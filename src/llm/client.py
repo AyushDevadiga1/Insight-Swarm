@@ -6,6 +6,7 @@ to Gemini (1,500 req/day) if Groq fails or hits rate limits.
 """
 
 import os
+import threading
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -52,9 +53,10 @@ class FreeLLMClient:
             self.gemini_error = str(e)
             print(f"⚠️  Gemini initialization failed: {e}")
         
-        # Track usage
+        # Track usage with thread-safe counter lock
         self.groq_calls = 0
         self.gemini_calls = 0
+        self._counter_lock = threading.Lock()
     
     def call(
         self, 
@@ -86,8 +88,10 @@ class FreeLLMClient:
         if self.groq_available:
             try:
                 response = self._call_groq(prompt, temperature, max_tokens)
-                self.groq_calls += 1
-                print(f"✅ Groq call #{self.groq_calls} successful")
+                with self._counter_lock:
+                    self.groq_calls += 1
+                    call_count = self.groq_calls
+                print(f"✅ Groq call #{call_count} successful")
                 return response
             
             except Exception as e:
@@ -99,8 +103,10 @@ class FreeLLMClient:
         if self.gemini_available:
             try:
                 response = self._call_gemini(prompt, temperature, max_tokens)
-                self.gemini_calls += 1
-                print(f"✅ Gemini fallback call #{self.gemini_calls} successful")
+                with self._counter_lock:
+                    self.gemini_calls += 1
+                    call_count = self.gemini_calls
+                print(f"✅ Gemini fallback call #{call_count} successful")
                 return response
             
             except Exception as e:
@@ -144,8 +150,9 @@ class FreeLLMClient:
             max_tokens=max_tokens
         )
         
-        return response.choices[0].message.content
-    
+        if not response.choices:
+            raise ValueError("Groq returned empty response")
+        return response.choices[0].message.content    
     def _call_gemini(
         self, 
         prompt: str, 
@@ -181,12 +188,15 @@ class FreeLLMClient:
         Get usage statistics
         
         Returns:
-            Dictionary with call counts
+            Dictionary with call counts (thread-safe snapshot)
         """
+        with self._counter_lock:
+            groq_count = self.groq_calls
+            gemini_count = self.gemini_calls
         return {
-            "groq_calls": self.groq_calls,
-            "gemini_calls": self.gemini_calls,
-            "total_calls": self.groq_calls + self.gemini_calls
+            "groq_calls": groq_count,
+            "gemini_calls": gemini_count,
+            "total_calls": groq_count + gemini_count
         }
 
 
