@@ -47,8 +47,10 @@ class FreeLLMClient:
         print(response)  # "4"
     """
     
-    # Rate limiting: max 5 calls per minute per provider
-    MAX_CALLS_PER_MINUTE = 5
+    # Rate limiting: configurable calls per minute per provider
+    # Default 60 matches free tier limits for Groq (14,400/day ~ 10/min) and Gemini (1,500/day ~ 1/min)
+    # Override via RATE_LIMIT_PER_MINUTE environment variable for cost control
+    MAX_CALLS_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
     
     def __init__(self):
         """Initialize both Groq and Gemini clients"""
@@ -62,8 +64,11 @@ class FreeLLMClient:
             groq_key = os.getenv("GROQ_API_KEY")
             if not groq_key:
                 raise ValueError("GROQ_API_KEY not set in environment")
-            if len(groq_key.strip()) < 10:
-                raise ValueError("GROQ_API_KEY appears invalid (too short)")
+            groq_key = groq_key.strip()
+            if len(groq_key) < 30:
+                raise ValueError("GROQ_API_KEY appears invalid (too short, expected >=30 characters)")
+            if not groq_key.startswith("gsk_"):
+                raise ValueError("GROQ_API_KEY format invalid (expected to start with 'gsk_')")
             
             self.groq_client = Groq(api_key=groq_key)
             self.groq_available = True
@@ -75,17 +80,25 @@ class FreeLLMClient:
         
         # Gemini setup
         try:
-            from google.genai import Client
+            import google.generativeai as genai
             gemini_key = os.getenv("GEMINI_API_KEY")
             if not gemini_key:
                 raise ValueError("GEMINI_API_KEY not set in environment")
-            if len(gemini_key.strip()) < 10:
-                raise ValueError("GEMINI_API_KEY appears invalid (too short)")
+            gemini_key = gemini_key.strip()
+            if len(gemini_key) < 30:
+                raise ValueError("GEMINI_API_KEY appears invalid (too short, expected >=30 characters)")
             
-            # New google-genai uses Client
-            self.genai_client = Client(api_key=gemini_key)
+            # Configure Gemini API
+            genai.configure(api_key=gemini_key)
+            self.genai_client = genai.GenerativeModel('gemini-2.0-flash')
             self.gemini_available = True
             logger.info("✅ Gemini client initialized")
+        except (ImportError, AttributeError) as e:
+            # Known issue: google-genai has compatibility issues with Python 3.13 and pydantic
+            # Gracefully fall back to Groq-only
+            self.gemini_available = False
+            self.gemini_error = f"google.generativeai initialization failed: {type(e).__name__} - likely version compatibility issue"
+            logger.warning(f"⚠️  Gemini initialization failed: {type(e).__name__} (will use Groq only)")
         except Exception as e:
             self.gemini_available = False
             self.gemini_error = str(e)
@@ -201,8 +214,8 @@ class FreeLLMClient:
                 raise ValueError("Temperature must be between 0.0 and 2.0")
             if not 1 <= max_tokens <= 4000:
                 raise ValueError("max_tokens must be between 1 and 4000")
-            if not 1 <= timeout <= 300:
-                raise ValueError("timeout must be between 1 and 300 seconds")
+            if not 1 <= timeout <= 90:
+                raise ValueError("timeout must be between 1 and 90 seconds")
         except ValueError as e:
             logger.error(f"❌ Input validation failed: {e}")
             raise
@@ -316,7 +329,7 @@ class FreeLLMClient:
         timeout: int
     ) -> str:
         """
-        Call Gemini API using Gemini 2.0 Flash model
+        Call Gemini API using google.generativeai SDK
         
         Args:
             prompt: User prompt
@@ -328,15 +341,12 @@ class FreeLLMClient:
             Response text
         """
         try:
-            config = {
-                "temperature": temperature,
-                "max_output_tokens": max_tokens,
-            }
-            
-            response = self.genai_client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt,
-                config=config,
+            response = self.genai_client.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": temperature,
+                    "max_output_tokens": max_tokens,
+                },
                 request_options={"timeout": timeout}
             )
             
