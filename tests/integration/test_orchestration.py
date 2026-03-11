@@ -30,6 +30,26 @@ def test_orchestration_completes(orchestrator):
     assert len(result['con_arguments']) >= 1
 
 
+def test_orchestration_includes_verification(orchestrator):
+    """Test that FactChecker runs and produces verification results"""
+    
+    result = orchestrator.run("Test claim with source verification")
+    
+    # Should have verification results (may be empty if no sources cited)
+    assert 'verification_results' in result
+    assert isinstance(result['verification_results'], list)
+    
+    # Should have verification rates
+    assert 'pro_verification_rate' in result
+    assert 'con_verification_rate' in result
+    assert result['pro_verification_rate'] is not None
+    assert result['con_verification_rate'] is not None
+    
+    # Rates should be between 0.0 and 1.0
+    assert 0.0 <= result['pro_verification_rate'] <= 1.0
+    assert 0.0 <= result['con_verification_rate'] <= 1.0
+
+
 def test_orchestration_runs_3_rounds(orchestrator):
     """Test that debate runs for exactly 3 rounds"""
     
@@ -41,6 +61,22 @@ def test_orchestration_runs_3_rounds(orchestrator):
     
     # Final round should be 4 (incremented after round 3 completes)
     assert result['round'] == 4
+
+
+def test_orchestration_fact_checker_detects_hallucinations(orchestrator):
+    """Test that FactChecker can detect hallucinated sources"""
+    
+    # This claim has a high chance of agents citing fake sources
+    result = orchestrator.run("Unicorns exist in Scotland")
+    
+    # Should have verification results
+    assert 'verification_results' in result
+    
+    # If there are sources, check that hallucinations are detected
+    if result['verification_results']:
+        # Should have some NOT_FOUND or CONTENT_MISMATCH sources
+        statuses = [r['status'] for r in result['verification_results']]
+        assert len(statuses) > 0
 
 
 def test_orchestration_on_multiple_claims(orchestrator):

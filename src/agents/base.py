@@ -42,6 +42,9 @@ class DebateState(TypedDict):
         con_arguments: List of all ConAgent arguments so far
         pro_sources: List of source lists from ProAgent
         con_sources: List of source lists from ConAgent
+        verification_results: List of source verification results from FactChecker
+        pro_verification_rate: Percentage of PRO sources verified (0.0-1.0)
+        con_verification_rate: Percentage of CON sources verified (0.0-1.0)
         verdict: Final verdict (set at end, None during debate)
         confidence: Final confidence score (set at end, None during debate)
     """
@@ -51,6 +54,9 @@ class DebateState(TypedDict):
     con_arguments: List[str]
     pro_sources: List[List[str]]
     con_sources: List[List[str]]
+    verification_results: Optional[List]
+    pro_verification_rate: Optional[float]
+    con_verification_rate: Optional[float]
     verdict: Optional[str]
     confidence: Optional[float]
 

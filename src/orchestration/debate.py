@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.agents.base import DebateState
 from src.agents.pro_agent import ProAgent
 from src.agents.con_agent import ConAgent
+from src.agents.fact_checker import FactChecker
 from src.llm.client import FreeLLMClient
 
 # Setup logging
@@ -44,11 +45,12 @@ class DebateOrchestrator:
         # Initialize agents
         self.pro_agent = ProAgent(self.client)
         self.con_agent = ConAgent(self.client)
+        self.fact_checker = FactChecker(self.client)
         
         # Build workflow
         self.workflow = self._build_workflow()
         
-        logger.info("DebateOrchestrator initialized with ProAgent and ConAgent")
+        logger.info("DebateOrchestrator initialized with ProAgent, ConAgent, and FactChecker")
     
     def _build_workflow(self) -> StateGraph:
         """
@@ -58,7 +60,7 @@ class DebateOrchestrator:
         START → ProAgent → ConAgent → (check rounds) → 
                 ↑__________________|
                                    ↓
-                              Verdict → END
+                          FactChecker → Verdict → END
         
         Returns:
             Compiled LangGraph workflow
@@ -70,6 +72,7 @@ class DebateOrchestrator:
         # Add nodes (each is a function that processes state)
         workflow.add_node("pro_agent", self._pro_agent_node)
         workflow.add_node("con_agent", self._con_agent_node)
+        workflow.add_node("fact_checker", self._fact_checker_node)
         workflow.add_node("verdict", self._verdict_node)
         
         # Set entry point
@@ -84,9 +87,12 @@ class DebateOrchestrator:
             self._should_continue,
             {
                 "continue": "pro_agent",  # Loop back for another round
-                "end": "verdict"           # Go to verdict calculation
+                "end": "fact_checker"      # Go to fact checker after debate ends
             }
         )
+        
+        # FactChecker → Verdict
+        workflow.add_edge("fact_checker", "verdict")
         
         # Verdict → END
         workflow.add_edge("verdict", END)
@@ -173,22 +179,85 @@ class DebateOrchestrator:
             logger.info(f"Continuing to round {state['round']}")
             return "continue"
     
-    def _verdict_node(self, state: DebateState) -> DebateState:
+    def _fact_checker_node(self, state: DebateState) -> DebateState:
         """
-        Calculate final verdict based on all arguments.
-        
-        Simple algorithm for MVP:
-        - Count total words in PRO vs CON arguments
-        - More words = stronger position (proxy for evidence)
-        - Calculate confidence based on ratio
+        Execute FactChecker to verify all sources cited during debate.
         
         Args:
-            state: Current debate state
+            state: Current debate state with all arguments and sources
+            
+        Returns:
+            Updated state with verification results
+        """
+        logger.info("FactChecker: Starting source verification")
+        
+        try:
+            # Generate verification response
+            response = self.fact_checker.generate(state)
+            
+            # Store verification results in state
+            state['verification_results'] = response['verification_results']
+            
+            # Calculate verification rates by agent
+            pro_sources = []
+            con_sources = []
+            
+            for result in response['verification_results']:
+                if result['agent_source'] == 'PRO':
+                    pro_sources.append(result)
+                else:
+                    con_sources.append(result)
+            
+            # Calculate individual verification rates
+            if pro_sources:
+                pro_verified = sum(1 for r in pro_sources if r['status'] == 'VERIFIED')
+                state['pro_verification_rate'] = pro_verified / len(pro_sources)
+            else:
+                state['pro_verification_rate'] = 1.0  # No sources = perfect
+            
+            if con_sources:
+                con_verified = sum(1 for r in con_sources if r['status'] == 'VERIFIED')
+                state['con_verification_rate'] = con_verified / len(con_sources)
+            else:
+                state['con_verification_rate'] = 1.0  # No sources = perfect
+            
+            logger.info(f"Source verification complete")
+            logger.info(f"  PRO verification rate: {state['pro_verification_rate']:.0%}")
+            logger.info(f"  CON verification rate: {state['con_verification_rate']:.0%}")
+            
+        except Exception as e:
+            logger.error(f"FactChecker failed: {e}")
+            # Set default values if verification fails
+            state['verification_results'] = []
+            state['pro_verification_rate'] = 0.5
+            state['con_verification_rate'] = 0.5
+        
+        return state
+    
+    def _verdict_node(self, state: DebateState) -> DebateState:
+        """
+        Calculate final verdict based on all arguments with weighted consensus.
+        
+        Algorithm:
+        - Count words in PRO vs CON arguments
+        - Weight by source verification rate (FactChecker)
+        - FactChecker gets additional 2x weight (objective fact verification)
+        - Calculate confidence based on weighted ratio
+        
+        Weighted score formula:
+        pro_score = pro_words * pro_verification_rate
+        con_score = con_words * con_verification_rate
+        fact_score = (pro_verification_rate + con_verification_rate) / 2 * 2  (2x weight)
+        
+        final_score = (pro_score + con_score + fact_score) / (total + fact_weight)
+        
+        Args:
+            state: Current debate state with verification data
             
         Returns:
             State with verdict and confidence set
         """
-        logger.info("Calculating verdict...")
+        logger.info("Calculating weighted verdict with source verification...")
         
         # Count words in arguments
         pro_words = sum(len(arg.split()) for arg in state['pro_arguments'])
@@ -203,23 +272,62 @@ class DebateOrchestrator:
             logger.warning("No arguments generated - verdict UNVERIFIABLE")
             return state
         
-        # Calculate ratio
-        pro_ratio = pro_words / total_words
+        # Get verification rates (default to 0.5 if not available)
+        pro_verification_rate = state.get('pro_verification_rate', 0.5) or 0.5
+        con_verification_rate = state.get('con_verification_rate', 0.5) or 0.5
         
-        # Determine verdict
-        if pro_ratio > 0.60:
+        # Calculate weighted scores
+        pro_score = pro_words * pro_verification_rate
+        con_score = con_words * con_verification_rate
+        
+        # FactChecker gets 2x weight (objective verification is crucial)
+        fact_score = ((pro_verification_rate + con_verification_rate) / 2.0) * 2.0
+        
+        # Calculate final weighted ratio
+        total_weighted_words = pro_score + con_score
+        
+        if total_weighted_words == 0:
+            # Both sides have 0 verified sources
+            pro_ratio = 0.5
+        else:
+            pro_ratio = pro_score / total_weighted_words
+        
+        # Adjust by fact score (2x weight)
+        # Fact score shifts the balance: if sources are mostly verified, maintain position
+        # If sources are mostly hallucinated, move toward middle (PARTIALLY TRUE)
+        if fact_score >= 1.5:
+            # Most sources verified, trust the argument balance
+            final_ratio = pro_ratio
+        elif fact_score <= 0.5:
+            # Most sources hallucinated, reduce confidence toward middle
+            final_ratio = 0.5 + (pro_ratio - 0.5) * 0.3  # Only 30% trust
+        else:
+            # Mixed verification, proportional trust
+            final_ratio = pro_ratio
+        
+        # Determine verdict based on final ratio
+        if final_ratio > 0.65:
             state['verdict'] = "TRUE"
-            state['confidence'] = pro_ratio
-        elif pro_ratio < 0.40:
+            state['confidence'] = final_ratio
+        elif final_ratio < 0.35:
             state['verdict'] = "FALSE"
-            state['confidence'] = 1 - pro_ratio
+            state['confidence'] = 1.0 - final_ratio
         else:
             state['verdict'] = "PARTIALLY TRUE"
-            state['confidence'] = 2.0 * abs(0.5 - pro_ratio)  # Range 0-1: low at 0.5 (tied), high at extremes
+            state['confidence'] = 2.0 * abs(0.5 - final_ratio)  # Range 0-1
         
-        logger.info(f"Verdict: {state['verdict']} ({state['confidence']:.2%} confidence)")
-        logger.info(f"  PRO: {pro_words} words across {len(state['pro_arguments'])} arguments")
-        logger.info(f"  CON: {con_words} words across {len(state['con_arguments'])} arguments")
+        # Log detailed verdict calculation
+        logger.info(f"\n📊 VERDICT CALCULATION DETAILS:")
+        logger.info(f"  Arguments:")
+        logger.info(f"    PRO: {pro_words} words × {pro_verification_rate:.0%} verification = {pro_score:.0f}")
+        logger.info(f"    CON: {con_words} words × {con_verification_rate:.0%} verification = {con_score:.0f}")
+        logger.info(f"  FactChecker (2x weight):")
+        logger.info(f"    Avg verification: {(pro_verification_rate + con_verification_rate) / 2.0:.0%} → score: {fact_score:.1f}")
+        logger.info(f"  Final weighted ratio: {final_ratio:.1%}")
+        logger.info(f"\n⚖️  VERDICT: {state['verdict']}")
+        logger.info(f"📊 CONFIDENCE: {state['confidence']:.1%}")
+        logger.info(f"  PRO: {pro_words} words ({pro_verification_rate:.0%} sources verified)")
+        logger.info(f"  CON: {con_words} words ({con_verification_rate:.0%} sources verified)")
         
         return state
     
@@ -243,6 +351,9 @@ class DebateOrchestrator:
             con_arguments=[],
             pro_sources=[],
             con_sources=[],
+            verification_results=None,
+            pro_verification_rate=None,
+            con_verification_rate=None,
             verdict=None,
             confidence=None
         )

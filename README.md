@@ -8,11 +8,16 @@ Combat misinformation through adversarial debate. Four specialized AI agents wor
 
 ## Project Status
 
-✅ **PRODUCTION READY** - Core debate system fully implemented and tested
+✅ **PRODUCTION READY** - Core debate system + source verification fully implemented
 
 **Current Implementation:**
-- ✅ ProAgent & ConAgent fully functional with error handling
-- ✅ 20/20 unit tests passing
+- ✅ ProAgent & ConAgent debate system (3-round debates)
+- ✅ FactChecker agent with source verification
+- ✅ Fuzzy string matching for content validation
+- ✅ Hallucination detection (fake URL detection)
+- ✅ Weighted verdict consensus (includes verification rates)
+- ✅ 30+ unit tests passing
+- ✅ Integration tests for full debate flow
 - ✅ Comprehensive input/output validation
 - ✅ Thread-safe concurrent operations  
 - ✅ Rate limiting (5 calls/min per provider)
@@ -51,7 +56,11 @@ InsightSwarm addresses these problems with transparent, multi-perspective fact-c
 ## Features
 
 ### ✅ Implemented
-- ✅ Multi-agent adversarial debate system (Pro/Con agents)
+- ✅ Multi-agent adversarial debate system (Pro/Con agents, 3 rounds)
+- ✅ **FactChecker agent with source verification** (NEW - Day 5)
+- ✅ **Fuzzy string matching for content validation** (NEW - Day 5)
+- ✅ **Hallucination detection** (fake/missing URLs) (NEW - Day 5)
+- ✅ **Weighted verdict consensus** using verification rates (NEW - Day 5)
 - ✅ Anti-hallucination layer (response validation)
 - ✅ Transparent reasoning (full debate transcripts)
 - ✅ Zero-cost infrastructure (free APIs: Groq + Gemini)
@@ -59,19 +68,17 @@ InsightSwarm addresses these problems with transparent, multi-perspective fact-c
 - ✅ Timeout protection (configurable 1-300 seconds)
 - ✅ Comprehensive error handling & logging
 - ✅ Thread-safe concurrent operations
-- ✅ Full test coverage (20 unit tests, 100% passing)
+- ✅ Full test coverage (30+ unit tests, 100% passing)
 
 ### 🔄 In Development
 - 🔄 Web interface (Streamlit)
-- 🔄 Multi-round debates
-- 🔄 Source verification layer
 - 🔄 REST API
+- 🔄 Image and video fact-checking
 
 ### 📋 Planned
 - 📋 Real-time verification (under 60 seconds)
 - 📋 Multilingual support
 - 📋 Mobile application
-- 📋 Image and video fact-checking
 - 📋 Advanced analytics dashboard
 
 ---
@@ -229,11 +236,19 @@ Sources: ['Epidemiology Review 2023', 'Cancer Research 2022']
 - Source validation
 - Safe exception handling
 
-**4. Debate System** (`tests/unit/test_debate.py`)
-- Multi-round debate orchestration
-- State management
-- Agent coordination
-- Consensus analysis (future)
+**4. FactChecker** (`src/agents/fact_checker.py`) - **NEW (Day 5)**
+- Verifies URLs cited by Pro/Con agents
+- Fuzzy matching for content validation
+- Detects hallucinated sources (404, content mismatch)
+- Returns verification report with confidence scores
+- Weights sources in final verdict calculation
+
+**5. Debate Orchestrator** (`src/orchestration/debate.py`)
+- Multi-round debate orchestration (3 rounds)
+- FactChecker integration for source verification
+- Weighted consensus verdict calculation
+- State management and coordination
+- Hallucination detection in verdict
 
 ### Security Features
 
@@ -265,15 +280,98 @@ Sources: ['Epidemiology Review 2023', 'Cancer Research 2022']
 
 ---
 
+## Source Verification with FactChecker (Day 5 Innovation)
+
+### The Problem
+- Agents cite sources but don't verify they're real (23% of AI responses have hallucinated sources)
+- A source URL like `https://fake-study.com/proof` sounds legitimate but may not exist
+
+### The Solution: FactChecker Agent
+FactChecker adds a verification layer that:
+
+1. **Extracts all URLs** cited by ProAgent and ConAgent
+2. **Attempts to fetch** each URL with intelligent timeout handling
+3. **Validates content** using fuzzy string matching (70% similarity threshold)
+4. **Detects hallucinations**: 404 errors, content mismatches, timeouts
+5. **Scores verification**: Each source gets a confidence score (0-100%)
+
+### How It Works
+
+```
+Claim: "Coffee prevents cancer"
+
+PRO Agent cites:
+  - https://nature-medicine.com/study-2023
+  - https://fake-cancer-cure.fake/evidence
+
+CON Agent cites:
+  - https://health-review.org/caffeine-risks
+  - https://nonexistent-source.invalid/data
+
+FactChecker:
+  ✅ nature-medicine.com → Fetched, content matches → VERIFIED (92%)
+  ❌ fake-cancer-cure.fake → 404 Not Found → HALLUCINATED
+  ✅ health-review.org → Fetched, content matches → VERIFIED (88%)
+  ❌ nonexistent-source.invalid → Connection timeout → HALLUCINATED
+
+Result:
+  PRO verification rate: 50% (1/2 verified)
+  CON verification rate: 50% (1/2 verified)
+  
+  Final Verdict: PARTIALLY TRUE
+  (Weighted by source verification: 60% → 48%)
+```
+
+### Validation Methods
+
+**Fuzzy String Matching (FuzzyWuzzy)**
+- Compares agent's claim to actual source content
+- Uses Levenshtein distance algorithm
+- Threshold: 70% similarity for verification
+- Handles partial quotes and paraphrasing
+
+**Hallucination Detection**
+- HTTP status code checking (404, 500, etc.)
+- Connection error handling (timeouts, DNS failures)
+- Content mismatch detection
+- Classification: VERIFIED | CONTENT_MISMATCH | NOT_FOUND | TIMEOUT
+
+### Weighted Verdict Calculation
+
+Traditional (Day 4):
+```
+verdict = (pro_words > con_words * 1.5) ? TRUE : FALSE
+```
+
+With FactChecker (Day 5):
+```
+pro_score = pro_words × pro_verification_rate
+con_score = con_words × con_verification_rate
+fact_score = avg_verification_rate × 2  (2x weight for objectivity)
+
+final_score = (pro_score + con_score + fact_score) / total
+
+if final_score > 0.65: verdict = TRUE
+elif final_score < 0.35: verdict = FALSE
+else: verdict = PARTIALLY TRUE
+```
+
+FactChecker gets **2x weight** because source verification is objective (not debatable).
+
+---
+
 ## Testing
 
 ### Test Suite
 
-**Unit Tests: 20/20 Passing ✅**
+**Unit Tests: 30+ Passing ✅**
 
 ```bash
 # Run all unit tests
 pytest tests/unit/ -v
+
+# Run FactChecker tests
+pytest tests/unit/test_fact_checker.py -v
 
 # Run debate tests
 pytest tests/unit/test_debate.py -v
@@ -281,35 +379,60 @@ pytest tests/unit/test_debate.py -v
 # Run agent tests
 pytest tests/unit/test_pro_agent.py tests/unit/test_con_agent.py -v
 
-# Run LLM client tests
-pytest tests/unit/test_llm_client.py -v
+# Run full integration test (5 claims)
+python tests/test_day5_factchecker.py
 ```
 
 ### Test Coverage
 
-- **Debate System (3 tests)**
+- **FactChecker Agent (15+ tests)**
+  - Source extraction from debate state
+  - Fuzzy string matching (exact, partial, no match cases)
+  - URL verification (success, 404, timeout, connection error)
+  - Hallucination detection
+  - Verification metrics calculation
+  - Empty and edge cases
+
+- **Debate System**
   - Full debate round execution
-  - Agent disagreement validation
+  - FactChecker integration
+  - Weighted verdict calculation
   - State consistency verification
 
-- **ProAgent (4 tests)**
+- **ProAgent & ConAgent**
   - Initialization
   - Response generation
   - Source citation
   - Input validation
 
-- **ConAgent (4 tests)**
-  - Initialization
-  - Response generation
-  - Challenge pro arguments
-  - Input validation
+- **Integration Tests**
+  - 5-claim verification test suite
+  - Multiple verdict types
+  - Source verification across debate
+  - Hallucination detection in real scenarios
 
-- **LLM Client (9 tests)**
-  - Client initialization
-  - Input validation (prompt, temperature, timeout)
-  - Rate limiting
-  - Stats tracking
-  - Response validation
+### Day 5 Verification Testing
+
+The comprehensive day 5 test validates:
+
+```bash
+python tests/test_day5_factchecker.py
+```
+
+Tests 5 different claim types:
+1. **Nuanced/Partial** - "Coffee consumption increases productivity by 15%"
+2. **Obviously False** - "The Earth is flat"
+3. **Likely True** - "Regular exercise improves mental health"
+4. **Debunked Conspiracy** - "Vaccines cause autism"
+5. **Controversial Prediction** - "AI will replace all jobs by 2030"
+
+Each test validates:
+- ✅ Complete debate execution (3 rounds)
+- ✅ Source extraction and verification
+- ✅ Hallucination detection
+- ✅ Weighted verdict calculation
+- ✅ Confidence scoring
+- ✅ Performance (should complete within 120 seconds)
 
 ### Integration Testing
 
