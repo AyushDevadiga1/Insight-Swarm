@@ -7,8 +7,14 @@ SECURITY NOTE:
 - Uses try/finally for cleanup guarantee
 """
 
-from src.llm.client import FreeLLMClient
+import sys
+from pathlib import Path
 import os
+
+# Add parent directory to path for imports when running directly
+sys.path.insert(0, str(Path(__file__).parent))
+
+from src.llm.client import FreeLLMClient
 
 
 def test_fallback_mechanism():

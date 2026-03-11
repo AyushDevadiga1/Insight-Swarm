@@ -8,6 +8,12 @@ SECURITY FEATURES:
 - Comprehensive logging
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports when running directly
+sys.path.insert(0, str(Path(__file__).parent))
+
 from src.agents.pro_agent import ProAgent
 from src.agents.con_agent import ConAgent
 from src.agents.base import DebateState
