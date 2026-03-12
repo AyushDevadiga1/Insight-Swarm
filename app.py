@@ -268,6 +268,8 @@ hr {
 """, unsafe_allow_html=True)
 
 
+import atexit
+
 def init_session_state():
     """Initialize session state variables"""
     if 'debate_run' not in st.session_state:
@@ -279,7 +281,16 @@ def init_session_state():
     if 'background_task' not in st.session_state:
         st.session_state.background_task = None
     if 'task_executor' not in st.session_state:
-        st.session_state.task_executor = ThreadPoolExecutor(max_workers=1)
+        executor = ThreadPoolExecutor(max_workers=1)
+        st.session_state.task_executor = executor
+        
+        # Register cleanup on exit (FIX 4)
+        def shutdown_executor():
+            try:
+                executor.shutdown(wait=False)
+            except:
+                pass
+        atexit.register(shutdown_executor)
 
 
 def render_header():
@@ -381,14 +392,22 @@ def render_verdict(result):
         </div>
         """, unsafe_allow_html=True)
         
-        # Sanitize for markdown rendering
+        # Sanitize for excerpt
         escaped_reasoning = html.escape(moderator_reasoning)
+        excerpt = escaped_reasoning[:300] + ("..." if len(escaped_reasoning) > 300 else "")
         
         st.markdown(f"""
-        <div class="debate-block" style="border-left: 3px solid #fff; padding-left: 20px; color: #fff;">
-            {escaped_reasoning.replace('\n', '<br>')}
+        <div class="debate-block" style="border-left: 3px solid #fff; padding-left: 20px; color: #fff; margin-bottom: 10px;">
+            {excerpt.replace('\n', '<br>')}
         </div>
         """, unsafe_allow_html=True)
+        
+        with st.expander("VIEW FULL REASONING PROTOCOL"):
+            st.markdown(f"""
+            <div style="font-size: 14px; line-height: 1.6; color: #ccc; font-family: 'Space Mono', monospace;">
+                {escaped_reasoning.replace('\n', '<br>')}
+            </div>
+            """, unsafe_allow_html=True)
 
 
 def render_verification_stats(result):
@@ -545,8 +564,11 @@ def main():
         status_text = st.empty()
         
         try:
-            # Start background task on first run
-            if st.session_state.background_task is None:
+            # Check if task already running (FIX 13)
+            if st.session_state.background_task is not None and not st.session_state.background_task.done():
+                st.warning("Debate already in progress. Please wait for it to complete...")
+            else:
+                # Start background task
                 st.session_state.background_task = st.session_state.task_executor.submit(
                     st.session_state.orchestrator.run,
                     claim_input

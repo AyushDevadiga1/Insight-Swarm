@@ -155,14 +155,15 @@ class DebateOrchestrator:
             state['con_sources'].append(response['sources'])
             
             # Increment round counter (after both agents have gone)
+            # FIX 5: Only increment on success
             state['round'] += 1
             
             logger.info(f"ConAgent completed - {len(response['argument'])} chars, {len(response['sources'])} sources")
             
         except Exception as e:
             logger.error(f"❌ ConAgent failed: {type(e).__name__}: {str(e)[:100]}")
-            # Raise to let orchestrator handle recovery instead of polluting state
-            state['round'] += 1
+            # FIX 5: Only increment round counter on successful agent completion
+            # Before it was: state['round'] += 1 (WRONG)
             raise RuntimeError(f"ConAgent generation failed") from e
         
         return state
@@ -177,7 +178,7 @@ class DebateOrchestrator:
         Returns:
             "continue" if more rounds needed, "end" if ready for verdict
         """
-        if state['round'] > 3:  # After round 3, stop
+        if state['round'] >= 3:  # After round 3, stop (FIX 1: >= 3 instead of > 3)
             logger.info("Debate complete - moving to verdict")
             return "end"
         else:
@@ -213,18 +214,26 @@ class DebateOrchestrator:
                 else:
                     con_sources.append(result)
             
-            # Calculate individual verification rates
+            # Calculate individual verification rates (FIX 2 & 12)
             if pro_sources:
                 pro_verified = sum(1 for r in pro_sources if r['status'] == 'VERIFIED')
+                pro_hallucinated = sum(1 for r in pro_sources if r['status'] in ['NOT_FOUND', 'CONTENT_MISMATCH'])
+                pro_timeout = sum(1 for r in pro_sources if r['status'] == 'TIMEOUT')
                 state['pro_verification_rate'] = pro_verified / len(pro_sources)
+                logger.info(f"  PRO sources: {pro_verified} verified, {pro_hallucinated} hallucinated, {pro_timeout} timeout")
             else:
-                state['pro_verification_rate'] = 1.0  # No sources = perfect
+                state['pro_verification_rate'] = 0.0  # FIX 2: No sources = 0.0% verification
+                logger.warning("ProAgent cited no sources - verification rate set to 0.0")
             
             if con_sources:
                 con_verified = sum(1 for r in con_sources if r['status'] == 'VERIFIED')
+                con_hallucinated = sum(1 for r in con_sources if r['status'] in ['NOT_FOUND', 'CONTENT_MISMATCH'])
+                con_timeout = sum(1 for r in con_sources if r['status'] == 'TIMEOUT')
                 state['con_verification_rate'] = con_verified / len(con_sources)
+                logger.info(f"  CON sources: {con_verified} verified, {con_hallucinated} hallucinated, {con_timeout} timeout")
             else:
-                state['con_verification_rate'] = 1.0  # No sources = perfect
+                state['con_verification_rate'] = 0.0  # FIX 2: No sources = 0.0% verification
+                logger.warning("ConAgent cited no sources - verification rate set to 0.0")
             
             logger.info(f"Source verification complete")
             logger.info(f"  PRO verification rate: {state['pro_verification_rate']:.0%}")
@@ -256,10 +265,10 @@ class DebateOrchestrator:
         try:
             response = self.moderator.generate(state)
             
-            # Store Moderator's verdict and reasoning directly from structured response
+            # FIX 3: Store Moderator's verdict and reasoning directly from structured response
             state['verdict'] = response.get('verdict', 'INSUFFICIENT EVIDENCE')
             state['confidence'] = response.get('confidence', 0.5)
-            state['moderator_reasoning'] = response.get('reasoning', response['argument'])
+            state['moderator_reasoning'] = response['argument']  # Already parsed reasoning
             
             logger.info(f"Moderator verdict: {state['verdict']} ({state['confidence']:.1%})")
             
@@ -278,9 +287,7 @@ class DebateOrchestrator:
         """
         Final verdict node - already set by Moderator.
         
-        This node just logs the final verdict.
-        In previous version, this calculated verdict,
-        but now Moderator does that.
+        This node logs the final verdict and a safe preview of reasoning.
         
         Args:
             state: Debate state with Moderator's verdict
@@ -288,8 +295,18 @@ class DebateOrchestrator:
         Returns:
             State (unchanged)
         """
-        logger.info(f"Final verdict: {state['verdict']} ({state['confidence']:.1%} confidence)")
-        logger.info(f"Moderator reasoning: {state.get('moderator_reasoning', 'N/A')[:200]}...")
+        verdict = state.get('verdict', 'INSUFFICIENT EVIDENCE')
+        confidence = state.get('confidence', 0.0)
+        reasoning = state.get('moderator_reasoning', 'N/A')
+        
+        logger.info(f"Final verdict: {verdict} ({confidence:.1%} confidence)")
+        
+        # Safe logging of reasoning (truncate and strip to avoid log pollution)
+        safe_reasoning = reasoning.replace('\n', ' ').strip()
+        if len(safe_reasoning) > 150:
+            safe_reasoning = safe_reasoning[:147] + "..."
+            
+        logger.info(f"Moderator reasoning preview: {safe_reasoning}")
         
         return state
     
@@ -305,7 +322,7 @@ class DebateOrchestrator:
         """
         logger.info(f"Starting debate on claim: {claim}")
         
-        # Initialize state
+        # Initialize state (FIX 10: Use None for optional fields)
         initial_state: DebateState = {
             "claim": claim,
             "round": 1,
@@ -315,10 +332,10 @@ class DebateOrchestrator:
             "con_sources": [],
             "verdict": None,
             "confidence": None,
-            "verification_results": [],
-            "pro_verification_rate": 0.0,
-            "con_verification_rate": 0.0,
-            "fact_check_result": "",
+            "verification_results": None,
+            "pro_verification_rate": None,
+            "con_verification_rate": None,
+            "fact_check_result": None,
             "moderator_reasoning": None
         }
         

@@ -2,8 +2,11 @@
 Base classes and type definitions for all agents
 """
 
+import logging
 from abc import ABC, abstractmethod
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Any, Dict
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================
@@ -27,7 +30,7 @@ class AgentResponse(TypedDict):
     sources: List[str]
     confidence: float
     verdict: Optional[str]
-    reasoning: Optional[str]  # NEW: Structured reasoning field
+    reasoning: Optional[str]  # Required for Moderator, Optional for others
 
 
 class DebateState(TypedDict):
@@ -56,10 +59,10 @@ class DebateState(TypedDict):
     con_arguments: List[str]
     pro_sources: List[List[str]]
     con_sources: List[List[str]]
-    verification_results: Optional[List]
+    verification_results: Optional[List[Dict[str, Any]]]
     pro_verification_rate: Optional[float]
-    con_verification_rate: float
-    fact_check_result: str  # Added field
+    con_verification_rate: Optional[float]
+    fact_check_result: Optional[str]
     moderator_reasoning: Optional[str]
     verdict: Optional[str]
     confidence: Optional[float]
@@ -181,8 +184,7 @@ class BaseAgent(ABC):
             
             # Return argument and whatever sources were found (even if empty)
             if not sources:
-                logger = logging.getLogger(__name__)
-                logger.warning(f"⚠️ No sources found in response from {getattr(self, 'role', 'AGENT')}")
+                logger.warning(f"⚠️ No sources found in response from {self.role} - argument may lack evidence")
             return argument, sources
         
         else:

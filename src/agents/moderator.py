@@ -11,6 +11,7 @@ This agent:
 
 import logging
 import re
+import html
 from typing import Tuple, Optional
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
@@ -76,11 +77,10 @@ class Moderator(BaseAgent):
             return {
                 "agent": "MODERATOR",
                 "round": state['round'],
-                "argument": response_text,
+                "argument": reasoning,  # Return parsed reasoning, not raw response
                 "sources": [],
                 "confidence": confidence,
-                "verdict": verdict,
-                "reasoning": reasoning  # Pass structured reasoning
+                "verdict": verdict
             }
         
         except Exception as e:
@@ -106,16 +106,16 @@ class Moderator(BaseAgent):
         Returns:
             Formatted prompt
         """
-        claim = state['claim']
+        claim = html.escape(state['claim'])
         
         # Compile arguments
         pro_args = "\n\n".join([
-            f"Round {i+1}: {arg}"
+            f"Round {i+1}: {html.escape(arg)}"
             for i, arg in enumerate(state['pro_arguments'])
         ])
         
         con_args = "\n\n".join([
-            f"Round {i+1}: {arg}"
+            f"Round {i+1}: {html.escape(arg)}"
             for i, arg in enumerate(state['con_arguments'])
         ])
         
@@ -179,19 +179,38 @@ Begin your analysis:"""
     
     def _parse_moderator_response(self, response_text: str) -> Tuple[str, float, str]:
         """
-        Parse Moderator's verdict from LLM response using regex for robustness.
+        Parse Moderator's verdict from LLM response using robust regex.
+        
+        Handles varied spacing, casing, and trailing punctuation.
         """
         verdict = None
         confidence = 0.5
         reasoning = ""
 
-        # Verdict parsing
-        verdict_match = re.search(r"VERDICT:\s*(TRUE|FALSE|PARTIALLY TRUE|INSUFFICIENT EVIDENCE)", response_text, re.IGNORECASE)
+        # Verdict parsing: case-insensitive, handles varied spacing/markers
+        verdict_match = re.search(
+            r"(?:VERDICT|Verdict|verdict)\s*[:\-]?\s*(\w+(?:\s+\w+)?)", 
+            response_text,
+            re.IGNORECASE
+        )
         if verdict_match:
-            verdict = verdict_match.group(1).upper()
+            verdict_text = verdict_match.group(1).upper().strip()
+            # Normalize to standard verdicts
+            if "TRUE" in verdict_text and "PARTIALLY" not in verdict_text and "FALSE" not in verdict_text:
+                verdict = "TRUE"
+            elif "FALSE" in verdict_text and "PARTIALLY" not in verdict_text:
+                verdict = "FALSE"
+            elif "PARTIALLY" in verdict_text or "PARTIAL" in verdict_text:
+                verdict = "PARTIALLY TRUE"
+            elif "INSUFFICIENT" in verdict_text or "UNCLEAR" in verdict_text:
+                verdict = "INSUFFICIENT EVIDENCE"
         
-        # Confidence parsing
-        conf_match = re.search(r"CONFIDENCE:\s*(0?\.\d+|1\.0|1)", response_text, re.IGNORECASE)
+        # Confidence parsing: case-insensitive, handles varied spacing
+        conf_match = re.search(
+            r"(?:CONFIDENCE|Confidence|confidence)\s*[:\-]?\s*(0?\.\d+|1\.0|1)", 
+            response_text,
+            re.IGNORECASE
+        )
         if conf_match:
             try:
                 confidence = float(conf_match.group(1))
@@ -199,8 +218,12 @@ Begin your analysis:"""
             except ValueError:
                 confidence = 0.5
 
-        # Reasoning parsing
-        reason_match = re.search(r"REASONING:\s*(.*)", response_text, re.IGNORECASE | re.DOTALL)
+        # Reasoning parsing: capture everything after REASONING marker
+        reason_match = re.search(
+            r"(?:REASONING|Reasoning|reasoning)\s*[:\-]?\s*(.*)", 
+            response_text, 
+            re.IGNORECASE | re.DOTALL
+        )
         if reason_match:
             reasoning = reason_match.group(1).strip()
         
@@ -208,28 +231,18 @@ Begin your analysis:"""
             logger.warning("Failed to parse verdict, defaulting to INSUFFICIENT EVIDENCE")
             verdict = "INSUFFICIENT EVIDENCE"
             confidence = 0.3
-            reasoning = response_text
+            reasoning = response_text.strip()
 
         return verdict, confidence, reasoning
-    
     def _fallback_verdict(self, state: DebateState) -> AgentResponse:
         """
         Fallback verdict if Moderator LLM call fails.
-        
-        Uses simple heuristic based on verification rates.
-        
-        Args:
-            state: Debate state
-            
-        Returns:
-            Fallback verdict response
         """
         logger.warning("Using fallback verdict calculation")
         
-        pro_verification = state.get('pro_verification_rate', 0.5)
-        con_verification = state.get('con_verification_rate', 0.5)
+        pro_verification = state.get('pro_verification_rate') or 0.0
+        con_verification = state.get('con_verification_rate') or 0.0
         
-        # Simple heuristic
         if pro_verification > 0.7 and con_verification < 0.3:
             verdict = "TRUE"
             confidence = pro_verification
@@ -243,11 +256,10 @@ Begin your analysis:"""
             confidence = 0.5
             reasoning = "Both sides had mixed verification results."
         
-        full_text = f"VERDICT: {verdict}\\nCONFIDENCE: {confidence}\\n\\nREASONING:\\n{reasoning}"
         return {
             "agent": "MODERATOR",
             "round": state['round'],
-            "argument": full_text,
+            "argument": reasoning,  # Return reasoning, not full text
             "sources": [],
             "confidence": confidence,
             "verdict": verdict
@@ -255,83 +267,6 @@ Begin your analysis:"""
     
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
         """
-        Required by BaseAgent but not used (we use _build_analysis_prompt instead)
+        Required by BaseAgent interface.
         """
         return self._build_analysis_prompt(state)
-
-
-# ============================================
-# TESTING CODE
-# ============================================
-
-if __name__ == "__main__":
-    import sys
-    from pathlib import Path
-    
-    # Add parent directories to path for imports when running directly
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-    print("\n" + "="*70)
-    print("Moderator Agent Test")
-    print("="*70)
-    
-    from src.llm.client import FreeLLMClient
-    
-    # Initialize
-    client = FreeLLMClient()
-    moderator = Moderator(client)
-    
-    # Mock debate state
-    test_state = DebateState(
-        claim="Coffee prevents cancer",
-        round=4,
-        pro_arguments=[
-            "Studies show coffee contains antioxidants that may reduce cancer risk by 15%.",
-            "Multiple meta-analyses confirm the protective effect.",
-            "The evidence is clear from large-scale studies."
-        ],
-        con_arguments=[
-            "Correlation does not imply causation - coffee drinkers may be healthier overall.",
-            "WHO was cautious about coffee until 2016.",
-            "Some studies show no effect or even increased risk for certain cancers."
-        ],
-        pro_sources=[
-            ["https://www.cancer.gov/", "https://pubmed.ncbi.nlm.nih.gov/12345"],
-            ["https://www.hsph.harvard.edu/"],
-            []
-        ],
-        con_sources=[
-            ["https://www.who.int/", "https://www.mayoclinic.org/"],
-            ["https://www.cancer.org/"],
-            []
-        ],
-        verdict=None,
-        confidence=None,
-        pro_verification_rate=0.85,
-        con_verification_rate=0.75,
-        verification_results=[],
-        fact_check_result="5 out of 6 sources verified",
-        moderator_reasoning=None,
-    )
-    
-    print("\n1. Testing Moderator analysis...")
-    print(f"   Claim: {test_state['claim']}")
-    print(f"   Pro verification: {test_state['pro_verification_rate']:.1%}")
-    print(f"   Con verification: {test_state['con_verification_rate']:.1%}")
-    
-    # Generate verdict
-    result = moderator.generate(test_state)
-    
-    # Display results
-    print("\n2. Moderator Verdict:")
-    print(f"\n   Agent: {result['agent']}")
-    print(f"   Confidence: {result['confidence']:.1%}")
-    
-    print(f"\n   Reasoning:")
-    reasoning_lines = result['argument'].split('\n')
-    for line in reasoning_lines:
-        print(f"   {line}")
-    
-    print("\n" + "="*70)
-    print("✅ Moderator test complete!")
-    print("="*70 + "\n")

@@ -128,25 +128,42 @@ class FactChecker(BaseAgent):
                 seen_urls.add(url)
                 unique_sources.append((url, claim_text, agent_source))
         
-        # Verify each source
+        # Verify each source with overall timeout (Fixes Issue #15)
+        import time
+        start_time = time.time()
+        max_total_time = 60  # 60 seconds total for all sources
+        
         verification_results = []
         for url, claim_text, agent_source in unique_sources:
+            # Check if we've exceeded total time
+            if time.time() - start_time > max_total_time:
+                logger.warning(f"FactChecker: Total verification timeout reached. Skipping {len(unique_sources) - len(verification_results)} sources.")
+                break
+                
             result = self._verify_source(url, claim_text, agent_source)
             verification_results.append(result)
-            logger.info(f"  {result['status']}: {url[:50]}... (confidence: {result['confidence']:.0%})")
+            logger.info(f"  [{result['status']}] {url[:50]}... (conf: {result['confidence']:.0%})")
         
-        # Calculate metrics
+        # Calculate metrics with zero division safety
+        total_count = len(verification_results)
         verified_count = sum(1 for r in verification_results if r['status'] == "VERIFIED")
-        hallucinated_count = sum(1 for r in verification_results if r['status'] in ["NOT_FOUND", "CONTENT_MISMATCH", "TIMEOUT"])
-        verification_rate = verified_count / len(verification_results) if verification_results else 0.0
-        overall_confidence = sum(r['confidence'] for r in verification_results) / len(verification_results) if verification_results else 0.0
+        
+        # Consistency check for metrics
+        if total_count > 0:
+            verification_rate = verified_count / total_count
+            overall_confidence = sum(r['confidence'] for r in verification_results) / total_count
+            hallucinated_count = total_count - verified_count
+        else:
+            verification_rate = 1.0  # Perfect by default if no sources
+            overall_confidence = 0.0
+            hallucinated_count = 0
         
         logger.info(f"\n📊 Verification Summary:")
-        logger.info(f"  Total sources: {len(verification_results)}")
+        logger.info(f"  Total sources: {total_count}")
         logger.info(f"  ✅ Verified: {verified_count}")
         logger.info(f"  ❌ Hallucinated: {hallucinated_count}")
-        logger.info(f"  📈 Verification rate: {verification_rate:.0%}")
-        logger.info(f"  🎯 Overall confidence: {overall_confidence:.0%}\n")
+        logger.info(f"  📈 Rate: {verification_rate:.0%}")
+        logger.info(f"  🎯 Confidence: {overall_confidence:.0%}\n")
         
         return FactCheckerResponse(
             agent="FACT_CHECKER",
