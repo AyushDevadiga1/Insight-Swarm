@@ -45,7 +45,7 @@ def validate_claim(claim: str) -> None:
         raise ValueError("Claim exceeds maximum length of 1000 characters")
 
 
-def test_claim(claim: str) -> None:
+def run_claim(claim: str) -> None:
     """
     Test both agents on a specific claim
     
@@ -132,7 +132,7 @@ if __name__ == "__main__":
     
     for claim in claims:
         try:
-            test_claim(claim)
+            run_claim(claim)
         except ValueError as e:
             logger.error(f"❌ Claim validation failed: {e}")
         except Exception as e:

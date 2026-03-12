@@ -119,7 +119,9 @@ class ProAgent(BaseAgent):
         Returns:
             Formatted prompt string
         """
-        claim = state['claim']
+        import html
+        # Sanitize claim input to prevent prompt injection
+        claim = html.escape(state['claim'])[:500]
         
         if round_num == 1:
             # Round 1: Initial argument

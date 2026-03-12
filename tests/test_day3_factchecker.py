@@ -1,5 +1,5 @@
 """
-Day 5 Test Suite - FactChecker Source Verification Testing
+Day 3 Test Suite - FactChecker Source Verification Testing
 
 This test script validates:
 1. FactChecker can verify sources
@@ -7,7 +7,7 @@ This test script validates:
 3. Hallucination detection functions correctly
 4. System works on diverse claims
 
-Run with: python tests/test_day5_factchecker.py
+Run with: python tests/test_day3_factchecker.py
 """
 
 import sys
@@ -28,7 +28,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def test_on_claim(orchestrator: DebateOrchestrator, claim: str, claim_type: str) -> dict:
+def evaluate_claim(orchestrator: DebateOrchestrator, claim: str, claim_type: str) -> dict:
     """
     Test debate on a single claim and return results.
     
@@ -120,10 +120,10 @@ def test_on_claim(orchestrator: DebateOrchestrator, claim: str, claim_type: str)
 
 
 def main():
-    """Run Day 5 test suite on 5 claims"""
+    """Run Day 3 test suite on 5 claims"""
     
     print("\n" + "="*70)
-    print("DAY 5 TEST SUITE - FACTCHECKER SOURCE VERIFICATION")
+    print("DAY 3 TEST SUITE - FACTCHECKER SOURCE VERIFICATION")
     print("="*70)
     
     # Initialize orchestrator
@@ -159,7 +159,7 @@ def main():
     results = []
     for i, test in enumerate(test_claims, 1):
         logger.info(f"\n\n[TEST {i}/5] Running test on claim type: {test['type']}")
-        result = test_on_claim(orchestrator, test['claim'], test['type'])
+        result = evaluate_claim(orchestrator, test['claim'], test['type'])
         results.append(result)
     
     # Display summary table
@@ -207,9 +207,9 @@ def main():
         if count > 0:
             print(f"  {verdict}: {count}")
     
-    # Day 5 success criteria check
+    # Day 3 success criteria check
     print("\n" + "="*70)
-    print("DAY 5 SUCCESS CRITERIA")
+    print("DAY 3 SUCCESS CRITERIA")
     print("="*70)
     
     criteria_met = []
@@ -229,7 +229,7 @@ def main():
     
     print("\n" + "="*70)
     if all_met:
-        print("🎉 DAY 5 COMPLETE - ALL SUCCESS CRITERIA MET!")
+        print("🎉 DAY 3 COMPLETE - ALL SUCCESS CRITERIA MET!")
     else:
         print("⚠️  Some criteria not fully met - review results above")
     print("="*70 + "\n")

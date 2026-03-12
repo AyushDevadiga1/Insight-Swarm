@@ -58,6 +58,10 @@ class SourceVerifier:
     2. URL is accessible (HTTP 200)
     3. Content can be extracted
     4. (Optional) Content matches claim
+    
+    Can be used as a context manager for automatic cleanup:
+        with SourceVerifier() as verifier:
+            result = verifier.verify_url(url)
     """
     
     # Configuration constants
@@ -77,6 +81,23 @@ class SourceVerifier:
         self.session.headers.update({
             'User-Agent': 'InsightSwarm-FactChecker/1.0'
         })
+    
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - close session"""
+        self.close()
+        return False
+    
+    def close(self):
+        """Close the requests session"""
+        if self.session:
+            try:
+                self.session.close()
+            except Exception as e:
+                logger.warning(f"Error closing session: {e}")
     
     def verify_url(self, url: str, expected_content: Optional[str] = None) -> SourceVerification:
         """

@@ -7,6 +7,7 @@ comparing source content to claims, and detecting hallucinated sources.
 
 import logging
 import requests
+import threading
 from typing import List, Dict, Optional, Tuple
 from src.agents.base import BaseAgent, DebateState
 from typing import TypedDict
@@ -79,15 +80,12 @@ class FactChecker(BaseAgent):
         self.role = "FACT_CHECKER"
         self.url_timeout = 10  # seconds
         self.fuzzy_match_threshold = 70  # percentage
+        self._fuzz_init_lock = threading.Lock()  # Thread-safe fuzzy import
+        self.fuzz = None
+        self.has_fuzzy_support = False
         
         # Try to import fuzzywuzzy, but don't fail if not available
-        try:
-            from fuzzywuzzy import fuzz
-            self.fuzz = fuzz
-            self.has_fuzzy_support = True
-        except ImportError:
-            logger.warning("⚠️  fuzzywuzzy not installed - will use simple string matching")
-            self.has_fuzzy_support = False
+        self._initialize_fuzzy_support()
     
     def generate(self, state: DebateState) -> FactCheckerResponse:
         """
@@ -112,7 +110,7 @@ class FactChecker(BaseAgent):
         all_sources_with_claims = self._extract_sources_with_claims(state)
         
         if not all_sources_with_claims:
-            logger.info("ℹ️  No sources found to verify")
+            logger.info("ℹx  No sources found to verify")
             return FactCheckerResponse(
                 agent="FACT_CHECKER",
                 verification_results=[],
@@ -122,9 +120,27 @@ class FactChecker(BaseAgent):
                 overall_confidence=0.0   # But no basis for confidence
             )
         
+        # Deduplicate sources before verification (fixes Medium Issue #15)
+        # Group by URL to avoid verifying the same URL multiple times
+        seen_urls = set()
+        unique_sources = []
+        for url, claim_text, agent_source in all_sources_with_claims:
+            if url not in seen_urls:
+                seen_urls.add(url)
+                unique_sources.append((url, claim_text, agent_source))
+        
+        # Deduplicate sources before verification (fixes Medium Issue #15)
+        # Group by URL to avoid verifying the same URL multiple times
+        seen_urls = set()
+        unique_sources = []
+        for url, claim_text, agent_source in all_sources_with_claims:
+            if url not in seen_urls:
+                seen_urls.add(url)
+                unique_sources.append((url, claim_text, agent_source))
+        
         # Verify each source
         verification_results = []
-        for url, claim_text, agent_source in all_sources_with_claims:
+        for url, claim_text, agent_source in unique_sources:
             result = self._verify_source(url, claim_text, agent_source)
             verification_results.append(result)
             logger.info(f"  {result['status']}: {url[:50]}... (confidence: {result['confidence']:.0%})")
@@ -150,6 +166,23 @@ class FactChecker(BaseAgent):
             verification_rate=verification_rate,
             overall_confidence=overall_confidence
         )
+    
+    def _initialize_fuzzy_support(self) -> None:
+        """
+        Initialize fuzzy matching support in a thread-safe manner.
+        Called once during __init__.
+        """
+        with self._fuzz_init_lock:
+            if self.fuzz is not None:
+                return  # Already initialized
+            
+            try:
+                from fuzzywuzzy import fuzz
+                self.fuzz = fuzz
+                self.has_fuzzy_support = True
+            except ImportError:
+                logger.warning("⚠️  fuzzywuzzy not installed - will use simple string matching")
+                self.has_fuzzy_support = False
     
     def _extract_sources_with_claims(self, state: DebateState) -> List[Tuple[str, str, str]]:
         """

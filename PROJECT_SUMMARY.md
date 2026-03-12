@@ -146,8 +146,8 @@ InsightSwarm/
 │
 ├── app.py                            # Streamlit web interface
 ├── main.py                           # CLI interface
-├── validate_day5.py                  # Day 5 validation tests
-├── test_day5_factchecker.py          # Day 5 factchecker tests
+├── validate_day3.py                  # Day 3 validation tests
+├── test_day3_factchecker.py          # Day 3 factchecker tests
 │
 ├── documentation/                    # Project documentation
 │   ├── pdf_flow.md                   # Presentation guide (detailed)
@@ -173,7 +173,7 @@ InsightSwarm/
 ├── README.md                         # User-facing documentation
 ├── CHANGES.md                        # Changelog
 ├── PROJECT_SUMMARY.md                # This file
-└── DAY_5_VERIFICATION_REPORT.md      # Final verification report
+└── DAY_3_VERIFICATION_REPORT.md      # Final verification report
 ```
 
 ---
@@ -481,7 +481,7 @@ python main.py --claim "Coffee prevents cancer"
 | LLM Client | Day 1 | ✅ Complete | FreeLLMClient (Groq + Gemini fallback) |
 | ProAgent + ConAgent | Days 2-3 | ✅ Complete | Debate system with 3 rounds |
 | Moderation | Days 3-4 | ✅ Complete | Verdict calculation + confidence |
-| FactChecker + Source Verification | Day 5 | ✅ Complete | Source validation + hallucination detection |
+| FactChecker + Source Verification | Day 3 | ✅ Complete | Source validation + hallucination detection |
 | Web Interface | Days 5-6 | ✅ Complete | Streamlit app with async execution |
 | Testing & Documentation | Throughout | ✅ Complete | 37+ tests, comprehensive docs |
 

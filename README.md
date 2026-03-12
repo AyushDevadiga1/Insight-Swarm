@@ -13,7 +13,7 @@ AI-powered fact-checking using adversarial debate and source verification.
   - ConAgent argues claim is FALSE  
   - FactChecker verifies all sources
 
-- **Source Verification** (NEW - Day 5)
+- **Source Verification** (NEW - Day 3)
   - Validates cited URLs
   - Detects hallucinated sources
   - Content matching with fuzzy logic
@@ -189,7 +189,7 @@ Verdict Weighting:
 - [Architecture Diagrams](progress/D2/ARCHITECTURE_DIAGRAMS.md) - System design & dataflow
 - [Day 2 Review](progress/D2/DAY_2.md) - Project evolution from Day 1 to Day 2
 - [Security Report](progress/D2/SECURITY.md) - Security features and testing
-- [Verification Report](DAY_5_VERIFICATION_REPORT.md) - Day 5 FactChecker implementation
+- [Verification Report](DAY_3_VERIFICATION_REPORT.md) - Day 3 FactChecker implementation
 
 ## 📚 How to Use
 
@@ -253,11 +253,11 @@ pytest tests/unit/test_fact_checker.py -v
 pytest tests/ --cov=src
 ```
 
-### Test Day 5 Implementation
+### Test Day 3 Implementation
 
 ```bash
 # Validation script
-python validate_day5.py
+python validate_day3.py
 
 # Look for:
 # ✅ ALL VALIDATION TESTS PASSED

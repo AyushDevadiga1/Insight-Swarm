@@ -122,10 +122,9 @@ class DebateOrchestrator:
             logger.info(f"ProAgent completed - {len(response['argument'])} chars, {len(response['sources'])} sources")
             
         except Exception as e:
-            logger.error(f"ProAgent failed: {e}")
-            # Add error placeholder
-            state['pro_arguments'].append(f"[Error: {str(e)}]")
-            state['pro_sources'].append([])
+            logger.error(f"❌ ProAgent failed: {type(e).__name__}: {str(e)[:100]}")
+            # Raise to let orchestrator handle recovery instead of polluting state
+            raise RuntimeError(f"ProAgent generation failed") from e
         
         return state
     
@@ -155,10 +154,10 @@ class DebateOrchestrator:
             logger.info(f"ConAgent completed - {len(response['argument'])} chars, {len(response['sources'])} sources")
             
         except Exception as e:
-            logger.error(f"ConAgent failed: {e}")
-            state['con_arguments'].append(f"[Error: {str(e)}]")
-            state['con_sources'].append([])
+            logger.error(f"❌ ConAgent failed: {type(e).__name__}: {str(e)[:100]}")
+            # Raise to let orchestrator handle recovery instead of polluting state
             state['round'] += 1
+            raise RuntimeError(f"ConAgent generation failed") from e
         
         return state
     

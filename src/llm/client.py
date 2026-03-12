@@ -129,13 +129,8 @@ class FreeLLMClient:
         now = time.time()
         one_minute_ago = now - 60
         
-        # Prune and filter calls older than 1 minute (in-place mutation)
-        i = 0
-        while i < len(call_times):
-            if call_times[i] <= one_minute_ago:
-                call_times.pop(i)
-            else:
-                i += 1
+        # Filter and update list to keep only recent calls (thread-safe replacement)
+        call_times[:] = [t for t in call_times if t > one_minute_ago]
         
         recent_calls = len(call_times)
         
@@ -214,8 +209,8 @@ class FreeLLMClient:
                 raise ValueError("Temperature must be between 0.0 and 2.0")
             if not 1 <= max_tokens <= 4000:
                 raise ValueError("max_tokens must be between 1 and 4000")
-            if not 1 <= timeout <= 90:
-                raise ValueError("timeout must be between 1 and 90 seconds")
+            if not 1 <= timeout <= 300:
+                raise ValueError("timeout must be between 1 and 300 seconds")
         except ValueError as e:
             logger.error(f"❌ Input validation failed: {e}")
             raise
