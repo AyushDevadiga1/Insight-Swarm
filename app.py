@@ -341,6 +341,7 @@ def render_verdict(result):
     """Render verdict with styled box"""
     verdict = result.get('verdict', 'UNKNOWN')
     confidence = result.get('confidence', 0.0)
+    moderator_reasoning = result.get('moderator_reasoning', '')
     
     # Determine verdict class
     verdict_class = {
@@ -358,6 +359,18 @@ def render_verdict(result):
         Confidence: {confidence:.1%}
     </div>
     """, unsafe_allow_html=True)
+    
+    # NEW: Display Moderator's reasoning
+    if moderator_reasoning:
+        st.markdown("---")
+        st.subheader("🎓 Moderator's Analysis")
+        
+        st.markdown(f"""
+        <div class="agent-card">
+        <p><strong>The Moderator reviewed all arguments and evidence to reach this verdict:</strong></p>
+        <p>{moderator_reasoning}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 def render_verification_stats(result):
@@ -547,8 +560,16 @@ def main():
             if task.done():
                 result = task.result()  # Retrieve the result from background task
                 
+                progress_bar.progress(75)
+                status_text.text("🔍 FactChecker verifying sources...")
+                time.sleep(0.5)
+                
+                progress_bar.progress(85)
+                status_text.text("🎓 Moderator analyzing debate quality...")  # NEW
+                time.sleep(0.5)
+                
                 progress_bar.progress(95)
-                status_text.text("Finalizing consensus...")
+                status_text.text("⚖️ Calculating final verdict...")
                 time.sleep(0.2)
                 
                 progress_bar.progress(100)

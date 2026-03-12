@@ -57,6 +57,11 @@ def print_result(result):
     print(f"\n{emoji}  VERDICT: {result['verdict']}")
     print(f"📊 CONFIDENCE: {result['confidence']:.1%}")
     
+    print("\n" + "-"*70)
+    print("🎓 MODERATOR'S ANALYSIS:")
+    print("-"*70)
+    print(f"\n{result.get('moderator_reasoning', '')}\n")
+    
     # Summary stats
     total_pro_sources = sum(len(sources) for sources in result['pro_sources'])
     total_con_sources = sum(len(sources) for sources in result['con_sources'])
@@ -141,7 +146,8 @@ def main():
         print("⏳ Running 3-round debate (this takes 30-90 seconds)...")
         print("   • ProAgent arguing FOR the claim")
         print("   • ConAgent arguing AGAINST the claim")
-        print("   • Computing verdict...\n")
+        print("   • FactChecker verifying sources")
+        print("   • Moderator analyzing debate quality...\n")
         
         try:
             result = orchestrator.run(claim)
