@@ -21,6 +21,7 @@ from src.agents.base import DebateState
 from src.agents.pro_agent import ProAgent
 from src.agents.con_agent import ConAgent
 from src.agents.fact_checker import FactChecker
+from src.agents.moderator import Moderator
 from src.llm.client import FreeLLMClient
 
 # Setup logging
@@ -46,11 +47,12 @@ class DebateOrchestrator:
         self.pro_agent = ProAgent(self.client)
         self.con_agent = ConAgent(self.client)
         self.fact_checker = FactChecker(self.client)
+        self.moderator = Moderator(self.client)  # NEW
         
         # Build workflow
         self.workflow = self._build_workflow()
         
-        logger.info("DebateOrchestrator initialized with ProAgent, ConAgent, and FactChecker")
+        logger.info("DebateOrchestrator initialized with 4 agents")
     
     def _build_workflow(self) -> StateGraph:
         """
@@ -73,6 +75,7 @@ class DebateOrchestrator:
         workflow.add_node("pro_agent", self._pro_agent_node)
         workflow.add_node("con_agent", self._con_agent_node)
         workflow.add_node("fact_checker", self._fact_checker_node)
+        workflow.add_node("moderator", self._moderator_node)  # NEW
         workflow.add_node("verdict", self._verdict_node)
         
         # Set entry point
@@ -91,8 +94,11 @@ class DebateOrchestrator:
             }
         )
         
-        # FactChecker → Verdict
-        workflow.add_edge("fact_checker", "verdict")
+        # FactChecker → Moderator (NEW)
+        workflow.add_edge("fact_checker", "moderator")
+        
+        # Moderator → Verdict (NEW)
+        workflow.add_edge("moderator", "verdict")
         
         # Verdict → END
         workflow.add_edge("verdict", END)
@@ -233,100 +239,83 @@ class DebateOrchestrator:
         
         return state
     
-    def _verdict_node(self, state: DebateState) -> DebateState:
+    def _moderator_node(self, state: DebateState) -> DebateState:
         """
-        Calculate final verdict based on all arguments with weighted consensus.
+        Execute Moderator analysis.
         
-        Algorithm:
-        - Count words in PRO vs CON arguments
-        - Weight by source verification rate (FactChecker)
-        - FactChecker gets additional 2x weight (objective fact verification)
-        - Calculate confidence based on weighted ratio
-        
-        Weighted score formula:
-        pro_score = pro_words * pro_verification_rate
-        con_score = con_words * con_verification_rate
-        fact_score = (pro_verification_rate + con_verification_rate) / 2 * 2  (2x weight)
-        
-        final_score = (pro_score + con_score + fact_score) / (total + fact_weight)
+        Moderator reviews all arguments and produces reasoned verdict.
         
         Args:
-            state: Current debate state with verification data
+            state: Current debate state
             
         Returns:
-            State with verdict and confidence set
+            Updated state with Moderator's verdict
         """
-        logger.info("Calculating weighted verdict with source verification...")
+        logger.info("Moderator analyzing debate quality...")
         
-        # Count words in arguments
-        pro_words = sum(len(arg.split()) for arg in state['pro_arguments'])
-        con_words = sum(len(arg.split()) for arg in state['con_arguments'])
-        
-        total_words = pro_words + con_words
-        
-        if total_words == 0:
-            # Edge case: no arguments
-            state['verdict'] = "UNVERIFIABLE"
+        try:
+            response = self.moderator.generate(state)
+            
+            # Store Moderator's verdict and reasoning
+            state['verdict'] = self._extract_verdict_from_reasoning(response['argument'])
+            state['confidence'] = response['confidence']
+            state['moderator_reasoning'] = response['argument']
+            
+            logger.info(f"Moderator verdict: {state['verdict']} ({state['confidence']:.1%})")
+            
+        except Exception as e:
+            logger.error(f"Moderator analysis failed: {e}")
+            
+            # Fallback
+            state['verdict'] = "ERROR"
             state['confidence'] = 0.0
-            logger.warning("No arguments generated - verdict UNVERIFIABLE")
-            return state
+            state['moderator_reasoning'] = f"Moderator analysis failed: {str(e)}"
         
-        # Get verification rates (default to 0.5 if not available)
-        pro_verification_rate = state.get('pro_verification_rate', 0.5) or 0.5
-        con_verification_rate = state.get('con_verification_rate', 0.5) or 0.5
+        return state
+
+    def _extract_verdict_from_reasoning(self, reasoning: str) -> str:
+        """
+        Extract verdict from Moderator's reasoning.
         
-        # Calculate weighted scores
-        pro_score = pro_words * pro_verification_rate
-        con_score = con_words * con_verification_rate
+        The verdict should be in the reasoning text somewhere.
+        If not found, return based on confidence.
         
-        # FactChecker gets 2x weight (objective verification is crucial)
-        fact_score = ((pro_verification_rate + con_verification_rate) / 2.0) * 2.0
+        Args:
+            reasoning: Moderator's reasoning text
+            
+        Returns:
+            Verdict string
+        """
+        reasoning_upper = reasoning.upper()
         
-        # Calculate final weighted ratio
-        total_weighted_words = pro_score + con_score
-        
-        if total_weighted_words == 0:
-            # Both sides have 0 verified sources
-            pro_ratio = 0.5
+        if "VERDICT: TRUE" in reasoning_upper and "PARTIALLY" not in reasoning_upper:
+            return "TRUE"
+        elif "VERDICT: FALSE" in reasoning_upper and "PARTIALLY" not in reasoning_upper:
+            return "FALSE"
+        elif "PARTIALLY" in reasoning_upper or "PARTIAL" in reasoning_upper:
+            return "PARTIALLY TRUE"
+        elif "INSUFFICIENT" in reasoning_upper:
+            return "INSUFFICIENT EVIDENCE"
         else:
-            pro_ratio = pro_score / total_weighted_words
+            # Default
+            return "PARTIALLY TRUE"
+
+    def _verdict_node(self, state: DebateState) -> DebateState:
+        """
+        Final verdict node - already set by Moderator.
         
-        # Adjust by fact score (2x weight)
-        # Fact score shifts the balance: if sources are mostly verified, maintain position
-        # If sources are mostly hallucinated, move toward middle (PARTIALLY TRUE)
-        if fact_score >= 1.5:
-            # Most sources verified, trust the argument balance
-            final_ratio = pro_ratio
-        elif fact_score <= 0.5:
-            # Most sources hallucinated, reduce confidence toward middle
-            final_ratio = 0.5 + (pro_ratio - 0.5) * 0.3  # Only 30% trust
-        else:
-            # Mixed verification, proportional trust
-            final_ratio = pro_ratio
+        This node just logs the final verdict.
+        In previous version, this calculated verdict,
+        but now Moderator does that.
         
-        # Determine verdict based on final ratio
-        if final_ratio > 0.65:
-            state['verdict'] = "TRUE"
-            state['confidence'] = final_ratio
-        elif final_ratio < 0.35:
-            state['verdict'] = "FALSE"
-            state['confidence'] = 1.0 - final_ratio
-        else:
-            state['verdict'] = "PARTIALLY TRUE"
-            state['confidence'] = 2.0 * abs(0.5 - final_ratio)  # Range 0-1
-        
-        # Log detailed verdict calculation
-        logger.info(f"\n📊 VERDICT CALCULATION DETAILS:")
-        logger.info(f"  Arguments:")
-        logger.info(f"    PRO: {pro_words} words × {pro_verification_rate:.0%} verification = {pro_score:.0f}")
-        logger.info(f"    CON: {con_words} words × {con_verification_rate:.0%} verification = {con_score:.0f}")
-        logger.info(f"  FactChecker (2x weight):")
-        logger.info(f"    Avg verification: {(pro_verification_rate + con_verification_rate) / 2.0:.0%} → score: {fact_score:.1f}")
-        logger.info(f"  Final weighted ratio: {final_ratio:.1%}")
-        logger.info(f"\n⚖️  VERDICT: {state['verdict']}")
-        logger.info(f"📊 CONFIDENCE: {state['confidence']:.1%}")
-        logger.info(f"  PRO: {pro_words} words ({pro_verification_rate:.0%} sources verified)")
-        logger.info(f"  CON: {con_words} words ({con_verification_rate:.0%} sources verified)")
+        Args:
+            state: Debate state with Moderator's verdict
+            
+        Returns:
+            State (unchanged)
+        """
+        logger.info(f"Final verdict: {state['verdict']} ({state['confidence']:.1%} confidence)")
+        logger.info(f"Moderator reasoning: {state.get('moderator_reasoning', 'N/A')[:200]}...")
         
         return state
     
@@ -343,19 +332,21 @@ class DebateOrchestrator:
         logger.info(f"Starting debate on claim: {claim}")
         
         # Initialize state
-        initial_state = DebateState(
-            claim=claim,
-            round=1,
-            pro_arguments=[],
-            con_arguments=[],
-            pro_sources=[],
-            con_sources=[],
-            verification_results=None,
-            pro_verification_rate=None,
-            con_verification_rate=None,
-            verdict=None,
-            confidence=None
-        )
+        initial_state: DebateState = {
+            "claim": claim,
+            "round": 1,
+            "pro_arguments": [],
+            "con_arguments": [],
+            "pro_sources": [],
+            "con_sources": [],
+            "verdict": None,
+            "confidence": None,
+            "verification_results": [],
+            "pro_verification_rate": 0.0,
+            "con_verification_rate": 0.0,
+            "fact_check_result": "",
+            "moderator_reasoning": None
+        }
         
         # Run workflow
         try:
@@ -365,9 +356,10 @@ class DebateOrchestrator:
             
         except Exception as e:
             logger.error(f"Debate failed: {e}")
-            # Return state with error
+            # Ensure all keys are present even on error
             initial_state['verdict'] = "ERROR"
             initial_state['confidence'] = 0.0
+            initial_state['moderator_reasoning'] = f"Debate failed: {str(e)}"
             return initial_state
 
 
