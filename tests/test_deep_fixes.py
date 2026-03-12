@@ -25,10 +25,11 @@ def test_moderator_parsing_robustness():
     expected_verdicts = ["TRUE", "FALSE", "PARTIALLY TRUE", "INSUFFICIENT EVIDENCE"]
     
     for resp, expected in zip(test_responses, expected_verdicts):
-        verdict, conf, reasoning = moderator._parse_moderator_response(resp)
+        verdict, conf, reasoning, metrics = moderator._parse_moderator_response(resp)
         assert verdict == expected
         assert isinstance(conf, float)
         assert len(reasoning) > 0
+        assert isinstance(metrics, dict)
 
 def test_verification_rate_semantics():
     """Verify agents with no sources get 0.0% verification (FIX 2)"""
@@ -46,7 +47,9 @@ def test_verification_rate_semantics():
         "pro_verification_rate": None,
         "con_verification_rate": None,
         "fact_check_result": None,
-        "moderator_reasoning": None
+        "moderator_reasoning": None,
+        "metrics": None,
+        "retry_count": 0
     }
     
     # Mock fact checker return

@@ -93,7 +93,7 @@ class FactChecker(BaseAgent):
         
         Process:
         1. Extract all URLs from pro_sources and con_sources
-        2. For each URL, attempt to fetch and verify content
+        2. For each URL, attempt to fetch and verify content concurrently
         3. Use fuzzy matching to validate that source content matches claims
         4. Calculate overall verification metrics
         5. Return detailed verification report
@@ -104,23 +104,23 @@ class FactChecker(BaseAgent):
         Returns:
             FactCheckerResponse with verification details for all sources
         """
-        logger.info("FactChecker: Starting source verification")
+        logger.info("FactChecker: Starting concurrent source verification")
         
         # Extract all sources with their corresponding claims
         all_sources_with_claims = self._extract_sources_with_claims(state)
         
         if not all_sources_with_claims:
-            logger.info("ℹx  No sources found to verify")
+            logger.info("ℹ️ No sources found to verify")
             return FactCheckerResponse(
                 agent="FACT_CHECKER",
                 verification_results=[],
                 verified_count=0,
                 hallucinated_count=0,
-                verification_rate=1.0,  # No sources = perfect
-                overall_confidence=0.0   # But no basis for confidence
+                verification_rate=0.0,  # No sources = 0.0 (Fixes inconsistency)
+                overall_confidence=0.0
             )
         
-        # Deduplicate sources before verification (fixes Medium Issue #15)
+        # Deduplicate sources
         seen_urls = set()
         unique_sources = []
         for url, claim_text, agent_source in all_sources_with_claims:
@@ -128,33 +128,38 @@ class FactChecker(BaseAgent):
                 seen_urls.add(url)
                 unique_sources.append((url, claim_text, agent_source))
         
-        # Verify each source with overall timeout (Fixes Issue #15)
-        import time
-        start_time = time.time()
-        max_total_time = 60  # 60 seconds total for all sources
+        # Verify sources concurrently (Fixes Reliability/Throughput issues)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         
         verification_results = []
-        for url, claim_text, agent_source in unique_sources:
-            # Check if we've exceeded total time
-            if time.time() - start_time > max_total_time:
-                logger.warning(f"FactChecker: Total verification timeout reached. Skipping {len(unique_sources) - len(verification_results)} sources.")
-                break
-                
-            result = self._verify_source(url, claim_text, agent_source)
-            verification_results.append(result)
-            logger.info(f"  [{result['status']}] {url[:50]}... (conf: {result['confidence']:.0%})")
+        max_workers = min(10, len(unique_sources))  # Limit concurrency
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Map verify_source to each unique source
+            future_to_url = {
+                executor.submit(self._verify_source, url, claim, src): url 
+                for url, claim, src in unique_sources
+            }
+            
+            for future in as_completed(future_to_url, timeout=60): # Overall 60s timeout
+                try:
+                    result = future.result()
+                    verification_results.append(result)
+                    logger.info(f"  [{result['status']}] {future_to_url[future][:50]}... (conf: {result['confidence']:.0%})")
+                except Exception as exc:
+                    url = future_to_url[future]
+                    logger.error(f'URL {url} generated an exception: {exc}')
         
         # Calculate metrics with zero division safety
         total_count = len(verification_results)
         verified_count = sum(1 for r in verification_results if r['status'] == "VERIFIED")
         
-        # Consistency check for metrics
         if total_count > 0:
             verification_rate = verified_count / total_count
             overall_confidence = sum(r['confidence'] for r in verification_results) / total_count
             hallucinated_count = total_count - verified_count
         else:
-            verification_rate = 1.0  # Perfect by default if no sources
+            verification_rate = 0.0
             overall_confidence = 0.0
             hallucinated_count = 0
         
@@ -163,7 +168,7 @@ class FactChecker(BaseAgent):
         logger.info(f"  ✅ Verified: {verified_count}")
         logger.info(f"  ❌ Hallucinated: {hallucinated_count}")
         logger.info(f"  📈 Rate: {verification_rate:.0%}")
-        logger.info(f"  🎯 Confidence: {overall_confidence:.0%}\n")
+        logger.info(f"  🎯 Confidence: {overall_confidence:.1%}\n")
         
         return FactCheckerResponse(
             agent="FACT_CHECKER",

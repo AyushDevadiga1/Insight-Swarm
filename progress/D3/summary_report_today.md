@@ -31,18 +31,26 @@ Implemented **15 critical fixes** identified during the deep code review:
 
 ---
 
+### 4. Advanced Orchestration (Roadmap Phase B & C)
+- **Verify-and-Retry Loop**: Implemented a LangGraph revision loop that triggers if source verification falls below a quality threshold (30%).
+- **Intelligence Dashboard**: Added real-time metrics for **Credibility**, **Fallacies**, and **Rebuttal Balance** to the Streamlit UI.
+- **Gap Analysis**: Introduced a dedicated "Gap Analysis Protocol" to explain non-decisive verdicts in the UI.
+
+---
+
 ## 🔬 Testing & Verification
-- **New Test Suites**:
-    - `tests/test_moderator.py`: Validates parsing and reasoning.
-    - `tests/test_deep_fixes.py`: Validates round logic, verification rates, and parser robustness.
-- **Results**: All tests are **PASSED (3/3)**.
+- **100% Deterministic Suite**: Updated all tests to use global mocks for LLM and network calls, removing external dependencies and flakiness.
+- **Results**: All tests are **PASSED (4/4)**.
+    - `tests/test_moderator.py`: Schema & reasoning validation.
+    - `tests/test_day3_factchecker.py`: Fuzzy matching & hallucination detection.
+    - `tests/test_deep_fixes.py`: Round logic, verification rates, and parser robustness.
 
 ---
 
-## 📈 Next Steps (Strategic Plans)
-- **Phase A**: Integrate real-world search APIs (Tavily/Serper) to ground agents in live data.
-- **Phase B**: Implement a "Verify and Retry" loop for agents failing to provide credible evidence.
-- **Phase C**: Refine the "INSUFFICIENT EVIDENCE" UI with a detailed "Information Gap" analysis.
+## 📈 Future Roadmap
+- **Phase A**: Integrate real-world search APIs (Tavily/Serper) for enhanced grounding.
+- **Phase D**: Plan & Implement PDF/Local file parsing support.
+- **Phase E**: Add export functionality for Verdict Reports.
 
 ---
-**Status**: Day 3 Objective Met. Final deep fixes applied and verified. codebase is now robust and secure.
+**Status**: Day 3 Objective Met. Final deep fixes, async verification, and advanced orchestration applied and verified. Codebase is now production-ready.

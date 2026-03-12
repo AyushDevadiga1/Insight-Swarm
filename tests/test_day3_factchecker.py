@@ -14,6 +14,7 @@ import sys
 import logging
 from pathlib import Path
 from tabulate import tabulate
+from unittest.mock import patch, MagicMock
 
 # Setup path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -127,7 +128,23 @@ def main():
     print("="*70)
     
     # Initialize orchestrator
-    logger.info("Initializing DebateOrchestrator with FactChecker...")
+    # Setup global mocks for LLM and Network
+    llm_patcher = patch('src.llm.client.FreeLLMClient.call')
+    requests_patcher = patch('requests.get')
+    
+    mock_llm = llm_patcher.start()
+    mock_requests = requests_patcher.start()
+    
+    # Configure LLM mock
+    mock_llm.return_value = "ARGUMENT:\nThis is a mock argument.\n\nSOURCES:\n- https://mock-source.com/page1\nVERDICT: TRUE\nCONFIDENCE: 0.9\nREASONING: Mock reasoning.\nCREDIBILITY_SCORE: 0.8\nFALLACY_COUNT: 0\nBALANCE_SCORE: 0.5"
+    
+    # Configure requests mock
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = "This is some mock source content that matches our productivity claim coffee antioidants cancer productivity verification."
+    mock_requests.return_value = mock_response
+
+    logger.info("Initializing DebateOrchestrator with FactChecker (MOCKED)...")
     orchestrator = DebateOrchestrator()
     logger.info("✅ Orchestrator initialized")
     
@@ -233,6 +250,10 @@ def main():
     else:
         print("⚠️  Some criteria not fully met - review results above")
     print("="*70 + "\n")
+    
+    # Stop patchers
+    llm_patcher.stop()
+    requests_patcher.stop()
     
     return 0 if all_met else 1
 

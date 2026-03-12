@@ -12,7 +12,7 @@ This agent:
 import logging
 import re
 import html
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
 
@@ -70,17 +70,20 @@ class Moderator(BaseAgent):
             )
             
             # Parse response
-            verdict, confidence, reasoning = self._parse_moderator_response(response_text)
+            verdict, confidence, reasoning, metrics = self._parse_moderator_response(response_text)
             
-            logger.info(f"Moderator verdict: {verdict} ({confidence:.1%} confidence)")
+            logger.info(f"Moderator verdict: {verdict}") # Standardized logging
+            logger.info(f"Confidence score: {confidence:.2f}")
             
             return {
                 "agent": "MODERATOR",
                 "round": state['round'],
-                "argument": reasoning,  # Return parsed reasoning, not raw response
+                "argument": reasoning[:300] + "..." if len(reasoning) > 300 else reasoning,
+                "reasoning": reasoning,  # Return full reasoning as requested
                 "sources": [],
                 "confidence": confidence,
-                "verdict": verdict
+                "verdict": verdict,
+                "metrics": metrics
             }
         
         except Exception as e:
@@ -106,16 +109,16 @@ class Moderator(BaseAgent):
         Returns:
             Formatted prompt
         """
-        claim = html.escape(state['claim'])
+        claim = state['claim']  # Removed html.escape
         
         # Compile arguments
         pro_args = "\n\n".join([
-            f"Round {i+1}: {html.escape(arg)}"
+            f"Round {i+1}: {arg}"
             for i, arg in enumerate(state['pro_arguments'])
         ])
         
         con_args = "\n\n".join([
-            f"Round {i+1}: {html.escape(arg)}"
+            f"Round {i+1}: {arg}"
             for i, arg in enumerate(state['con_arguments'])
         ])
         
@@ -163,77 +166,68 @@ IMPORTANT GUIDELINES:
 OUTPUT FORMAT (you must follow this exactly):
 
 VERDICT: [TRUE | FALSE | PARTIALLY TRUE | INSUFFICIENT EVIDENCE]
-CONFIDENCE: [0.0 to 1.0 as decimal, e.g., 0.75]
+CONFIDENCE: [0.0 to 1.0]
+
+METRICS:
+- CREDIBILITY_SCORE: [0.0 to 1.0]
+- FALLACY_COUNT: [integer]
+- BALANCE_SCORE: [0.0 to 1.0, where 0.5 is perfectly balanced]
 
 REASONING:
-[2-3 paragraphs explaining your verdict. Include:
-- Which arguments were strongest and why
-- Any logical fallacies you identified
-- How verification results influenced your decision
-- Why you assigned this confidence level
-- Any important nuances or conditions]
+[2-3 paragraphs explaining your verdict.]
 
 Begin your analysis:"""
         
         return prompt
     
-    def _parse_moderator_response(self, response_text: str) -> Tuple[str, float, str]:
+    def _parse_moderator_response(self, response_text: str) -> Tuple[str, float, str, Dict]:
         """
         Parse Moderator's verdict from LLM response using robust regex.
-        
-        Handles varied spacing, casing, and trailing punctuation.
+        Returns: (verdict, confidence, reasoning, metrics)
         """
         verdict = None
         confidence = 0.5
         reasoning = ""
+        metrics = {
+            "credibility": 0.5,
+            "fallacies": 0,
+            "balance": 0.5
+        }
 
-        # Verdict parsing: case-insensitive, handles varied spacing/markers
-        verdict_match = re.search(
-            r"(?:VERDICT|Verdict|verdict)\s*[:\-]?\s*(\w+(?:\s+\w+)?)", 
-            response_text,
-            re.IGNORECASE
-        )
+        # Verdict: Tight exact match for allowed values
+        verdict_pattern = r"(?:VERDICT|Verdict|verdict)\s*[:\-]?\s*(TRUE|FALSE|PARTIALLY TRUE|INSUFFICIENT EVIDENCE)"
+        verdict_match = re.search(verdict_pattern, response_text, re.IGNORECASE)
         if verdict_match:
-            verdict_text = verdict_match.group(1).upper().strip()
-            # Normalize to standard verdicts
-            if "TRUE" in verdict_text and "PARTIALLY" not in verdict_text and "FALSE" not in verdict_text:
-                verdict = "TRUE"
-            elif "FALSE" in verdict_text and "PARTIALLY" not in verdict_text:
-                verdict = "FALSE"
-            elif "PARTIALLY" in verdict_text or "PARTIAL" in verdict_text:
-                verdict = "PARTIALLY TRUE"
-            elif "INSUFFICIENT" in verdict_text or "UNCLEAR" in verdict_text:
-                verdict = "INSUFFICIENT EVIDENCE"
+            verdict = verdict_match.group(1).upper().strip()
         
-        # Confidence parsing: case-insensitive, handles varied spacing
-        conf_match = re.search(
-            r"(?:CONFIDENCE|Confidence|confidence)\s*[:\-]?\s*(0?\.\d+|1\.0|1)", 
-            response_text,
-            re.IGNORECASE
-        )
+        # Confidence: Precision parsing
+        conf_match = re.search(r"CONFIDENCE\s*[:\-]?\s*(0?\.\d+|1\.0|1)", response_text, re.IGNORECASE)
         if conf_match:
             try:
                 confidence = float(conf_match.group(1))
-                confidence = max(0.0, min(1.0, confidence))
-            except ValueError:
-                confidence = 0.5
+            except ValueError: pass
 
-        # Reasoning parsing: capture everything after REASONING marker
-        reason_match = re.search(
-            r"(?:REASONING|Reasoning|reasoning)\s*[:\-]?\s*(.*)", 
-            response_text, 
-            re.IGNORECASE | re.DOTALL
-        )
+        # Metrics parsing
+        cred_match = re.search(r"CREDIBILITY_SCORE\s*[:\-]?\s*(0?\.\d+|1\.0|1)", response_text, re.IGNORECASE)
+        if cred_match: metrics["credibility"] = float(cred_match.group(1))
+        
+        fall_match = re.search(r"FALLACY_COUNT\s*[:\-]?\s*(\d+)", response_text, re.IGNORECASE)
+        if fall_match: metrics["fallacies"] = int(fall_match.group(1))
+        
+        bal_match = re.search(r"BALANCE_SCORE\s*[:\-]?\s*(0?\.\d+|1\.0|1)", response_text, re.IGNORECASE)
+        if bal_match: metrics["balance"] = float(bal_match.group(1))
+
+        # Reasoning: Capture everything after REASONING up to end or next marker
+        reason_match = re.search(r"REASONING\s*[:\-]?\s*(.*)", response_text, re.IGNORECASE | re.DOTALL)
         if reason_match:
             reasoning = reason_match.group(1).strip()
         
         if not verdict:
-            logger.warning("Failed to parse verdict, defaulting to INSUFFICIENT EVIDENCE")
+            logger.warning("Moderator: Failed to parse verdict accurately.")
             verdict = "INSUFFICIENT EVIDENCE"
-            confidence = 0.3
-            reasoning = response_text.strip()
+            reasoning = response_text.strip() if not reasoning else reasoning
 
-        return verdict, confidence, reasoning
+        return verdict, confidence, reasoning, metrics
     def _fallback_verdict(self, state: DebateState) -> AgentResponse:
         """
         Fallback verdict if Moderator LLM call fails.
@@ -259,10 +253,16 @@ Begin your analysis:"""
         return {
             "agent": "MODERATOR",
             "round": state['round'],
-            "argument": reasoning,  # Return reasoning, not full text
+            "argument": reasoning,
+            "reasoning": reasoning,
             "sources": [],
             "confidence": confidence,
-            "verdict": verdict
+            "verdict": verdict,
+            "metrics": {
+                "credibility": (pro_verification + con_verification) / 2,
+                "fallacies": 0,
+                "balance": 0.5
+            }
         }
     
     def _build_prompt(self, state: DebateState, round_num: int) -> str:

@@ -31,6 +31,7 @@ class AgentResponse(TypedDict):
     confidence: float
     verdict: Optional[str]
     reasoning: Optional[str]  # Required for Moderator, Optional for others
+    metrics: Optional[Dict[str, Any]]  # Qualitative to Quantitative scoring
 
 
 class DebateState(TypedDict):
@@ -66,6 +67,8 @@ class DebateState(TypedDict):
     moderator_reasoning: Optional[str]
     verdict: Optional[str]
     confidence: Optional[float]
+    metrics: Optional[Dict[str, Any]]
+    retry_count: int  # Added for Verify-and-Retry loop
 
 
 # ============================================

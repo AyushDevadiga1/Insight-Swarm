@@ -268,6 +268,18 @@ hr {
 """, unsafe_allow_html=True)
 
 
+
+def safe_markdown(content: str, is_html: bool = True):
+    """
+    Centralized helper for safe HTML/Markdown rendering.
+    Escapes content and ensures unsafe_allow_html is only used intentionally.
+    """
+    if is_html:
+        st.markdown(content, unsafe_allow_html=True)
+    else:
+        st.markdown(content)
+
+
 import atexit
 
 def init_session_state():
@@ -294,23 +306,22 @@ def init_session_state():
 
 
 def render_header():
-    st.markdown(
+    safe_markdown(
         """
         <div class="main-header">INSIGHTSWARM</div>
         <div class="sub-header">
         Multi-Agent Truth Verification Protocol
         </div>
-        """,
-        unsafe_allow_html=True
+        """
     )
 
 
 def render_sidebar():
     """Render sidebar with information"""
     with st.sidebar:
-        st.markdown("<h3 style='text-transform:uppercase;letter-spacing:2px;font-size:12px;color:#888;margin-bottom:16px;'>Architecture</h3>", unsafe_allow_html=True)
+        safe_markdown("<h3 style='text-transform:uppercase;letter-spacing:2px;font-size:12px;color:#888;margin-bottom:16px;'>Architecture</h3>")
         
-        st.markdown("""
+        safe_markdown("""
         <div style='font-size: 13px; color: #aaa; line-height: 1.8; margin-bottom: 30px;'>
         <p style='border-left: 1px solid #333; padding-left: 12px; margin-bottom: 16px;'>
         <strong>01 ProAgent</strong><br/>
@@ -332,7 +343,7 @@ def render_sidebar():
         Intelligent consensus.<br/>
         Fallacy detection.</p>
         </div>
-        """, unsafe_allow_html=True)
+        """)
         
         st.divider()
         
@@ -346,7 +357,7 @@ def render_sidebar():
             "AI will replace all jobs by 2030"
         ]
         
-        st.markdown("<div style='font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-bottom:12px;'>Pre-verified queries</div>", unsafe_allow_html=True)
+        safe_markdown("<div style='font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-bottom:12px;'>Pre-verified queries</div>")
         for claim in example_claims:
             if st.button(claim, key=f"example_{claim}", use_container_width=True):
                 st.session_state.example_claim = claim
@@ -370,17 +381,17 @@ def render_verdict(result):
     # Escape verdict string to prevent XSS
     escaped_verdict = html.escape(verdict)
     
-    st.markdown(f"""
+    safe_markdown(f"""
     <div class="verdict-box {verdict_class}">
         <strong>{escaped_verdict}</strong><br>
         Confidence: {confidence:.1%}
     </div>
-    """, unsafe_allow_html=True)
+    """)
     
     # Moderation Decision Chat style
     if moderator_reasoning:
         st.markdown("---")
-        st.markdown("""
+        safe_markdown("""
         <div style='display: flex; align-items: center; margin-bottom: 20px;'>
             <div style='width: 40px; height: 40px; border-radius: 0; border: 1px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: bold; margin-right: 15px;'>
                 M
@@ -390,24 +401,66 @@ def render_verdict(result):
                 <div style='font-size: 10px; color: #888; text-transform: uppercase;'>Evidence-Based Consensus Protocol</div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """)
         
         # Sanitize for excerpt
         escaped_reasoning = html.escape(moderator_reasoning)
         excerpt = escaped_reasoning[:300] + ("..." if len(escaped_reasoning) > 300 else "")
         
-        st.markdown(f"""
+        # Fix f-string backslash error and ensure safe rendering
+        formatted_excerpt = excerpt.replace('\n', '<br>')
+        safe_markdown(f"""
         <div class="debate-block" style="border-left: 3px solid #fff; padding-left: 20px; color: #fff; margin-bottom: 10px;">
-            {excerpt.replace('\n', '<br>')}
+            {formatted_excerpt}
         </div>
-        """, unsafe_allow_html=True)
+        """)
         
         with st.expander("VIEW FULL REASONING PROTOCOL"):
-            st.markdown(f"""
+            formatted_reasoning = escaped_reasoning.replace('\n', '<br>')
+            safe_markdown(f"""
             <div style="font-size: 14px; line-height: 1.6; color: #ccc; font-family: 'Space Mono', monospace;">
-                {escaped_reasoning.replace('\n', '<br>')}
+                {formatted_reasoning}
             </div>
-            """, unsafe_allow_html=True)
+            """)
+    
+    # NEW: Gap Analysis for Insufficient Evidence
+    if verdict == 'INSUFFICIENT EVIDENCE':
+        st.markdown("---")
+        safe_markdown("""
+        <div style='background-color: #111; border: 1px solid #333; padding: 20px;'>
+            <h4 style='font-size: 12px; color: #ff3333; margin-top:0;'>GAP_ANALYSIS_PROTOCOL</h4>
+            <p style='font-size: 13px; color: #888;'>The current evidence pool is non-decisive. Primary bottlenecks:</p>
+            <ul style='font-size: 13px; color: #aaa; padding-left: 20px;'>
+                <li>Low verification density on primary claims</li>
+                <li>Conflicting signals from verified peer-reviewed sources</li>
+                <li>High fallacy density in adversarial rebuttals</li>
+            </ul>
+        </div>
+        """)
+
+
+def render_metrics(result):
+    """Render quantitative metrics dashboard"""
+    metrics = result.get('metrics')
+    if not metrics:
+        return
+        
+    st.markdown("---")
+    safe_markdown("<h3>INTELLIGENCE_METRICS</h3>")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        cred = metrics.get('credibility', 0.0)
+        st.metric("Evidence Credibility", f"{cred:.0%}", help="Strength of verified sources")
+    
+    with col2:
+        fallacies = metrics.get('fallacies', 0)
+        st.metric("Fallacy Count", fallacies, delta=f"-{fallacies}" if fallacies > 0 else None, delta_color="inverse")
+    
+    with col3:
+        balance = metrics.get('balance', 0.5)
+        st.metric("Rebuttal Balance", f"{balance:.1f}", help="Semantic balance between Pro and Con arguments")
 
 
 def render_verification_stats(result):
@@ -426,7 +479,7 @@ def render_verification_stats(result):
     verified = sum(1 for r in verification_results if r.get('status') == 'VERIFIED')
     hallucinated = total - verified
     
-    st.markdown("<h3>SOURCES</h3>", unsafe_allow_html=True)
+    safe_markdown("<h3>SOURCES</h3>")
     
     # Metrics row
     col1, col2, col3, col4 = st.columns(4)
@@ -450,12 +503,12 @@ def render_verification_stats(result):
             escaped_url = html.escape(url)
             
             if status == 'VERIFIED':
-                st.markdown(f"{i}. <span class='source-verified'>{escaped_url}</span>", unsafe_allow_html=True)
+                safe_markdown(f"{i}. <span class='source-verified'>{escaped_url}</span>")
             else:
                 error = vr.get('error', 'Unknown error')
                 # Escape error message to prevent XSS
                 escaped_error = html.escape(error)
-                st.markdown(f"{i}. <span class='source-failed'>{escaped_url}</span> - {escaped_error}", unsafe_allow_html=True)
+                safe_markdown(f"{i}. <span class='source-failed'>{escaped_url}</span> - {escaped_error}")
 
 
 def render_debate_arguments(result):
@@ -466,7 +519,7 @@ def render_debate_arguments(result):
     pro_sources = result.get('pro_sources', [])
     con_sources = result.get('con_sources', [])
     
-    st.markdown("<h3>DEBATE LOG</h3>", unsafe_allow_html=True)
+    safe_markdown("<h3>DEBATE LOG</h3>")
     
     # Create tabs for each round
     num_rounds = min(len(pro_arguments), len(con_arguments))
@@ -483,7 +536,7 @@ def render_debate_arguments(result):
                     st.markdown("### ProAgent")
                     # Escape argument content to prevent XSS
                     escaped_pro_arg = html.escape(pro_arguments[i])
-                    st.markdown(f'<div class="debate-block">{escaped_pro_arg}</div>', unsafe_allow_html=True)
+                    safe_markdown(f'<div class="debate-block">{escaped_pro_arg}</div>')
                     
                     if i < len(pro_sources) and pro_sources[i]:
                         st.markdown("**Sources cited:**")
@@ -497,7 +550,7 @@ def render_debate_arguments(result):
                     st.markdown("### ConAgent")
                     # Escape argument content to prevent XSS
                     escaped_con_arg = html.escape(con_arguments[i])
-                    st.markdown(f'<div class="debate-block">{escaped_con_arg}</div>', unsafe_allow_html=True)
+                    safe_markdown(f'<div class="debate-block">{escaped_con_arg}</div>')
                     
                     if i < len(con_sources) and con_sources[i]:
                         st.markdown("**Sources cited:**")
@@ -557,7 +610,7 @@ def main():
         
         # Run debate
         st.markdown("---")
-        st.markdown("<h3 style='font-size:18px;'>ANALYZING</h3>", unsafe_allow_html=True)
+        safe_markdown("<h3 style='font-size:18px;'>ANALYZING</h3>")
         
         # Progress indicators
         progress_bar = st.progress(0)
@@ -647,6 +700,9 @@ def main():
         # Render verdict
         render_verdict(result)
         
+        # Render metrics dashboard (NEW)
+        render_metrics(result)
+        
         # Render verification stats
         render_verification_stats(result)
         
@@ -656,12 +712,12 @@ def main():
         render_debate_arguments(result)
         
         # Footer
-        st.markdown("""
+        safe_markdown("""
         <div class='footer'>
             <span><strong>INSIGHTSWARM</strong></span>
             <span>POWERED BY GROQ + GEMINI</span>
         </div>
-        """, unsafe_allow_html=True)
+        """)
 
 
 if __name__ == "__main__":

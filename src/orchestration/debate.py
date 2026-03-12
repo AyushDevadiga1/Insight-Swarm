@@ -75,8 +75,9 @@ class DebateOrchestrator:
         workflow.add_node("pro_agent", self._pro_agent_node)
         workflow.add_node("con_agent", self._con_agent_node)
         workflow.add_node("fact_checker", self._fact_checker_node)
-        workflow.add_node("moderator", self._moderator_node)  # NEW
+        workflow.add_node("moderator", self._moderator_node)
         workflow.add_node("verdict", self._verdict_node)
+        workflow.add_node("revision", self._retry_revision_node)  # NEW: Revision loop
         
         # Set entry point
         workflow.set_entry_point("pro_agent")
@@ -94,10 +95,20 @@ class DebateOrchestrator:
             }
         )
         
-        # FactChecker → Moderator (NEW)
-        workflow.add_edge("fact_checker", "moderator")
+        # FactChecker → Decide whether to Moderator or Revision
+        workflow.add_conditional_edges(
+            "fact_checker",
+            self._should_retry,
+            {
+                "retry": "revision",
+                "proceed": "moderator"
+            }
+        )
         
-        # Moderator → Verdict (NEW)
+        # Revision → Moderator (Revision always leads to final moderation)
+        workflow.add_edge("revision", "moderator")
+        
+        # Moderator → Verdict
         workflow.add_edge("moderator", "verdict")
         
         # Verdict → END
@@ -171,19 +182,47 @@ class DebateOrchestrator:
     def _should_continue(self, state: DebateState) -> Literal["continue", "end"]:
         """
         Decide whether to continue debate or move to verdict.
-        
-        Args:
-            state: Current debate state
-            
-        Returns:
-            "continue" if more rounds needed, "end" if ready for verdict
         """
-        if state['round'] >= 3:  # After round 3, stop (FIX 1: >= 3 instead of > 3)
-            logger.info("Debate complete - moving to verdict")
+        if state['round'] >= 3:
+            logger.info("Debate core rounds complete - moving to fact check")
             return "end"
         else:
             logger.info(f"Continuing to round {state['round']}")
             return "continue"
+
+    def _should_retry(self, state: DebateState) -> Literal["retry", "proceed"]:
+        """
+        Logic for Verify-and-Retry roadmap item. 
+        Triggers if verification rate is low (< 0.3) and we haven't retried yet.
+        """
+        pro_rate = state.get('pro_verification_rate', 0.0)
+        con_rate = state.get('con_verification_rate', 0.0)
+        
+        # Threshold for retry: if either side has poor verification and we have retries left
+        if (pro_rate < 0.3 or con_rate < 0.3) and state.get('retry_count', 0) < 1:
+            logger.warning(f"⚠️ Low verification detected (PRO: {pro_rate:.0%}, CON: {con_rate:.0%}). Triggering REVISION loop.")
+            return "retry"
+        
+        return "proceed"
+
+    def _retry_revision_node(self, state: DebateState) -> DebateState:
+        """
+        Revision node for Verify-and-Retry loop.
+        Asks both agents to revise their arguments based on fact-check failures.
+        """
+        logger.info("Revision turn - Both agents correcting based on FactChecker feedback")
+        state['retry_count'] += 1
+        
+        try:
+            # Simple revision logic: run one more constrained turn for both
+            # In a full implementation, we'd pass verification_results into prompts
+            state = self._pro_agent_node(state)
+            state = self._con_agent_node(state)
+            # Re-run fact check for the revisions (optional, here we proceed to moderator)
+        except Exception as e:
+            logger.error(f"Revision failed: {e}")
+            
+        return state
     
     def _fact_checker_node(self, state: DebateState) -> DebateState:
         """
@@ -265,12 +304,13 @@ class DebateOrchestrator:
         try:
             response = self.moderator.generate(state)
             
-            # FIX 3: Store Moderator's verdict and reasoning directly from structured response
+            # Store Moderator's verdict, reasoning, and metrics
             state['verdict'] = response.get('verdict', 'INSUFFICIENT EVIDENCE')
             state['confidence'] = response.get('confidence', 0.5)
-            state['moderator_reasoning'] = response['argument']  # Already parsed reasoning
+            state['moderator_reasoning'] = response.get('reasoning') or response['argument']
+            state['metrics'] = response.get('metrics')
             
-            logger.info(f"Moderator verdict: {state['verdict']} ({state['confidence']:.1%})")
+            logger.info(f"Moderator verdict: {state['verdict']} (Conf: {state['confidence']:.2f})")
             
         except Exception as e:
             logger.error(f"Moderator analysis failed: {e}")
@@ -336,7 +376,9 @@ class DebateOrchestrator:
             "pro_verification_rate": None,
             "con_verification_rate": None,
             "fact_check_result": None,
-            "moderator_reasoning": None
+            "moderator_reasoning": None,
+            "metrics": None,
+            "retry_count": 0
         }
         
         # Run workflow

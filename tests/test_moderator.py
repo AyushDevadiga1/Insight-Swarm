@@ -12,14 +12,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.agents.moderator import Moderator
 from src.agents.base import DebateState
 from src.llm.client import FreeLLMClient
+from unittest.mock import MagicMock
 
 def test_moderator_analysis():
     print("\n" + "="*70)
     print("Moderator Agent Test")
     print("="*70)
     
-    # Initialize
-    client = FreeLLMClient()
+    # Initialize with Mock client for determinisims
+    client = MagicMock(spec=FreeLLMClient)
+    client.call.return_value = """
+VERDICT: TRUE
+CONFIDENCE: 0.85
+METRICS:
+- CREDIBILITY_SCORE: 0.9
+- FALLACY_COUNT: 1
+- BALANCE_SCORE: 0.5
+REASONING:
+The evidence for coffee's health benefits is well-supported by multiple studies.
+    """
     moderator = Moderator(client)
     
     # Mock debate state
