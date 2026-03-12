@@ -19,7 +19,12 @@ def test_orchestration_completes(orchestrator):
     
     # Should have verdict
     assert result['verdict'] is not None
-    assert result['verdict'] in ['TRUE', 'FALSE', 'PARTIALLY TRUE', 'UNVERIFIABLE', 'ERROR']
+    assert result['verdict'] in ['TRUE', 'FALSE', 'PARTIALLY TRUE', 'INSUFFICIENT EVIDENCE', 'UNVERIFIABLE', 'ERROR']
+    
+    # NEW: Should have moderator reasoning
+    assert 'moderator_reasoning' in result
+    if result['verdict'] != 'ERROR':
+        assert result['moderator_reasoning'] is not None
     
     # Should have confidence
     assert result['confidence'] is not None
@@ -94,7 +99,7 @@ def test_orchestration_on_multiple_claims(orchestrator):
         result = orchestrator.run(claim)
         
         # Each should complete with valid verdict
-        assert result['verdict'] in ['TRUE', 'FALSE', 'PARTIALLY TRUE', 'UNVERIFIABLE', 'ERROR']
+        assert result['verdict'] in ['TRUE', 'FALSE', 'PARTIALLY TRUE', 'INSUFFICIENT EVIDENCE', 'UNVERIFIABLE', 'ERROR']
         assert result['confidence'] is not None
         
         # Each should have arguments
