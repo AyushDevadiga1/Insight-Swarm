@@ -256,10 +256,10 @@ class DebateOrchestrator:
         try:
             response = self.moderator.generate(state)
             
-            # Store Moderator's verdict and reasoning
-            state['verdict'] = self._extract_verdict_from_reasoning(response['argument'])
-            state['confidence'] = response['confidence']
-            state['moderator_reasoning'] = response['argument']
+            # Store Moderator's verdict and reasoning directly from structured response
+            state['verdict'] = response.get('verdict', 'INSUFFICIENT EVIDENCE')
+            state['confidence'] = response.get('confidence', 0.5)
+            state['moderator_reasoning'] = response.get('reasoning', response['argument'])
             
             logger.info(f"Moderator verdict: {state['verdict']} ({state['confidence']:.1%})")
             
@@ -273,32 +273,6 @@ class DebateOrchestrator:
         
         return state
 
-    def _extract_verdict_from_reasoning(self, reasoning: str) -> str:
-        """
-        Extract verdict from Moderator's reasoning.
-        
-        The verdict should be in the reasoning text somewhere.
-        If not found, return based on confidence.
-        
-        Args:
-            reasoning: Moderator's reasoning text
-            
-        Returns:
-            Verdict string
-        """
-        reasoning_upper = reasoning.upper()
-        
-        if "VERDICT: TRUE" in reasoning_upper and "PARTIALLY" not in reasoning_upper:
-            return "TRUE"
-        elif "VERDICT: FALSE" in reasoning_upper and "PARTIALLY" not in reasoning_upper:
-            return "FALSE"
-        elif "PARTIALLY" in reasoning_upper or "PARTIAL" in reasoning_upper:
-            return "PARTIALLY TRUE"
-        elif "INSUFFICIENT" in reasoning_upper:
-            return "INSUFFICIENT EVIDENCE"
-        else:
-            # Default
-            return "PARTIALLY TRUE"
 
     def _verdict_node(self, state: DebateState) -> DebateState:
         """

@@ -121,16 +121,6 @@ class FactChecker(BaseAgent):
             )
         
         # Deduplicate sources before verification (fixes Medium Issue #15)
-        # Group by URL to avoid verifying the same URL multiple times
-        seen_urls = set()
-        unique_sources = []
-        for url, claim_text, agent_source in all_sources_with_claims:
-            if url not in seen_urls:
-                seen_urls.add(url)
-                unique_sources.append((url, claim_text, agent_source))
-        
-        # Deduplicate sources before verification (fixes Medium Issue #15)
-        # Group by URL to avoid verifying the same URL multiple times
         seen_urls = set()
         unique_sources = []
         for url, claim_text, agent_source in all_sources_with_claims:

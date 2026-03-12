@@ -27,6 +27,7 @@ class AgentResponse(TypedDict):
     sources: List[str]
     confidence: float
     verdict: Optional[str]
+    reasoning: Optional[str]  # NEW: Structured reasoning field
 
 
 class DebateState(TypedDict):
@@ -57,8 +58,9 @@ class DebateState(TypedDict):
     con_sources: List[List[str]]
     verification_results: Optional[List]
     pro_verification_rate: Optional[float]
-    con_verification_rate: Optional[float]
-    moderator_reasoning: Optional[str]  # NEW - Moderator's explanation
+    con_verification_rate: float
+    fact_check_result: str  # Added field
+    moderator_reasoning: Optional[str]
     verdict: Optional[str]
     confidence: Optional[float]
 
@@ -178,6 +180,9 @@ class BaseAgent(ABC):
                         sources.append(source)
             
             # Return argument and whatever sources were found (even if empty)
+            if not sources:
+                logger = logging.getLogger(__name__)
+                logger.warning(f"⚠️ No sources found in response from {getattr(self, 'role', 'AGENT')}")
             return argument, sources
         
         else:

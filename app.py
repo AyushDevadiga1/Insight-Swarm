@@ -311,10 +311,15 @@ def render_sidebar():
         Invalidates claim assumptions.<br/>
         Adversarial execution.</p>
         
-        <p style='border-left: 1px solid #333; padding-left: 12px;'>
+        <p style='border-left: 1px solid #333; padding-left: 12px; margin-bottom: 16px;'>
         <strong>03 FactChecker</strong><br/>
         Source verification.<br/>
-        Consensus modeling.</p>
+        Hallucination detection.</p>
+        
+        <p style='border-left: 1px solid #333; padding-left: 12px;'>
+        <strong>04 Moderator</strong><br/>
+        Intelligent consensus.<br/>
+        Fallacy detection.</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -347,7 +352,8 @@ def render_verdict(result):
     verdict_class = {
         'TRUE': 'verdict-true',
         'FALSE': 'verdict-false',
-        'PARTIALLY TRUE': 'verdict-partial'
+        'PARTIALLY TRUE': 'verdict-partial',
+        'INSUFFICIENT EVIDENCE': 'verdict-partial'
     }.get(verdict, 'verdict-partial')
     
     # Escape verdict string to prevent XSS
@@ -360,17 +366,20 @@ def render_verdict(result):
     </div>
     """, unsafe_allow_html=True)
     
-    # NEW: Display Moderator's reasoning
+    # NEW: Display Moderator's reasoning with sanitization and collapsible section
     if moderator_reasoning:
         st.markdown("---")
         st.subheader("🎓 Moderator's Analysis")
         
-        st.markdown(f"""
-        <div class="agent-card">
-        <p><strong>The Moderator reviewed all arguments and evidence to reach this verdict:</strong></p>
-        <p>{moderator_reasoning}</p>
-        </div>
-        """, unsafe_allow_html=True)
+        # Sanitize for markdown rendering
+        escaped_reasoning = html.escape(moderator_reasoning)
+        
+        with st.expander("View Full Evidence-Based Reasoning", expanded=True):
+            st.markdown(f"""
+            <div style="color: #ccc; font-size: 14px; line-height: 1.6;">
+            {escaped_reasoning.replace('\n', '<br>')}
+            </div>
+            """, unsafe_allow_html=True)
 
 
 def render_verification_stats(result):

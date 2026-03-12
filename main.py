@@ -49,6 +49,7 @@ def print_result(result):
         "TRUE": "✅",
         "FALSE": "❌",
         "PARTIALLY TRUE": "⚠️",
+        "INSUFFICIENT EVIDENCE": "🔍",
         "UNVERIFIABLE": "❓",
         "ERROR": "💥"
     }

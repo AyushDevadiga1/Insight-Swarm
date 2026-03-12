@@ -10,7 +10,8 @@ This agent:
 """
 
 import logging
-from typing import Dict, List, Tuple
+import re
+from typing import Tuple, Optional
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
 
@@ -78,7 +79,8 @@ class Moderator(BaseAgent):
                 "argument": response_text,
                 "sources": [],
                 "confidence": confidence,
-                "verdict": verdict
+                "verdict": verdict,
+                "reasoning": reasoning  # Pass structured reasoning
             }
         
         except Exception as e:
@@ -177,75 +179,37 @@ Begin your analysis:"""
     
     def _parse_moderator_response(self, response_text: str) -> Tuple[str, float, str]:
         """
-        Parse Moderator's verdict from LLM response.
-        
-        Expected format:
-        VERDICT: TRUE
-        CONFIDENCE: 0.75
-        
-        REASONING:
-        [explanation]
-        
-        Args:
-            response_text: Raw LLM response
-            
-        Returns:
-            Tuple of (verdict, confidence, reasoning)
+        Parse Moderator's verdict from LLM response using regex for robustness.
         """
-        lines = response_text.strip().split('\n')
-        
         verdict = None
         confidence = 0.5
         reasoning = ""
+
+        # Verdict parsing
+        verdict_match = re.search(r"VERDICT:\s*(TRUE|FALSE|PARTIALLY TRUE|INSUFFICIENT EVIDENCE)", response_text, re.IGNORECASE)
+        if verdict_match:
+            verdict = verdict_match.group(1).upper()
         
-        # Parse verdict
-        for line in lines:
-            if line.startswith("VERDICT:"):
-                verdict_text = line.replace("VERDICT:", "").strip()
-                # Normalize verdict
-                if "TRUE" in verdict_text and "PARTIALLY" not in verdict_text and "FALSE" not in verdict_text:
-                    verdict = "TRUE"
-                elif "FALSE" in verdict_text and "PARTIALLY" not in verdict_text:
-                    verdict = "FALSE"
-                elif "PARTIALLY" in verdict_text or "PARTIAL" in verdict_text:
-                    verdict = "PARTIALLY TRUE"
-                elif "INSUFFICIENT" in verdict_text or "UNCLEAR" in verdict_text:
-                    verdict = "INSUFFICIENT EVIDENCE"
-                break
+        # Confidence parsing
+        conf_match = re.search(r"CONFIDENCE:\s*(0?\.\d+|1\.0|1)", response_text, re.IGNORECASE)
+        if conf_match:
+            try:
+                confidence = float(conf_match.group(1))
+                confidence = max(0.0, min(1.0, confidence))
+            except ValueError:
+                confidence = 0.5
+
+        # Reasoning parsing
+        reason_match = re.search(r"REASONING:\s*(.*)", response_text, re.IGNORECASE | re.DOTALL)
+        if reason_match:
+            reasoning = reason_match.group(1).strip()
         
-        # Parse confidence
-        for line in lines:
-            if line.startswith("CONFIDENCE:"):
-                conf_text = line.replace("CONFIDENCE:", "").strip()
-                try:
-                    confidence = float(conf_text)
-                    # Clamp to valid range
-                    confidence = max(0.0, min(1.0, confidence))
-                except:
-                    confidence = 0.5
-                break
-        
-        # Parse reasoning (everything after "REASONING:")
-        reasoning_started = False
-        reasoning_lines = []
-        
-        for line in lines:
-            if line.startswith("REASONING:"):
-                reasoning_started = True
-                continue
-            
-            if reasoning_started:
-                reasoning_lines.append(line)
-        
-        reasoning = "\n".join(reasoning_lines).strip()
-        
-        # Fallback if parsing failed
-        if verdict is None:
+        if not verdict:
             logger.warning("Failed to parse verdict, defaulting to INSUFFICIENT EVIDENCE")
             verdict = "INSUFFICIENT EVIDENCE"
             confidence = 0.3
-            reasoning = response_text  # Use full response as reasoning
-        
+            reasoning = response_text
+
         return verdict, confidence, reasoning
     
     def _fallback_verdict(self, state: DebateState) -> AgentResponse:
