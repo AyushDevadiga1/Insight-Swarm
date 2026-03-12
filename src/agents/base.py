@@ -26,6 +26,7 @@ class AgentResponse(TypedDict):
     argument: str
     sources: List[str]
     confidence: float
+    verdict: Optional[str]
 
 
 class DebateState(TypedDict):
@@ -57,6 +58,7 @@ class DebateState(TypedDict):
     verification_results: Optional[List]
     pro_verification_rate: Optional[float]
     con_verification_rate: Optional[float]
+    moderator_reasoning: Optional[str]  # NEW - Moderator's explanation
     verdict: Optional[str]
     confidence: Optional[float]
 
@@ -175,10 +177,7 @@ class BaseAgent(ABC):
                     if source:  # Only add non-empty sources
                         sources.append(source)
             
-            # Validate we got at least one source
-            if not sources:
-                raise ValueError("No valid sources found in response")
-            
+            # Return argument and whatever sources were found (even if empty)
             return argument, sources
         
         else:
