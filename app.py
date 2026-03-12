@@ -366,20 +366,29 @@ def render_verdict(result):
     </div>
     """, unsafe_allow_html=True)
     
-    # NEW: Display Moderator's reasoning with sanitization and collapsible section
+    # Moderation Decision Chat style
     if moderator_reasoning:
         st.markdown("---")
-        st.subheader("🎓 Moderator's Analysis")
+        st.markdown("""
+        <div style='display: flex; align-items: center; margin-bottom: 20px;'>
+            <div style='width: 40px; height: 40px; border-radius: 0; border: 1px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: bold; margin-right: 15px;'>
+                M
+            </div>
+            <div>
+                <h3 style='margin: 0; font-size: 14px; letter-spacing: 2px;'>MODERATOR_DECISION_CHAT</h3>
+                <div style='font-size: 10px; color: #888; text-transform: uppercase;'>Evidence-Based Consensus Protocol</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Sanitize for markdown rendering
         escaped_reasoning = html.escape(moderator_reasoning)
         
-        with st.expander("View Full Evidence-Based Reasoning", expanded=True):
-            st.markdown(f"""
-            <div style="color: #ccc; font-size: 14px; line-height: 1.6;">
+        st.markdown(f"""
+        <div class="debate-block" style="border-left: 3px solid #fff; padding-left: 20px; color: #fff;">
             {escaped_reasoning.replace('\n', '<br>')}
-            </div>
-            """, unsafe_allow_html=True)
+        </div>
+        """, unsafe_allow_html=True)
 
 
 def render_verification_stats(result):

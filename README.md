@@ -8,10 +8,10 @@ AI-powered fact-checking using adversarial debate and source verification.
 
 ## 🎯 Features
 
-- **3-Agent Debate System**
-  - ProAgent argues claim is TRUE
-  - ConAgent argues claim is FALSE  
-  - FactChecker verifies all sources
+- **Moderator Decision Chat** (NEW - Day 7/Current)
+  - Intelligent evidence-based consensus
+  - Distinct chat-style reasoning interface
+  - Fallacy and credibility analysis
 
 - **Source Verification** (NEW - Day 3)
   - Validates cited URLs
@@ -163,8 +163,10 @@ Verdict Weighting:
 **Status:** ✅ PRODUCTION READY
 
 ### Completed Features
-- ✅ Multi-agent debate system (3 rounds)
+- ✅ Multi-agent debate system (4 agents)
 - ✅ FactChecker agent with source verification
+- ✅ Moderator agent with decision reasoning
+- ✅ Moderator Decision Chat UI in Streamlit
 - ✅ Fuzzy string matching for content validation
 - ✅ Hallucination detection
 - ✅ Weighted verdict calculation with verification rates
