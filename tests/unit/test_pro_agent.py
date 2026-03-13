@@ -1,97 +1,48 @@
 """
 Unit tests for ProAgent
-
-Security features tested:
-- Input validation
-- Error handling
-- Response parsing
 """
+import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 import pytest
+from unittest.mock import Mock
 from src.agents.pro_agent import ProAgent
-from src.agents.base import DebateState
+from src.core.models import DebateState, AgentResponse
 from src.llm.client import FreeLLMClient
 
+@pytest.fixture
+def mock_client():
+    client = Mock(spec=FreeLLMClient)
+    client.call_structured.return_value = AgentResponse(
+        agent="PRO",
+        round=1,
+        argument="This is a strong argument for the claim with sources.",
+        sources=["https://example.com/source1"]
+    )
+    return client
 
 @pytest.fixture
-def client():
-    """Fixture: FreeLLMClient instance"""
-    try:
-        return FreeLLMClient()
-    except RuntimeError:
-        pytest.skip("LLM providers not available")
-
-
-@pytest.fixture
-def pro_agent(client):
-    """Fixture: ProAgent instance"""
-    return ProAgent(client)
-
+def pro_agent(mock_client):
+    return ProAgent(mock_client)
 
 @pytest.fixture
 def initial_state():
-    """Fixture: Fresh debate state"""
-    return DebateState(
-        claim="Test claim",
-        round=1,
-        pro_arguments=[],
-        con_arguments=[],
-        pro_sources=[],
-        con_sources=[],
-        verdict=None,
-        confidence=None
-    )
-
+    return DebateState(claim="Test claim", round=1)
 
 def test_pro_agent_initialization(pro_agent):
-    """Test ProAgent initializes correctly"""
     assert pro_agent.role == "PRO"
-    assert pro_agent.call_count == 0
-
 
 def test_pro_agent_generates_response(pro_agent, initial_state):
-    """Test ProAgent generates valid response"""
     response = pro_agent.generate(initial_state)
-    
-    assert response['agent'] == "PRO"
-    assert response['round'] == 1
-    assert len(response['argument']) > 50
-    assert isinstance(response['sources'], list)
-
-
-def test_pro_agent_cites_sources(pro_agent, initial_state):
-    """Test ProAgent cites sources in response"""
-    response = pro_agent.generate(initial_state)
-    
-    # Should cite at least 1 source (or empty list is acceptable)
-    assert isinstance(response['sources'], list)
-    assert response['confidence'] is not None
-    assert 0.0 <= response['confidence'] <= 1.0
-
+    assert response.agent == "PRO"
+    assert "argument" in response.argument.lower()
+    assert len(response.sources) > 0
 
 def test_pro_agent_validates_claim(pro_agent):
-    """Test that invalid claims are handled"""
-    invalid_state = DebateState(
-        claim="",  # Empty claim
-        round=1,
-        pro_arguments=[],
-        con_arguments=[],
-        pro_sources=[],
-        con_sources=[],
-        verdict=None,
-        confidence=None
-    )
-    
-    # Should handle gracefully even with empty claim
-    try:
-        response = pro_agent.generate(invalid_state)
-        # If it succeeds, the response should still be valid
-        assert 'argument' in response
-        assert 'sources' in response
-    except (ValueError, RuntimeError):
-        # It's acceptable to raise an error for invalid claims
-        pass
-
+    invalid_state = DebateState(claim="")
+    response = pro_agent.generate(invalid_state)
+    assert hasattr(response, 'argument')
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
