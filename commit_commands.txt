@@ -1,0 +1,66 @@
+# Day 4 Commit Commands
+# Run these commands sequentially to commit all Day 4 changes in a structured way.
+
+# 1. Centralized Data Models
+git add src/core/models.py
+git commit -m "feat: introduce centralized pydantic data models in core/models.py"
+
+# 2. Base Agent Interface
+git add src/agents/base.py
+git commit -m "refactor: update base agent interface to support pydantic models"
+
+# 3. Pro and Con Agents
+git add src/agents/pro_agent.py src/agents/con_agent.py
+git commit -m "refactor: harden pro_agent and con_agent with structured output support"
+
+# 4. Moderator Agent
+git add src/agents/moderator.py
+git commit -m "refactor: implement pydantic-based moderator logic and schema validation"
+
+# 5. FactChecker Agent
+git add src/agents/fact_checker.py
+git commit -m "refactor: satisfy abstract requirements and implement fact_checker response logic"
+
+# 6. Unified Semantic Cache
+git add src/orchestration/cache.py
+git commit -m "feat: implement unified semantic cache with sentence-transformers"
+
+# 7. LLM Client Hardening
+git add src/llm/client.py
+git commit -m "refactor: modernize llm client with tenacity retries and structured parsing"
+
+# 8. Debate Orchestrator
+git add src/orchestration/debate.py
+git commit -m "refactor: update debate orchestrator for pydantic state management"
+
+# 9. Proxy/Con Agent Tests
+git add tests/unit/test_pro_agent.py tests/unit/test_con_agent.py
+git commit -m "test: modernize pro and con agent unit tests with mocks"
+
+# 10. Moderator Tests
+git add tests/unit/test_moderator.py
+git commit -m "test: update moderator unit tests for pydantic attribute access"
+
+# 11. FactChecker Tests
+git add tests/unit/test_fact_checker.py
+git commit -m "test: rewrite fact_checker tests for simplified verification logic"
+
+# 12. Debate Integration Tests
+git add tests/unit/test_debate.py
+git commit -m "test: align debate integration tests with hardened llm client mocks"
+
+# 13. Client and Baseline Tests
+git add tests/unit/test_llm_client.py src/utils/input_validator.py src/utils/feedback_db.py tests/integration/test_current_system_baseline.py tests/unit/__init__.py
+git commit -m "test: verify llm client validation and include structural baseline tests"
+
+# 14. UI Alignment
+git add app.py
+git commit -m "fix: align app.py with the new centralized data model architecture"
+
+# 15. Documentation and Task Artifacts
+git add task.md walkthrough.md implementation_plan.md
+git commit -m "docs: update task and walkthrough artifacts for day 4 progress"
+
+# 16. Progress Reports
+git add progress/D4/D4_Comparison_Report.md
+git commit -m "docs: add day 4 comparison report and architectural evolution summary"

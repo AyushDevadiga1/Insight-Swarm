@@ -9,12 +9,51 @@ Then enter claims interactively to get verdicts.
 """
 
 import sys
+import logging
 from pathlib import Path
+from typing import Tuple
 
 # Add parent directory to path for imports when running directly
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Fix #35: Configure logging so all modules can output logs
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('insightswarm.log', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
+
 from src.orchestration.debate import DebateOrchestrator
+
+
+# Fix #37: Claim input validation with injection detection
+def validate_claim(claim: str) -> Tuple[bool, str]:
+    """Validates a user-submitted claim for safety and quality."""
+    if not claim or not claim.strip():
+        return False, "Claim cannot be empty."
+    
+    if len(claim) > 500:
+        return False, "Claim too long (max 500 characters)."
+    
+    if len(claim.split()) < 3:
+        return False, "Claim too short (minimum 3 words)."
+    
+    # Prompt injection patterns
+    injection_patterns = [
+        "ignore previous instructions",
+        "ignore all previous",
+        "disregard all previous",
+        "system:",
+    ]
+    for pattern in injection_patterns:
+        if pattern in claim.lower():
+            return False, "Prompt injection detected."
+    
+    return True, ""
 
 
 def print_header():
@@ -133,13 +172,10 @@ def main():
             print("\n👋 Goodbye!")
             break
         
-        # Validate input
-        if not claim:
-            print("⚠️  Please enter a claim.\n")
-            continue
-        
-        if len(claim) < 10:
-            print("⚠️  Claim too short. Please enter at least 10 characters.\n")
+        # Fix #37: Use full validation before running debate
+        valid, error_msg = validate_claim(claim)
+        if not valid:
+            print(f"⚠️  {error_msg}\n")
             continue
         
         # Run debate

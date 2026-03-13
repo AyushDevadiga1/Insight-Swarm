@@ -67,7 +67,7 @@ class SourceVerifier:
     # Configuration constants
     SIMILARITY_THRESHOLD = 30  # Minimum similarity score (%) for content match
     
-    def __init__(self, timeout: int = 10, similarity_threshold: int = None):
+    def __init__(self, timeout: Optional[int] = 10, similarity_threshold: Optional[int] = None):
         """
         Initialize verifier
         
@@ -75,7 +75,7 @@ class SourceVerifier:
             timeout: HTTP request timeout in seconds
             similarity_threshold: Minimum similarity score (%) for content match. Defaults to class constant.
         """
-        self.timeout = timeout
+        self.timeout = timeout if timeout is not None else 10
         self.similarity_threshold = similarity_threshold if similarity_threshold is not None else self.SIMILARITY_THRESHOLD
         self.session = requests.Session()
         self.session.headers.update({

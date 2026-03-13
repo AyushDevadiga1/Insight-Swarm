@@ -5,6 +5,18 @@ Centralized configuration for magic numbers and settings used throughout the cod
 This makes it easier to tune performance and behavior without editing source code.
 """
 
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('insightswarm.log', encoding='utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
+
 # ============================================
 # AGENT CONFIGURATION
 # ============================================
