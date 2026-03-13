@@ -7,8 +7,11 @@ Public demo of multi-agent fact-checking system with source verification
 import streamlit as st
 import time
 import html
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from src.orchestration.debate import DebateOrchestrator
+from src.orchestration.cache import record_feedback
+from main import validate_claim
 
 # Page configuration
 st.set_page_config(
@@ -286,6 +289,10 @@ def init_session_state():
     """Initialize session state variables"""
     if 'debate_run' not in st.session_state:
         st.session_state.debate_run = False
+    if 'thread_id' not in st.session_state:
+        st.session_state.thread_id = str(uuid.uuid4())
+    if 'moderator_chat' not in st.session_state:
+        st.session_state.moderator_chat = []
     if 'result' not in st.session_state:
         st.session_state.result = None
     if 'orchestrator' not in st.session_state:
@@ -368,6 +375,8 @@ def render_verdict(result):
     """Render verdict with styled box"""
     verdict = result.get('verdict', 'UNKNOWN')
     confidence = result.get('confidence', 0.0)
+    if confidence is None:
+        confidence = 0.0
     moderator_reasoning = result.get('moderator_reasoning', '')
     
     # Determine verdict class
@@ -451,15 +460,15 @@ def render_metrics(result):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        cred = metrics.get('credibility', 0.0)
+        cred = metrics.get('credibility', 0.0) or 0.0
         st.metric("Evidence Credibility", f"{cred:.0%}", help="Strength of verified sources")
     
     with col2:
-        fallacies = metrics.get('fallacies', 0)
+        fallacies = metrics.get('fallacies', 0) or 0
         st.metric("Fallacy Count", fallacies, delta=f"-{fallacies}" if fallacies > 0 else None, delta_color="inverse")
     
     with col3:
-        balance = metrics.get('balance', 0.5)
+        balance = metrics.get('balance', 0.5) or 0.5
         st.metric("Rebuttal Balance", f"{balance:.1f}", help="Semantic balance between Pro and Con arguments")
 
 
@@ -467,9 +476,9 @@ def render_verification_stats(result):
     """Render source verification statistics"""
     
     # Get verification results
-    verification_results = result.get('verification_results', [])
-    pro_verification = result.get('pro_verification_rate', 0.0)
-    con_verification = result.get('con_verification_rate', 0.0)
+    verification_results = result.get('verification_results', []) or []
+    pro_verification = result.get('pro_verification_rate', 0.0) or 0.0
+    con_verification = result.get('con_verification_rate', 0.0) or 0.0
     
     if not verification_results:
         return
@@ -560,6 +569,12 @@ def render_debate_arguments(result):
                             st.markdown(f"{j}. {escaped_source}")
 
 
+@st.cache_resource(show_spinner=False)
+def get_orchestrator():
+    """Cache the LangGraph compilation so it doesn't recompile on every interaction"""
+    return DebateOrchestrator()
+
+
 def main():
     """Main application logic"""
     
@@ -589,6 +604,7 @@ def main():
             st.session_state.debate_run = False
             st.session_state.result = None
             st.session_state.example_claim = ''
+            st.session_state.thread_id = str(uuid.uuid4())  # Reset thread isolation
             st.rerun()
     
     # Process claim
@@ -599,95 +615,86 @@ def main():
             st.error("Please enter a claim with at least 10 characters.")
             return
         
-        # Initialize orchestrator
-        if st.session_state.orchestrator is None:
-            with st.spinner("Initializing debate system..."):
-                try:
-                    st.session_state.orchestrator = DebateOrchestrator()
-                except Exception as e:
-                    st.error(f"Failed to initialize: {e}")
-                    return
+        # Fix #37: Use shared validate_claim for injection/length/quality checks
+        valid, error_msg = validate_claim(claim_input)
+        if not valid:
+            st.error(f"Invalid claim: {error_msg}")
+            return
+        
+        # Initialize/Retrieve orchestrator
+        with st.spinner("Initializing debate system..."):
+            try:
+                orchestrator = get_orchestrator()
+                st.session_state.orchestrator = orchestrator
+            except Exception as e:
+                st.error(f"Failed to initialize: {e}")
+                return
         
         # Run debate
         st.markdown("---")
         safe_markdown("<h3 style='font-size:18px;'>ANALYZING</h3>")
         
-        # Progress indicators
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
         try:
-            # Check if task already running (FIX 13)
+            # Check if task already running
             if st.session_state.background_task is not None and not st.session_state.background_task.done():
                 st.warning("Debate already in progress. Please wait for it to complete...")
-            else:
-                # Start background task
-                st.session_state.background_task = st.session_state.task_executor.submit(
-                    st.session_state.orchestrator.run,
-                    claim_input
-                )
-                status_text.text("Connecting nodes...")
-                progress_bar.progress(10)
-            
-            # Poll background task for completion
-            task = st.session_state.background_task
-            poll_interval = 0.5  # Check task every 500ms
-            max_wait_time = 120  # Max 2 minutes timeout
-            elapsed_time = 0
-            progress = 10
-            
-            while not task.done() and elapsed_time < max_wait_time:
-                elapsed_time += poll_interval
-                
-                # Update progress gradually (10% to 90%)
-                if elapsed_time < max_wait_time * 0.8:
-                    progress = min(90, 10 + int(80 * (elapsed_time / (max_wait_time * 0.8))))
-                else:
-                    progress = 90
-                
-                progress_bar.progress(progress)
-                status_text.text(f"Processing... {elapsed_time:.1f}s")
-                time.sleep(poll_interval)
-            
-            # Task completed or timed out
-            if task.done():
-                result = task.result()  # Retrieve the result from background task
-                
-                progress_bar.progress(75)
-                status_text.text("🔍 FactChecker verifying sources...")
-                time.sleep(0.5)
-                
-                progress_bar.progress(85)
-                status_text.text("🎓 Moderator analyzing debate quality...")  # NEW
-                time.sleep(0.5)
-                
-                progress_bar.progress(95)
-                status_text.text("⚖️ Calculating final verdict...")
-                time.sleep(0.2)
-                
-                progress_bar.progress(100)
-                status_text.text("Complete.")
-                time.sleep(0.3)
-                
-                # Store result
-                st.session_state.result = result
-                st.session_state.debate_run = True
-                st.session_state.background_task = None  # Reset for next run
-            else:
-                st.error(f"Analysis timeout after {max_wait_time} seconds")
-                st.session_state.background_task = None
-                progress_bar.empty()
-                status_text.empty()
                 return
             
-            # Clear progress indicators
-            progress_bar.empty()
-            status_text.empty()
+            # Using st.status for a live, streaming UX instead of a frozen while loop
+            with st.status("Initializing Debate Nodes...", expanded=True) as status:
+                st.write("Configuring adversarial agents...")
+                
+                # Start background task (in real life, orchestrator needs streaming yields, 
+                # but for now we block gracefully inside the status box so the UI isn't completely frozen)
+                st.session_state.background_task = st.session_state.task_executor.submit(
+                    st.session_state.orchestrator.run,
+                    claim_input,
+                    st.session_state.thread_id # Pass thread isolation via kwargs supported later
+                )
+                
+                status.update(label="Running 3-Round Debate...", state="running")
+                st.write("Debating...")
+                
+                # Poll gracefully
+                task = st.session_state.background_task
+                poll_interval = 0.5
+                max_wait_time = 120
+                elapsed_time = 0
+                
+                while not task.done() and elapsed_time < max_wait_time:
+                    time.sleep(poll_interval)
+                    elapsed_time += poll_interval
+                    
+                    if elapsed_time > 15 and elapsed_time < 16:
+                        st.write("FactChecker verifying cited sources...")
+                    elif elapsed_time > 30 and elapsed_time < 31:
+                        st.write("Moderator analyzing logical fallacies...")
+                
+                if task.done():
+                    result = task.result()
+                    
+                    if result.get('is_cached'):
+                        status.update(label="Loaded from Cache", state="complete", expanded=False)
+                        st.success("Lightning Fast: Result loaded from Semantic Cache.")
+                    else:
+                        status.update(label="Debate Complete", state="complete", expanded=False)
+                    
+                    st.session_state.result = result
+                    
+                    # Fix #29: Cap moderator chat memory leak if this is storing anything
+                    if len(st.session_state.moderator_chat) > 20:
+                        st.session_state.moderator_chat = st.session_state.moderator_chat[-10:]
+                        
+                    st.session_state.debate_run = True
+                    st.session_state.background_task = None
+                else:
+                    status.update(label="Analysis Timeout", state="error")
+                    st.error(f"Analysis timeout after {max_wait_time} seconds")
+                    st.session_state.background_task = None
+                    return
             
         except Exception as e:
             st.error(f"Analysis failed: {e}")
-            progress_bar.empty()
-            status_text.empty()
             st.session_state.background_task = None
             return
     
@@ -710,6 +717,24 @@ def main():
         
         # Render debate transcript
         render_debate_arguments(result)
+        
+        # Provide User Feedback loop
+        st.markdown("---")
+        safe_markdown("<h3>FEEDBACK_PROTOCOL</h3>")
+        fcol1, fcol2, fcol3 = st.columns([1,1,4])
+        
+        # We need to capture the current claim and verdict for feedback
+        current_claim = st.session_state.get('result', {}).get('claim', 'Unknown Claim')
+        current_verdict = st.session_state.get('result', {}).get('verdict', 'UNKNOWN')
+        
+        with fcol1:
+            if st.button("👍 ACCURATE", key="feedback_up", help="Mark this verdict as correct"):
+                record_feedback(current_claim, current_verdict, "UP")
+                st.success("Feedback recorded. Thank you.")
+        with fcol2:
+            if st.button("👎 INCORRECT", key="feedback_down", help="Mark this verdict as flawed"):
+                record_feedback(current_claim, current_verdict, "DOWN")
+                st.success("Feedback recorded for human review.")
         
         # Footer
         safe_markdown("""
