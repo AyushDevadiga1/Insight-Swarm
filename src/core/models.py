@@ -1,0 +1,74 @@
+    
+        
+from pydantic import BaseModel, Field, validator
+from typing import List, Dict, Any, Optional, Literal
+from datetime import datetime
+
+class SourceVerification(BaseModel):
+    """Result of verifying a single source."""
+    url: str
+    status: Literal["VERIFIED", "NOT_FOUND", "INVALID_URL", "TIMEOUT", "CONTENT_MISMATCH", "ERROR"]
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    content_preview: Optional[str] = None
+    error: Optional[str] = None
+    agent_source: Optional[Literal["PRO", "CON"]] = None
+    matched_claim: Optional[str] = None
+    similarity_score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.dict()
+
+class AgentResponse(BaseModel):
+    """Structured response from a Pro or Con agent."""
+    agent: Literal["PRO", "CON", "MODERATOR", "FACT_CHECKER"]
+    round: int
+    argument: str
+    sources: List[str]
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    verdict: Optional[str] = None
+    reasoning: Optional[str] = None
+    metrics: Optional[Dict[str, Any]] = None
+
+class ModeratorVerdict(BaseModel):
+    """Structured verdict from the Moderator agent."""
+    verdict: Literal["TRUE", "FALSE", "PARTIALLY TRUE", "INSUFFICIENT EVIDENCE", "CONSENSUS_SETTLED", "ERROR"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str
+    metrics: Optional[Dict[str, float]] = None
+
+class DebateState(BaseModel):
+    """Complete state of the debate workflow."""
+    claim: str
+    round: int = 1
+    pro_arguments: List[str] = Field(default_factory=list)
+    con_arguments: List[str] = Field(default_factory=list)
+    pro_sources: List[List[str]] = Field(default_factory=list)
+    con_sources: List[List[str]] = Field(default_factory=list)
+    verdict: Optional[str] = None
+    confidence: Optional[float] = None
+    verification_results: Optional[List[Dict[str, Any]]] = None
+    pro_verification_rate: Optional[float] = None
+    con_verification_rate: Optional[float] = None
+    moderator_reasoning: Optional[str] = None
+    metrics: Optional[Dict[str, Any]] = None
+    retry_count: int = 0
+    is_cached: bool = False
+    num_rounds: int = 3
+    pro_evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    con_evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    
+    # Compatibility with TypedDict-style access during migration
+    def __getitem__(self, item):
+        return getattr(self, item)
+    
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+        
+    def get(self, key, default=None):
+        val = getattr(self, key, default)
+        if val is None:
+            return default
+        return val
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.dict()
