@@ -1,64 +1,44 @@
-"""
-FreeLLMClient - Manages LLM API calls with automatic fallback
-
-This client tries Groq first (fast, 14,400 req/day), then falls back
-to Gemini (1,500 req/day) if Groq fails or hits rate limits.
-
-SECURITY FEATURES:
-- Input validation & sanitization
-- Response validation  
-- Rate limiting (5 calls/min per provider)
-- Timeout protection (1-300 seconds)
-- Safe error handling (no key exposure)
-- Thread-safe operations
-"""
-
+from pydantic import BaseModel
+from typing import Type, Any
 import os
 import threading
 import logging
 import time
-from typing import Optional
 from dotenv import load_dotenv
+try:
+    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type  # type: ignore
+    HAS_TENACITY = True
+except ImportError:
+    HAS_TENACITY = False
+    def retry(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    def stop_after_attempt(*args: Any, **kwargs: Any) -> Any: return None
+    def wait_exponential(*args: Any, **kwargs: Any) -> Any: return None
+    def retry_if_exception_type(*args: Any, **kwargs: Any) -> Any: return None
 
-# Load environment variables
 load_dotenv()
-
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-
 class FreeLLMClient:
-    """
-    Unified client for multiple LLM providers with automatic fallback.
-    
-    Features:
-    - Automatic fallback from Groq to Gemini
-    - Rate limiting and timeout protection
-    - Comprehensive error handling
-    - Thread-safe call tracking
-    
-    Usage:
-        client = FreeLLMClient()
-        response = client.call("What is 2+2?")
-        print(response)  # "4"
-    """
-    
-    # Rate limiting: configurable calls per minute per provider
-    # Default 60 matches free tier limits for Groq (14,400/day ~ 10/min) and Gemini (1,500/day ~ 1/min)
-    # Override via RATE_LIMIT_PER_MINUTE environment variable for cost control
     MAX_CALLS_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
-    
     def __init__(self):
-        """Initialize both Groq and Gemini clients"""
-        
-        self.groq_error = None
-        self.gemini_error = None
-        
-        # Groq setup
+        self.groq_client = None
+        self.genai_client = None
+        self.groq_available = False
+        self.gemini_available = False
+        self.groq_calls = 0
+        self.gemini_calls = 0
+        self.groq_last_call_times = []
+        self.gemini_last_call_times = []
+        self._counter_lock = threading.Lock()
+        self.groq_error: Optional[str] = None
+        self.gemini_error: Optional[str] = None
         try:
             from groq import Groq
             groq_key = os.getenv("GROQ_API_KEY")
@@ -69,7 +49,6 @@ class FreeLLMClient:
                 raise ValueError("GROQ_API_KEY appears invalid (too short, expected >=30 characters)")
             if not groq_key.startswith("gsk_"):
                 raise ValueError("GROQ_API_KEY format invalid (expected to start with 'gsk_')")
-            
             self.groq_client = Groq(api_key=groq_key)
             self.groq_available = True
             logger.info("✅ Groq client initialized")
@@ -77,25 +56,19 @@ class FreeLLMClient:
             self.groq_available = False
             self.groq_error = str(e)
             logger.warning(f"⚠️  Groq initialization failed: {type(e).__name__}")
-        
-        # Gemini setup
         try:
-            import google.generativeai as genai
+            import google.generativeai as genai  # type: ignore
             gemini_key = os.getenv("GEMINI_API_KEY")
             if not gemini_key:
                 raise ValueError("GEMINI_API_KEY not set in environment")
             gemini_key = gemini_key.strip()
             if len(gemini_key) < 30:
                 raise ValueError("GEMINI_API_KEY appears invalid (too short, expected >=30 characters)")
-            
-            # Configure Gemini API
-            genai.configure(api_key=gemini_key)
-            self.genai_client = genai.GenerativeModel('gemini-2.0-flash')
+            genai.configure(api_key=gemini_key)  # type: ignore
+            self.genai_client = genai.GenerativeModel('gemini-2.0-flash')  # type: ignore
             self.gemini_available = True
             logger.info("✅ Gemini client initialized")
         except (ImportError, AttributeError) as e:
-            # Known issue: google-genai has compatibility issues with Python 3.13 and pydantic
-            # Gracefully fall back to Groq-only
             self.gemini_available = False
             self.gemini_error = f"google.generativeai initialization failed: {type(e).__name__} - likely version compatibility issue"
             logger.warning(f"⚠️  Gemini initialization failed: {type(e).__name__} (will use Groq only)")
@@ -103,7 +76,66 @@ class FreeLLMClient:
             self.gemini_available = False
             self.gemini_error = str(e)
             logger.warning(f"⚠️  Gemini initialization failed: {type(e).__name__}")
+        if not self.groq_available and not self.gemini_available:
+            logger.error("❌ No LLM providers available")
+            raise RuntimeError("No LLM providers available. Check your API keys in .env file")
+
+    def call_structured(
+        self,
+        prompt: str,
+        output_schema: Type[BaseModel],
+        temperature: float = 0.7,
+        max_tokens: int = 2000,
+        max_retries: int = 2
+    ) -> Any:
+        """
+        Calls LLM with mandatory JSON output that is parsed into a Pydantic model.
+        Falls back between providers.
+        """
+        json_prompt = f"{prompt}\n\nIMPORTANT: You MUST return a valid JSON object matching this schema:\n{output_schema.schema_json(indent=2)}"
         
+        last_error = None
+        
+        # Try Groq first
+        if self.groq_available:
+            for attempt in range(max_retries + 1):
+                try:
+                    response = self.groq_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": json_prompt}],
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        response_format={"type": "json_object"}
+                    )
+                    content = response.choices[0].message.content or "{}"
+                    return output_schema.parse_raw(content)
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"Groq structured call failed (attempt {attempt+1}): {e}")
+                    time.sleep(1)
+        
+        # Fallback to Gemini
+        if self.gemini_available:
+            for attempt in range(max_retries + 1):
+                try:
+                    # Gemini doesn't have a rigid 'json_object' mode in the same way, but 2.0-flash is great at it
+                    response = self.genai_client.generate_content(
+                        json_prompt,
+                        generation_config={
+                            "temperature": temperature,
+                            "max_output_tokens": max_tokens,
+                            "response_mime_type": "application/json"
+                        }
+                    )
+                    content = response.text or "{}"
+                    return output_schema.parse_raw(content)
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"Gemini structured call failed (attempt {attempt+1}): {e}")
+                    time.sleep(1)
+                    
+        logger.error(f"All structured LLM calls failed. Last error: {last_error}")
+        raise RuntimeError(f"Failed to get structured output from LLM: {last_error}")
         # Track usage with thread-safe counter lock
         self.groq_calls = 0
         self.gemini_calls = 0
@@ -130,7 +162,9 @@ class FreeLLMClient:
         one_minute_ago = now - 60
         
         # Filter and update list to keep only recent calls (thread-safe replacement)
-        call_times[:] = [t for t in call_times if t > one_minute_ago]
+        recent = [t for t in call_times if t > one_minute_ago]
+        call_times.clear()
+        call_times.extend(recent)
         
         recent_calls = len(call_times)
         
@@ -178,13 +212,13 @@ class FreeLLMClient:
         if len(response.strip()) == 0:
             raise ValueError("LLM returned empty response")
     
-    def call(
-        self, 
-        prompt: str, 
-        temperature: float = 0.7,
-        max_tokens: int = 1000,
-        timeout: int = 30
-    ) -> str:
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=retry_if_exception_type((Exception,)),
+        reraise=True
+    )
+    def call(self, prompt: str, temperature: float = 0.7, max_tokens: int = 1000, timeout: int = 30) -> str:
         """
         Send prompt to LLM and get response.
         Tries Groq first, falls back to Gemini if Groq fails.
@@ -226,25 +260,24 @@ class FreeLLMClient:
                         rate_limit_reached = True
                     else:
                         rate_limit_reached = False
-                
                 if rate_limit_reached:
-                    logger.info("   Groq rate limit reached, trying Gemini...")
+                    logger.info("   Groq rate limit reached, sleeping 5s before Gemini fallback...")
+                    time.sleep(5)
                 else:
+                    if self.groq_client is None:
+                        raise RuntimeError("Groq client not initialized")
                     response = self._call_groq(prompt, temperature, max_tokens, timeout)
                     self._validate_response(response)
-                    
                     with self._counter_lock:
                         self.groq_calls += 1
                         self.groq_last_call_times.append(time.time())
                         call_count = self.groq_calls
-                    
                     logger.info(f"✅ Groq call #{call_count} successful")
                     return response
-            
             except Exception as e:
                 groq_error = str(e)
                 logger.warning(f"⚠️  Groq failed: {type(e).__name__}")
-                logger.debug(f"   Error details: {groq_error[:100]}")
+                logger.debug(f"   Error details: {groq_error[:100]}")  # type: ignore
                 logger.info("   Attempting Gemini fallback...")
         
         # Fallback to Gemini
@@ -255,25 +288,23 @@ class FreeLLMClient:
                         rate_limit_reached = True
                     else:
                         rate_limit_reached = False
-                
                 if rate_limit_reached:
                     logger.warning("❌ Gemini rate limit also reached")
                 else:
+                    if self.genai_client is None:
+                        raise RuntimeError("Gemini client not initialized")
                     response = self._call_gemini(prompt, temperature, max_tokens, timeout)
                     self._validate_response(response)
-                    
                     with self._counter_lock:
                         self.gemini_calls += 1
                         self.gemini_last_call_times.append(time.time())
                         call_count = self.gemini_calls
-                    
                     logger.info(f"✅ Gemini fallback call #{call_count} successful")
                     return response
-            
             except Exception as e:
                 gemini_error = str(e)
                 logger.error(f"❌ Gemini also failed: {type(e).__name__}")
-                logger.debug(f"   Error details: {gemini_error[:100]}")
+                logger.debug(f"   Error details: {gemini_error[:100]}")  # type: ignore
         
         # Both providers failed
         error_msg = "All LLM providers failed. Check your API keys and network connection."
@@ -301,7 +332,7 @@ class FreeLLMClient:
         """
         try:
             response = self.groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
+                model="llama-3-8b-8192",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -310,7 +341,7 @@ class FreeLLMClient:
             
             if not response.choices:
                 raise ValueError("Groq returned empty response")
-            return response.choices[0].message.content
+            return response.choices[0].message.content or ""
         
         except Exception as e:
             logger.debug(f"Groq API error: {type(e).__name__}")
