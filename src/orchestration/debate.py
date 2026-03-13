@@ -1,448 +1,190 @@
 """
-DebateOrchestrator - Coordinates multi-round debate using LangGraph
-
-Manages 3-round debate between ProAgent and ConAgent:
-- Round 1: Both agents make initial arguments
-- Round 2: Both agents rebut each other
-- Round 3: Final synthesis
-- Verdict: Calculate based on all arguments
+DebateOrchestrator - Coordinates multi-round debate using LangGraph and Pydantic models.
 """
-
 import sys
 import logging
 from pathlib import Path
-from typing import Literal, Dict, Any
-from langgraph.graph import StateGraph, END
+from typing import Dict, List, Any, Optional, cast, Literal
+from langgraph.graph import StateGraph, START, END
 
-# Add parent directories to path for imports when running directly
+# Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.agents.base import DebateState
+from src.core.models import DebateState, AgentResponse
 from src.agents.pro_agent import ProAgent
 from src.agents.con_agent import ConAgent
 from src.agents.fact_checker import FactChecker
 from src.agents.moderator import Moderator
+from src.orchestration.cache import get_cached_verdict, set_cached_verdict
 from src.llm.client import FreeLLMClient
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 class DebateOrchestrator:
     """
-    Orchestrates multi-round debate between ProAgent and ConAgent.
-    
-    Uses LangGraph state machine to coordinate agent turns and
-    manage debate flow.
+    Orchestrates multi-round debate using LangGraph.
     """
     
     def __init__(self):
-        """Initialize orchestrator with agents and workflow"""
-        
-        # Initialize LLM client (shared by all agents)
         self.client = FreeLLMClient()
-        
-        # Initialize agents
         self.pro_agent = ProAgent(self.client)
         self.con_agent = ConAgent(self.client)
         self.fact_checker = FactChecker(self.client)
-        self.moderator = Moderator(self.client)  # NEW
-        
-        # Build workflow
-        self.workflow = self._build_workflow()
-        
-        logger.info("DebateOrchestrator initialized with 4 agents")
+        self.moderator = Moderator(self.client)
+        self.graph = self._build_graph()
     
-    def _build_workflow(self) -> StateGraph:
-        """
-        Build LangGraph state machine for debate flow.
-        
-        Flow:
-        START → ProAgent → ConAgent → (check rounds) → 
-                ↑__________________|
-                                   ↓
-                          FactChecker → Verdict → END
-        
-        Returns:
-            Compiled LangGraph workflow
-        """
-        
-        # Create state graph
+    def _build_graph(self) -> Any:
+        # We use the Pydantic model as the state schema
+        # LangGraph works with Pydantic models by using their field annotations
         workflow = StateGraph(DebateState)
         
-        # Add nodes (each is a function that processes state)
         workflow.add_node("pro_agent", self._pro_agent_node)
         workflow.add_node("con_agent", self._con_agent_node)
         workflow.add_node("fact_checker", self._fact_checker_node)
         workflow.add_node("moderator", self._moderator_node)
         workflow.add_node("verdict", self._verdict_node)
-        workflow.add_node("revision", self._retry_revision_node)  # NEW: Revision loop
+        workflow.add_node("revision", self._retry_revision_node)
         
-        # Set entry point
         workflow.set_entry_point("pro_agent")
-        
-        # Pro → Con (always)
         workflow.add_edge("pro_agent", "con_agent")
         
-        # Con → Check if should continue or end
         workflow.add_conditional_edges(
             "con_agent",
             self._should_continue,
-            {
-                "continue": "pro_agent",  # Loop back for another round
-                "end": "fact_checker"      # Go to fact checker after debate ends
-            }
+            {"continue": "pro_agent", "end": "fact_checker"}
         )
         
-        # FactChecker → Decide whether to Moderator or Revision
         workflow.add_conditional_edges(
             "fact_checker",
             self._should_retry,
-            {
-                "retry": "revision",
-                "proceed": "moderator"
-            }
+            {"retry": "revision", "proceed": "moderator"}
         )
         
-        # Revision → Moderator (Revision always leads to final moderation)
         workflow.add_edge("revision", "moderator")
-        
-        # Moderator → Verdict
         workflow.add_edge("moderator", "verdict")
-        
-        # Verdict → END
         workflow.add_edge("verdict", END)
         
         return workflow.compile()
     
     def _pro_agent_node(self, state: DebateState) -> DebateState:
-        """
-        Execute ProAgent turn.
-        
-        Args:
-            state: Current debate state
-            
-        Returns:
-            Updated state with ProAgent's response added
-        """
-        logger.info(f"ProAgent turn - Round {state['round']}")
-        
+        logger.info(f"ProAgent turn - Round {state.round}")
         try:
-            # Generate response
             response = self.pro_agent.generate(state)
-            
-            # Update state
-            state['pro_arguments'].append(response['argument'])
-            state['pro_sources'].append(response['sources'])
-            
-            logger.info(f"ProAgent completed - {len(response['argument'])} chars, {len(response['sources'])} sources")
-            
+            state.pro_arguments.append(response.argument)
+            state.pro_sources.append(response.sources)
+            return state
         except Exception as e:
-            logger.error(f"❌ ProAgent failed: {type(e).__name__}: {str(e)[:100]}")
-            # Raise to let orchestrator handle recovery instead of polluting state
-            raise RuntimeError(f"ProAgent generation failed") from e
-        
-        return state
+            logger.error(f"ProAgent failed: {e}")
+            raise
     
     def _con_agent_node(self, state: DebateState) -> DebateState:
-        """
-        Execute ConAgent turn.
-        
-        Args:
-            state: Current debate state
-            
-        Returns:
-            Updated state with ConAgent's response added
-        """
-        logger.info(f"ConAgent turn - Round {state['round']}")
-        
+        logger.info(f"ConAgent turn - Round {state.round}")
         try:
-            # Generate response
             response = self.con_agent.generate(state)
-            
-            # Update state
-            state['con_arguments'].append(response['argument'])
-            state['con_sources'].append(response['sources'])
-            
-            # Increment round counter (after both agents have gone)
-            # FIX 5: Only increment on success
-            state['round'] += 1
-            
-            logger.info(f"ConAgent completed - {len(response['argument'])} chars, {len(response['sources'])} sources")
-            
+            state.con_arguments.append(response.argument)
+            state.con_sources.append(response.sources)
+            state.round += 1
+            return state
         except Exception as e:
-            logger.error(f"❌ ConAgent failed: {type(e).__name__}: {str(e)[:100]}")
-            # FIX 5: Only increment round counter on successful agent completion
-            # Before it was: state['round'] += 1 (WRONG)
-            raise RuntimeError(f"ConAgent generation failed") from e
-        
-        return state
+            logger.error(f"ConAgent failed: {e}")
+            raise
     
     def _should_continue(self, state: DebateState) -> Literal["continue", "end"]:
-        """
-        Decide whether to continue debate or move to verdict.
-        """
-        if state['round'] >= 3:
-            logger.info("Debate core rounds complete - moving to fact check")
+        if state.round > state.num_rounds:
             return "end"
-        else:
-            logger.info(f"Continuing to round {state['round']}")
-            return "continue"
+        return "continue"
 
     def _should_retry(self, state: DebateState) -> Literal["retry", "proceed"]:
-        """
-        Logic for Verify-and-Retry roadmap item. 
-        Triggers if verification rate is low (< 0.3) and we haven't retried yet.
-        """
-        pro_rate = state.get('pro_verification_rate', 0.0)
-        con_rate = state.get('con_verification_rate', 0.0)
+        # Check for technical errors in the last round arguments
+        # If we hit quota or 400 errors, don't waste more API calls in a revision loop
+        last_pro = state.pro_arguments[-1] if state.pro_arguments else ""
+        last_con = state.con_arguments[-1] if state.con_arguments else ""
         
-        # Threshold for retry: if either side has poor verification and we have retries left
-        if (pro_rate < 0.3 or con_rate < 0.3) and state.get('retry_count', 0) < 1:
-            logger.warning(f"⚠️ Low verification detected (PRO: {pro_rate:.0%}, CON: {con_rate:.0%}). Triggering REVISION loop.")
+        error_keywords = ["Technical error", "Quota exceeded", "429", "model_decommissioned"]
+        if any(kw in last_pro or kw in last_con for kw in error_keywords):
+            logger.warning("Technical failure detected in debate rounds. Short-circuiting revision loop.")
+            return "proceed"
+            
+        pro_rate = state.pro_verification_rate or 0.0
+        con_rate = state.con_verification_rate or 0.0
+        if (pro_rate < 0.3 or con_rate < 0.3) and state.retry_count < 1:
             return "retry"
-        
         return "proceed"
 
     def _retry_revision_node(self, state: DebateState) -> DebateState:
-        """
-        Revision node for Verify-and-Retry loop.
-        Asks both agents to revise their arguments based on fact-check failures.
-        """
-        logger.info("Revision turn - Both agents correcting based on FactChecker feedback")
-        state['retry_count'] += 1
-        
-        try:
-            # Simple revision logic: run one more constrained turn for both
-            # In a full implementation, we'd pass verification_results into prompts
-            state = self._pro_agent_node(state)
-            state = self._con_agent_node(state)
-            # Re-run fact check for the revisions (optional, here we proceed to moderator)
-        except Exception as e:
-            logger.error(f"Revision failed: {e}")
-            
+        logger.info("Revision loop triggered")
+        state.retry_count += 1
+        # In a real revision we would pass feedback, for now just rerun the agents
+        state = self._pro_agent_node(state)
+        state = self._con_agent_node(state)
         return state
     
     def _fact_checker_node(self, state: DebateState) -> DebateState:
-        """
-        Execute FactChecker to verify all sources cited during debate.
-        
-        Args:
-            state: Current debate state with all arguments and sources
-            
-        Returns:
-            Updated state with verification results
-        """
-        logger.info("FactChecker: Starting source verification")
-        
+        logger.info("FactChecker verifying sources...")
         try:
-            # Generate verification response
             response = self.fact_checker.generate(state)
-            
-            # Store verification results in state
-            state['verification_results'] = response['verification_results']
-            
-            # Calculate verification rates by agent
-            pro_sources = []
-            con_sources = []
-            
-            for result in response['verification_results']:
-                if result['agent_source'] == 'PRO':
-                    pro_sources.append(result)
-                else:
-                    con_sources.append(result)
-            
-            # Calculate individual verification rates (FIX 2 & 12)
-            if pro_sources:
-                pro_verified = sum(1 for r in pro_sources if r['status'] == 'VERIFIED')
-                pro_hallucinated = sum(1 for r in pro_sources if r['status'] in ['NOT_FOUND', 'CONTENT_MISMATCH'])
-                pro_timeout = sum(1 for r in pro_sources if r['status'] == 'TIMEOUT')
-                state['pro_verification_rate'] = pro_verified / len(pro_sources)
-                logger.info(f"  PRO sources: {pro_verified} verified, {pro_hallucinated} hallucinated, {pro_timeout} timeout")
-            else:
-                state['pro_verification_rate'] = 0.0  # FIX 2: No sources = 0.0% verification
-                logger.warning("ProAgent cited no sources - verification rate set to 0.0")
-            
-            if con_sources:
-                con_verified = sum(1 for r in con_sources if r['status'] == 'VERIFIED')
-                con_hallucinated = sum(1 for r in con_sources if r['status'] in ['NOT_FOUND', 'CONTENT_MISMATCH'])
-                con_timeout = sum(1 for r in con_sources if r['status'] == 'TIMEOUT')
-                state['con_verification_rate'] = con_verified / len(con_sources)
-                logger.info(f"  CON sources: {con_verified} verified, {con_hallucinated} hallucinated, {con_timeout} timeout")
-            else:
-                state['con_verification_rate'] = 0.0  # FIX 2: No sources = 0.0% verification
-                logger.warning("ConAgent cited no sources - verification rate set to 0.0")
-            
-            logger.info(f"Source verification complete")
-            logger.info(f"  PRO verification rate: {state['pro_verification_rate']:.0%}")
-            logger.info(f"  CON verification rate: {state['con_verification_rate']:.0%}")
-            
+            metrics = response.metrics or {}
+            state.verification_results = metrics.get('verification_results', [])
+            state.pro_verification_rate = metrics.get('pro_rate', 0.0)
+            state.con_verification_rate = metrics.get('con_rate', 0.0)
+            return state
         except Exception as e:
             logger.error(f"FactChecker failed: {e}")
-            # Set default values if verification fails
-            state['verification_results'] = []
-            state['pro_verification_rate'] = 0.5
-            state['con_verification_rate'] = 0.5
-        
-        return state
+            return state
     
     def _moderator_node(self, state: DebateState) -> DebateState:
-        """
-        Execute Moderator analysis.
-        
-        Moderator reviews all arguments and produces reasoned verdict.
-        
-        Args:
-            state: Current debate state
-            
-        Returns:
-            Updated state with Moderator's verdict
-        """
-        logger.info("Moderator analyzing debate quality...")
-        
         try:
             response = self.moderator.generate(state)
-            
-            # Store Moderator's verdict, reasoning, and metrics
-            state['verdict'] = response.get('verdict', 'INSUFFICIENT EVIDENCE')
-            state['confidence'] = response.get('confidence', 0.5)
-            state['moderator_reasoning'] = response.get('reasoning') or response['argument']
-            state['metrics'] = response.get('metrics')
-            
-            logger.info(f"Moderator verdict: {state['verdict']} (Conf: {state['confidence']:.2f})")
-            
+            state.verdict = response.verdict
+            state.confidence = response.confidence
+            state.moderator_reasoning = response.reasoning
+            state.metrics = response.metrics
+            return state
         except Exception as e:
-            logger.error(f"Moderator analysis failed: {e}")
-            
-            # Fallback
-            state['verdict'] = "ERROR"
-            state['confidence'] = 0.0
-            state['moderator_reasoning'] = f"Moderator analysis failed: {str(e)}"
-        
-        return state
-
+            logger.error(f"Moderator failed: {e}")
+            return state
 
     def _verdict_node(self, state: DebateState) -> DebateState:
-        """
-        Final verdict node - already set by Moderator.
-        
-        This node logs the final verdict and a safe preview of reasoning.
-        
-        Args:
-            state: Debate state with Moderator's verdict
-            
-        Returns:
-            State (unchanged)
-        """
-        verdict = state.get('verdict', 'INSUFFICIENT EVIDENCE')
-        confidence = state.get('confidence', 0.0)
-        reasoning = state.get('moderator_reasoning', 'N/A')
-        
-        logger.info(f"Final verdict: {verdict} ({confidence:.1%} confidence)")
-        
-        # Safe logging of reasoning (truncate and strip to avoid log pollution)
-        safe_reasoning = reasoning.replace('\n', ' ').strip()
-        if len(safe_reasoning) > 150:
-            safe_reasoning = safe_reasoning[:147] + "..."
-            
-        logger.info(f"Moderator reasoning preview: {safe_reasoning}")
-        
+        logger.info(f"Final Verdict: {state.verdict} (Confidence: {state.confidence})")
         return state
     
-    def run(self, claim: str) -> DebateState:
-        """
-        Run complete debate on a claim.
+    def run(self, claim: str, thread_id: str = "default") -> DebateState:
+        logger.info(f"Running debate on: {claim}")
         
-        Args:
-            claim: The claim to fact-check
+        # Check cache
+        cached = get_cached_verdict(claim)
+        if cached:
+            # Reconstruct model from dict
+            state = DebateState.parse_obj(cached)
+            state.is_cached = True
+            return state
             
-        Returns:
-            Final debate state with verdict and full history
-        """
-        logger.info(f"Starting debate on claim: {claim}")
-        
-        # Initialize state (FIX 10: Use None for optional fields)
-        initial_state: DebateState = {
-            "claim": claim,
-            "round": 1,
-            "pro_arguments": [],
-            "con_arguments": [],
-            "pro_sources": [],
-            "con_sources": [],
-            "verdict": None,
-            "confidence": None,
-            "verification_results": None,
-            "pro_verification_rate": None,
-            "con_verification_rate": None,
-            "fact_check_result": None,
-            "moderator_reasoning": None,
-            "metrics": None,
-            "retry_count": 0
-        }
-        
-        # Run workflow
+        initial_state = DebateState(claim=claim)
         try:
-            final_state = self.workflow.invoke(initial_state)
-            logger.info("Debate completed successfully")
-            return final_state
+            config = {"configurable": {"thread_id": thread_id}}
+            final_state = self.graph.invoke(initial_state, config=config)
             
+            # Ensure final_state is a DebateState model
+            if not hasattr(final_state, 'to_dict'):
+                if isinstance(final_state, dict):
+                    final_state = DebateState.parse_obj(final_state)
+                else:
+                    # Fallback for unexpected types
+                    logger.warning(f"Unexpected final_state type: {type(final_state)}. Attempting conversion.")
+                    final_state = DebateState.parse_obj(dict(final_state))
+            
+            # Save to cache as dict
+            set_cached_verdict(claim, final_state.to_dict())
+            return final_state
         except Exception as e:
             logger.error(f"Debate failed: {e}")
-            # Ensure all keys are present even on error
-            initial_state['verdict'] = "ERROR"
-            initial_state['confidence'] = 0.0
-            initial_state['moderator_reasoning'] = f"Debate failed: {str(e)}"
+            initial_state.verdict = "ERROR"
+            initial_state.confidence = 0.0
+            initial_state.moderator_reasoning = str(e)
             return initial_state
 
-
-# ============================================
-# TESTING CODE
-# ============================================
-
 if __name__ == "__main__":
-    # Fix for Windows console encoding
-    import sys
-    if sys.platform == "win32":
-        import io
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    
-    print("\n" + "="*70)
-    print("DebateOrchestrator Test")
-    print("="*70)
-    
-    # Initialize
+    logging.basicConfig(level=logging.INFO)
     orchestrator = DebateOrchestrator()
-    
-    # Test claim
-    claim = "Coffee prevents cancer"
-    
-    print(f"\n🔍 Testing claim: {claim}")
-    print("⏳ Running 3-round debate...\n")
-    
-    # Run debate
-    result = orchestrator.run(claim)
-    
-    # Display results
-    print("="*70)
-    print("DEBATE RESULTS")
-    print("="*70)
-    
-    print(f"\n⚖️  VERDICT: {result['verdict']}")
-    print(f"📊 CONFIDENCE: {result['confidence']:.1%}")
-    
-    print("\n📘 PRO ARGUMENTS:")
-    for i, arg in enumerate(result['pro_arguments'], 1):
-        print(f"\n  Round {i}:")
-        print(f"  {arg[:200]}...")
-        print(f"  Sources: {len(result['pro_sources'][i-1])}")
-    
-    print("\n📕 CON ARGUMENTS:")
-    for i, arg in enumerate(result['con_arguments'], 1):
-        print(f"\n  Round {i}:")
-        print(f"  {arg[:200]}...")
-        print(f"  Sources: {len(result['con_sources'][i-1])}")
-    
-    print("\n" + "="*70)
-    print("✅ Test complete!")
-    print("="*70 + "\n")
+    res = orchestrator.run("Does coffee cause cancer?")
+    print(f"VERDICT: {res.verdict}")
