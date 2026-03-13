@@ -8,6 +8,10 @@ Security features tested:
 - Rate limiting
 """
 
+import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+
 import pytest
 from src.llm.client import FreeLLMClient
 
@@ -26,6 +30,7 @@ def test_client_initialization():
     try:
         client = FreeLLMClient()
         assert client is not None
+        model = "llama-3.3-70b-versatile"
         assert client.groq_available or client.gemini_available
     except RuntimeError:
         pytest.skip("LLM providers not available")
