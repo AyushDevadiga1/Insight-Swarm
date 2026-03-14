@@ -5,17 +5,38 @@ Consolidates semantic matching, verdict storage, and user feedback into a single
 import sqlite3
 import json
 import logging
-import numpy as np
 import os
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from pathlib import Path
-from sentence_transformers import SentenceTransformer
+
+import numpy as np
+try:
+    from sentence_transformers import SentenceTransformer
+    HAS_SENTENCE_TRANSFORMERS = True
+except ImportError:
+    HAS_SENTENCE_TRANSFORMERS = False
 
 logger = logging.getLogger(__name__)
 
 # Use a single unified database
 CACHE_DB_PATH = Path("insightswarm.db")
+
+# Env toggles to control semantic cache fetch behavior
+PYTEST_RUNNING = os.getenv("PYTEST_CURRENT_TEST") is not None
+SEMANTIC_CACHE_ENABLED = (
+    os.getenv("SEMANTIC_CACHE_ENABLED", "1").strip().lower() not in ("0", "false", "off")
+    and not PYTEST_RUNNING
+)
+HF_LOCAL_ONLY = os.getenv("HF_LOCAL_ONLY", "0").strip().lower() in ("1", "true", "on", "yes")
+
+# Reduce noisy third-party fetch logs
+for _name in ("httpx", "huggingface_hub", "sentence_transformers", "transformers"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
+
+# Quiet HF Hub progress bars and telemetry by default
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
 class SemanticCache:
     """
@@ -24,17 +45,52 @@ class SemanticCache:
     def __init__(self, db_path: Path = CACHE_DB_PATH, ttl_days: int = 7):
         self.db_path = db_path
         self.ttl_days = ttl_days
+        self.enabled = SEMANTIC_CACHE_ENABLED
+        self.local_only = HF_LOCAL_ONLY
+        if os.getenv("PYTEST_CURRENT_TEST") is not None:
+            self.enabled = False
         # Lazy loading of model to avoid overhead if cache is hit directly by text match (optional optimization)
         self._model = None
+        self._model_failed = False
         self._init_db()
 
     @property
     def model(self):
+        if not self.enabled:
+            raise RuntimeError("Semantic cache disabled by SEMANTIC_CACHE_ENABLED")
+        if self._model_failed:
+            raise RuntimeError("Semantic cache model previously failed to load")
         if self._model is None:
+            if not HAS_SENTENCE_TRANSFORMERS:
+                self._model_failed = True
+                raise RuntimeError("sentence-transformers not installed")
+            
             logger.info("Loading SentenceTransformer model for semantic cache...")
-            self._model = SentenceTransformer('all-MiniLM-L6-v2')
+            try:
+                self._model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=self.local_only)
+            except Exception as e:
+                self._model_failed = True
+                raise
         return self._model
 
+    def _encode(self, text: str) -> Optional[np.ndarray]:
+        try:
+            return self.model.encode([text])[0]
+        except Exception as e:
+            logger.warning(f"Semantic cache disabled (model load failed): {e}")
+            self.enabled = False
+            return None
+
+    def _has_live_rows(self) -> bool:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+                now = datetime.now().isoformat()
+                c.execute('SELECT 1 FROM claim_cache WHERE expires_at > ? LIMIT 1', (now,))
+                row = c.fetchone()
+                return row is not None
+        except Exception:
+            return False
     def _init_db(self):
         """Initializes the SQLite unified database"""
         try:
@@ -78,7 +134,13 @@ class SemanticCache:
     def get_verdict(self, claim: str, similarity_threshold: float = 0.92) -> Optional[Dict[str, Any]]:
         """Retrieves a cached verdict using semantic similarity"""
         try:
-            query_embedding = self.model.encode([claim])[0]
+            if not self.enabled:
+                return None
+            if not self._has_live_rows():
+                return None
+            query_embedding = self._encode(claim)
+            if query_embedding is None:
+                return None
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
             
@@ -100,9 +162,10 @@ class SemanticCache:
                 cached_embedding = np.frombuffer(embedding_bytes, dtype=np.float32)
                 
                 # Cosine similarity
-                similarity = np.dot(query_embedding, cached_embedding) / (
-                    np.linalg.norm(query_embedding) * np.linalg.norm(cached_embedding)
-                )
+                denom = np.linalg.norm(query_embedding) * np.linalg.norm(cached_embedding)
+                if denom == 0:
+                    continue
+                similarity = np.dot(query_embedding, cached_embedding) / denom
                 
                 if similarity > best_similarity and similarity >= similarity_threshold:
                     best_similarity = similarity
@@ -123,7 +186,11 @@ class SemanticCache:
     def set_verdict(self, claim: str, verdict_data: Dict[str, Any]):
         """Saves a verdict with its embedding to the cache"""
         try:
-            embedding = self.model.encode([claim])[0]
+            if not self.enabled:
+                return
+            embedding = self._encode(claim)
+            if embedding is None:
+                return
             embedding_bytes = embedding.tobytes()
             
             created_at = datetime.now()
