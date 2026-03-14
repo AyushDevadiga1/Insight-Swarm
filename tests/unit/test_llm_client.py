@@ -15,6 +15,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import pytest
 from src.llm.client import FreeLLMClient
 
+# Skip by default to keep unit tests deterministic.
+RUN_LLM_TESTS = os.getenv("RUN_LLM_TESTS", "").strip().lower() in ("1", "true", "yes")
+pytestmark = pytest.mark.skipif(
+    not RUN_LLM_TESTS,
+    reason="LLM tests require live API access. Set RUN_LLM_TESTS=1 to enable."
+)
+
 
 @pytest.fixture
 def client():

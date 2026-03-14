@@ -13,13 +13,21 @@ Run with: python tests/test_day3_factchecker.py
 import sys
 import logging
 from pathlib import Path
-from tabulate import tabulate
 from unittest.mock import patch, MagicMock
+
+try:
+    from tabulate import tabulate
+except ImportError:
+    tabulate = None
 
 # Setup path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.orchestration.debate import DebateOrchestrator
+
+if tabulate is None:
+    import pytest
+    pytest.skip("tabulate not installed; skipping day3 factchecker script", allow_module_level=True)
 
 # Setup logging
 logging.basicConfig(
