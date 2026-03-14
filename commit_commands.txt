@@ -1,66 +1,40 @@
-# Day 4 Commit Commands
-# Run these commands sequentially to commit all Day 4 changes in a structured way.
+# Day 5 Comprehensive Commit Commands
+# Run these commands sequentially to commit all Day 5 changes in a structured and professional way.
 
-# 1. Centralized Data Models
-git add src/core/models.py
-git commit -m "feat: introduce centralized pydantic data models in core/models.py"
-
-# 2. Base Agent Interface
-git add src/agents/base.py
-git commit -m "refactor: update base agent interface to support pydantic models"
-
-# 3. Pro and Con Agents
-git add src/agents/pro_agent.py src/agents/con_agent.py
-git commit -m "refactor: harden pro_agent and con_agent with structured output support"
-
-# 4. Moderator Agent
-git add src/agents/moderator.py
-git commit -m "refactor: implement pydantic-based moderator logic and schema validation"
-
-# 5. FactChecker Agent
-git add src/agents/fact_checker.py
-git commit -m "refactor: satisfy abstract requirements and implement fact_checker response logic"
-
-# 6. Unified Semantic Cache
-git add src/orchestration/cache.py
-git commit -m "feat: implement unified semantic cache with sentence-transformers"
-
-# 7. LLM Client Hardening
+# 1. LLM Client Hardening
 git add src/llm/client.py
-git commit -m "refactor: modernize llm client with tenacity retries and structured parsing"
+git commit -m "fix: restore preferred_provider in call_structured and improve provider fallback logic"
 
-# 8. Debate Orchestrator
-git add src/orchestration/debate.py
-git commit -m "refactor: update debate orchestrator for pydantic state management"
+# 2. Temporal & Utility Hardening
+git add src/utils/temporal_verifier.py src/utils/api_key_manager.py src/utils/tavily_retriever.py
+git commit -m "fix: resolve year extraction regex bug and track core utility modules"
 
-# 9. Proxy/Con Agent Tests
-git add tests/unit/test_pro_agent.py tests/unit/test_con_agent.py
-git commit -m "test: modernize pro and con agent unit tests with mocks"
+# 3. Cache Unification & Orchestration
+# Note: src/utils/verdict_cache.py was identified as redundant and should be removed.
+git rm src/utils/verdict_cache.py
+git add src/orchestration/cache.py src/orchestration/debate.py
+git commit -m "refactor: unify semantic cache in orchestration and streamline debate graph logic"
 
-# 10. Moderator Tests
-git add tests/unit/test_moderator.py
-git commit -m "test: update moderator unit tests for pydantic attribute access"
+# 4. Test Suite Alignment
+git add tests/test_day3_factchecker.py tests/unit/test_llm_client.py 
+git add tests/integration/conftest.py tests/unit/test_factchecker_url_handling.py tests/unit/test_orchestrator_sanitization.py
+git commit -m "test: align unit and integration tests with Day 5 structural refinements"
 
-# 11. FactChecker Tests
-git add tests/unit/test_fact_checker.py
-git commit -m "test: rewrite fact_checker tests for simplified verification logic"
+# 5. Progress Documentation
+git add progress/D5/D5_Progress_Report.md
+git commit -m "docs: add Day 5 Evolution Report detailing API resilience and audit findings"
 
-# 12. Debate Integration Tests
-git add tests/unit/test_debate.py
-git commit -m "test: align debate integration tests with hardened llm client mocks"
+# 6. Project Assets & Research
+git add assets/ data/ documentation/ paper/ report/ suggestions/ test_import.py
+git commit -m "docs: track project assets, research papers, and supporting documentation"
 
-# 13. Client and Baseline Tests
-git add tests/unit/test_llm_client.py src/utils/input_validator.py src/utils/feedback_db.py tests/integration/test_current_system_baseline.py tests/unit/__init__.py
-git commit -m "test: verify llm client validation and include structural baseline tests"
+# 7. Audit Artifacts
+git add task.md walkthrough.md final_audit_report.md
+git commit -m "docs: finalized codebase audit report and implementation walkthrough"
 
-# 14. UI Alignment
-git add app.py
-git commit -m "fix: align app.py with the new centralized data model architecture"
+# 8. Commit Command Update
+git add commit_commands.txt
+git commit -m "docs: finalize day 5 commit instructions"
 
-# 15. Documentation and Task Artifacts
-git add task.md walkthrough.md implementation_plan.md
-git commit -m "docs: update task and walkthrough artifacts for day 4 progress"
-
-# 16. Progress Reports
-git add progress/D4/D4_Comparison_Report.md
-git commit -m "docs: add day 4 comparison report and architectural evolution summary"
+# Final Step: Push
+git push origin main
