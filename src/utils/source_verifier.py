@@ -203,7 +203,7 @@ class SourceVerifier:
         try:
             result = urlparse(url)
             return all([result.scheme in ['http', 'https'], result.netloc])
-        except:
+        except (ValueError, TypeError):
             return False
     
     def _extract_text(self, html: str) -> str:

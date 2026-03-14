@@ -27,29 +27,32 @@ class FactChecker(BaseAgent):
     def _initialize_fuzzy_support(self):
         with self._fuzz_init_lock:
             try:
-                from fuzzywuzzy import fuzz
+                from rapidfuzz import fuzz
                 self.fuzz = fuzz
             except ImportError:
-                logger.warning("fuzzywuzzy not installed - using fallback matching")
+                logger.warning("rapidfuzz not installed - fuzzy matching disabled")
 
     def generate(self, state: DebateState) -> AgentResponse:
         """Verify all sources cited and return structured results."""
         logger.info("FactChecker verifying all debate sources...")
         
         all_sources = []
+        all_sources = []
         # PRO sources
-        for round_sources in state.pro_sources:
+        for i, round_sources in enumerate(state.pro_sources):
+            argument = state.pro_arguments[i] if i < len(state.pro_arguments) else ""
             for url in round_sources:
-                all_sources.append((url, "PRO"))
+                all_sources.append((url, "PRO", argument))
         # CON sources
-        for round_sources in state.con_sources:
+        for i, round_sources in enumerate(state.con_sources):
+            argument = state.con_arguments[i] if i < len(state.con_arguments) else ""
             for url in round_sources:
-                all_sources.append((url, "CON"))
+                all_sources.append((url, "CON", argument))
                 
         results = []
         if all_sources:
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                futures = {executor.submit(self._verify_url, url, agent): url for url, agent in all_sources}
+                futures = {executor.submit(self._verify_url, url, agent, argument): url for url, agent, argument in all_sources}
                 for future in concurrent.futures.as_completed(futures):
                     try:
                         results.append(future.result())
@@ -77,18 +80,73 @@ class FactChecker(BaseAgent):
         """Requirement for BaseAgent, though FactChecker is deterministic."""
         return "Verify the sources in the current debate state."
 
-    def _verify_url(self, url: str, agent: str) -> SourceVerification:
-        """Deterministic URL verification."""
+    def _verify_url(self, url: str, agent: str, claim: str = "") -> SourceVerification:
+        """Deterministic URL verification with validation.
+
+        If the input is not a valid URL (no scheme/netloc), return an
+        INVALID_URL result instead of attempting to fetch it. This
+        avoids noisy errors like "No connection adapters were found".
+        """
+        from urllib.parse import urlparse
+
         try:
-            resp = requests.get(url, timeout=self.url_timeout, allow_redirects=True)
+            # Defensive: ensure we only deal with strings
+            if not isinstance(url, str):
+                logger.debug("_verify_url received non-str url: %r", url)
+                return SourceVerification(url=str(url), status="INVALID_URL", agent_source=agent, error="Non-string URL")
+
+            original = url
+            url = url.strip()
+            logger.debug("_verify_url called with url=%r (agent=%s)", url, agent)
+
+            parsed = urlparse(url)
+            # Require explicit http/https schemes and a network location
+            if not (parsed.scheme in ("http", "https") and parsed.netloc):
+                logger.debug("Invalid URL format detected (no scheme/netloc): %r parsed=%s", url, parsed)
+                return SourceVerification(
+                    url=original,
+                    status="INVALID_URL",
+                    agent_source=agent,
+                    error="Invalid URL format: no scheme or host"
+                )
+
+            # Safe to fetch
+            resp = requests.get(
+                url,
+                timeout=self.url_timeout,
+                allow_redirects=True,
+                headers={"User-Agent": "InsightSwarm-FactChecker/1.0"}
+            )
             if resp.status_code == 200:
+                content = resp.text
+                
+                if claim:
+                    from src.utils.temporal_verifier import TemporalVerifier
+                    tv = TemporalVerifier()
+                    is_aligned, msg = tv.verify_alignment(claim, content)
+                    if not is_aligned:
+                        return SourceVerification(
+                            url=url,
+                            status="CONTENT_MISMATCH",
+                            agent_source=agent,
+                            error=msg,
+                            content_preview=content[:200]
+                        )
+                
                 return SourceVerification(
                     url=url,
                     status="VERIFIED",
                     agent_source=agent,
                     confidence=1.0,
-                    content_preview=resp.text[:200]
+                    content_preview=content[:200]
                 )
             return SourceVerification(url=url, status="NOT_FOUND", agent_source=agent, error=f"HTTP {resp.status_code}")
+        except requests.Timeout:
+            return SourceVerification(url=str(url), status="TIMEOUT", agent_source=agent, error="Request timeout")
+        except requests.RequestException as e:
+            # Log debug to help diagnose noisy adapter errors
+            logger.debug("requests exception for url=%r: %s", url, e)
+            return SourceVerification(url=str(url), status="ERROR", agent_source=agent, error=str(e))
         except Exception as e:
-            return SourceVerification(url=url, status="ERROR", agent_source=agent, error=str(e))
+            logger.exception("Unexpected error verifying url=%r", url)
+            return SourceVerification(url=str(url), status="ERROR", agent_source=agent, error=str(e))

@@ -2,6 +2,9 @@
 Base classes and type definitions for all agents
 """
 import logging
+import re
+from typing import List
+from urllib.parse import urlparse
 from abc import ABC, abstractmethod
 from src.core.models import AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
@@ -64,3 +67,46 @@ class BaseAgent(ABC):
             Formatted prompt string for the LLM
         """
         raise NotImplementedError("Subclasses must implement _build_prompt()")
+
+    def _sanitize_sources(self, sources: List[str]) -> List[str]:
+        """
+        Normalize and filter sources so only usable URLs remain.
+        - Extract embedded http(s) URLs from strings
+        - Coerce bare domains to https://
+        - Drop title-like strings with no URL
+        """
+        if not sources:
+            return []
+
+        url_re = re.compile(r"(https?://[^\s\)\]\}<>\"']+)")
+        bare_domain_re = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-\.]+\.[A-Za-z]{2,}([/?#].*)?$")
+
+        sanitized: List[str] = []
+        for s in sources:
+            try:
+                if not isinstance(s, str):
+                    s = str(s)
+                original = s.strip()
+                if not original:
+                    continue
+
+                match = url_re.search(original)
+                if match:
+                    cleaned = match.group(1).rstrip(".,;:!?)\]}'\"")
+                    sanitized.append(cleaned)
+                    continue
+
+                parsed = urlparse(original)
+                if parsed.scheme in ("http", "https") and parsed.netloc:
+                    sanitized.append(original)
+                    continue
+
+                if " " not in original and bare_domain_re.match(original):
+                    sanitized.append("https://" + original)
+                    continue
+            except Exception:
+                continue
+
+        if len(sanitized) < len(sources):
+            logger.info("Sanitized sources: %d -> %d", len(sources), len(sanitized))
+        return sanitized

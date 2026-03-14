@@ -1,748 +1,893 @@
 """
-InsightSwarm Streamlit Web Interface
+InsightSwarm Streamlit UI
+=========================
+Design inspired by app_backup.py — Space Mono typography, Nothing-brand dark
+aesthetic, colour-coded verdicts.
 
-Public demo of multi-agent fact-checking system with source verification
+Key improvements over the previous app.py:
+ - Full API-exhaustion handling: Groq → Gemini fallback, and a prominent
+   "All Resources Exhausted" banner when every key is rate-limited.
+ - Retry countdown timer with live seconds display.
+ - Progress bar visualising pipeline stages while debate runs.
+ - Colour-coded verdict box (green / red / amber / grey).
+ - Empty-state landing page instead of a blank canvas.
+ - Stable session state (feedback_given persists across reruns).
 """
 
-import streamlit as st
-import time
+from __future__ import annotations
+
 import html
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Mapping, Optional, cast
+
+import streamlit as st
+
 from src.orchestration.debate import DebateOrchestrator
 from src.orchestration.cache import record_feedback
 from main import validate_claim
+from src.llm.client import RateLimitError
 
-# Page configuration
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="InsightSwarm",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Custom CSS
-st.markdown("""
+# ── CSS ───────────────────────────────────────────────────────────────────────
+_md = getattr(st, "markdown")
+
+_md("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500&display=swap');
 
-/* Extremely Professional Nothing-Inspired Minimalist Theme */
+/* ── Tokens ──────────────────────────────────────────────────────── */
 :root {
-    --bg-color: #000000;
-    --text-primary: #FFFFFF;
-    --text-secondary: #999999;
-    --accent: #FFFFFF;
-    --border-color: #333333;
-    --surface-color: #0a0a0a;
+    --bg:     #000000;
+    --s1:     #0c0c0c;
+    --s2:     #111111;
+    --text:   #f0f0f0;
+    --text2:  #999999;
+    --border: #2a2a2a;
+    --b2:     #3a3a3a;
+    --accent: #ffcc33;
+    --green:  #22c55e;
+    --red:    #ef4444;
+    --amber:  #f59e0b;
+    --mono:   'Space Mono', monospace;
+    --sans:   'DM Sans', sans-serif;
 }
 
+/* ── App background & base font ─────────────────────────────────── */
 [data-testid="stAppViewContainer"] {
-    background-color: var(--bg-color);
-    color: var(--text-primary);
-    font-family: 'Space Mono', 'Inter', monospace;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
 }
-
-[data-testid="stSidebar"] {
-    background-color: var(--bg-color);
-    border-right: 1px solid var(--border-color);
-    padding-top: 20px;
-}
-
-[data-testid="stHeader"] {
-    background-color: transparent !important;
-}
-
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],
 .block-container {
-    max-width: 900px;
-    margin: auto;
-    padding-top: 10px;
+    background-color: var(--bg);
+    padding-top: 2rem;
+}
+body {
+    background-image: radial-gradient(#1a1a1a 1px, transparent 1px);
+    background-size: 22px 22px;
 }
 
-/* Typography & Display - Removing white banner and lowering amateur elements */
-.main-header {
-    font-size: 56px;
-    font-weight: 500;
-    letter-spacing: -2px;
-    line-height: 1.1;
-    text-transform: uppercase;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-    display: inline-block;
+/* ── Sidebar ─────────────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+    background-color: var(--s1);
+    border-right: 1px solid var(--border);
 }
 
-.sub-header {
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--text-secondary);
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    margin-bottom: 64px;
-}
+/* ── Hide chrome ─────────────────────────────────────────────────── */
+#MainMenu { visibility: hidden; }
+footer    { visibility: hidden; }
+[data-testid="stDecoration"]  { display: none; }
+[data-testid="stToolbar"]     { visibility: hidden; }
+[data-testid="stHeader"]      { background: transparent; }
 
-/* Hard Edged Inputs - ZERO border radius */
-div[data-baseweb="input"], 
-div[data-baseweb="input"] > div,
-div[data-baseweb="base-input"],
-div[data-testid="stTextInput"] > div > div {
-    border-radius: 0px !important;
-}
-
+/* ── Text input ──────────────────────────────────────────────────── */
 .stTextInput input {
-    background-color: var(--surface-color) !important;
-    border: 1px solid var(--border-color) !important;
-    border-radius: 0px !important; 
-    color: var(--text-primary) !important;
-    padding: 18px 20px !important;
-    font-family: inherit;
-    font-size: 15px;
-    transition: all 0.2s ease;
+    background-color: var(--s1) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 0 !important;
+    color: var(--text) !important;
+    padding: 14px 16px !important;
+    font-family: var(--sans) !important;
+    font-size: 15px !important;
+    caret-color: var(--accent);
 }
-
 .stTextInput input:focus {
-    border-color: var(--text-primary) !important;
-    box-shadow: none !important;
-    background-color: var(--bg-color) !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 1px var(--accent) !important;
+}
+.stTextInput input::placeholder { color: var(--text2) !important; }
+.stTextInput label {
+    font-family: var(--mono) !important;
+    font-size: 9px !important;
+    letter-spacing: 3px !important;
+    text-transform: uppercase !important;
+    color: var(--text2) !important;
 }
 
-/* Hard Edged Buttons - ZERO border radius */
+/* ── Buttons ─────────────────────────────────────────────────────── */
 .stButton button {
     background-color: transparent !important;
-    color: var(--text-primary) !important;
-    border: 1px solid var(--border-color) !important;
-    border-radius: 0px !important;
-    padding: 14px 24px !important;
-    font-size: 14px !important;
-    font-weight: 500 !important;
+    color: var(--text) !important;
+    border: 1px solid var(--b2) !important;
+    border-radius: 0 !important;
+    padding: 11px 20px !important;
+    font-family: var(--mono) !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
     letter-spacing: 2px !important;
     text-transform: uppercase !important;
-    transition: all 0.3s ease !important;
-    width: 100%;
-    white-space: nowrap !important;
-    min-width: max-content !important;
+    transition: background 0.15s, border-color 0.15s !important;
 }
-
 .stButton button:hover {
-    border-color: var(--text-primary) !important;
     background-color: rgba(255,255,255,0.05) !important;
+    border-color: var(--text) !important;
+}
+.stButton button[kind="primary"] {
+    background-color: var(--accent) !important;
+    color: #000 !important;
+    border-color: var(--accent) !important;
+}
+.stButton button[kind="primary"]:hover {
+    background-color: #ffd94d !important;
+    border-color: #ffd94d !important;
+}
+.stButton button:disabled { opacity: 0.3 !important; }
+
+[data-testid="stSidebar"] .stButton button {
+    font-family: var(--sans) !important;
+    font-size: 12px !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    font-weight: 400 !important;
+    padding: 7px 10px !important;
+    color: var(--text2) !important;
+    border-color: var(--border) !important;
 }
 
-.stButton button[data-testid="baseButton-primary"] {
-    background-color: var(--text-primary) !important;
-    color: var(--bg-color) !important;
-    border: 1px solid var(--text-primary) !important;
+/* ── Metrics ─────────────────────────────────────────────────────── */
+[data-testid="stMetric"] {
+    background: var(--s2) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 0 !important;
+    padding: 16px 18px !important;
+}
+[data-testid="stMetricLabel"] p {
+    font-family: var(--mono) !important;
+    font-size: 9px !important;
+    letter-spacing: 3px !important;
+    text-transform: uppercase !important;
+    color: var(--text2) !important;
+}
+[data-testid="stMetricValue"] {
+    font-family: var(--mono) !important;
+    font-size: 28px !important;
+    color: var(--text) !important;
 }
 
-.stButton button[data-testid="baseButton-primary"]:hover {
-    background-color: transparent !important;
-    color: var(--text-primary) !important;
+/* ── Tabs ────────────────────────────────────────────────────────── */
+[data-baseweb="tab-list"] {
+    background: transparent !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+[data-baseweb="tab"] {
+    background: transparent !important;
+    border-radius: 0 !important;
+    font-family: var(--mono) !important;
+    font-size: 10px !important;
+    letter-spacing: 2px !important;
+    text-transform: uppercase !important;
+    color: var(--text2) !important;
+    padding: 10px 16px !important;
+}
+[aria-selected="true"][data-baseweb="tab"] {
+    color: var(--text) !important;
+    border-bottom: 2px solid var(--accent) !important;
+}
+[data-baseweb="tab-highlight"],
+[data-baseweb="tab-border"] { display: none !important; }
+
+/* ── Expander ────────────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    border: 1px solid var(--border) !important;
+    border-radius: 0 !important;
+    background: var(--s1) !important;
+}
+[data-testid="stExpander"] summary {
+    font-family: var(--mono) !important;
+    font-size: 10px !important;
+    letter-spacing: 2px !important;
+    text-transform: uppercase !important;
+    color: var(--text2) !important;
+    padding: 11px 14px !important;
 }
 
-/* Verdict Box - Ultra minimal */
-.verdict-box {
-    margin-top: 32px;
-    padding: 30px;
-    border: 1px solid var(--border-color);
-    background-color: transparent;
+/* ── Alerts ──────────────────────────────────────────────────────── */
+[data-testid="stAlert"] {
+    border-radius: 0 !important;
+    background: var(--s2) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   CUSTOM HTML COMPONENTS
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Header ──────────────────────────────────────────────────────── */
+.is-title {
+    font-family: var(--mono);
+    font-size: 72px;
+    font-weight: 700;
+    letter-spacing: -4px;
     text-transform: uppercase;
-    position: relative;
-    border-radius: 0px;
+    line-height: 0.9;
+    color: #ffffff;
+    border-bottom: 2px solid #ffffff;
+    padding-bottom: 14px;
+    display: inline-block;
+}
+.is-subtitle {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text2);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin: 12px 0 0;
 }
 
-.verdict-box::before {
+/* ── Section divider ─────────────────────────────────────────────── */
+.sec {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--text2);
+    margin: 32px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.sec::before {
     content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 2px;
-    height: 100%;
+    width: 3px;
+    height: 10px;
+    background: var(--accent);
+    display: inline-block;
+    flex-shrink: 0;
 }
 
-.verdict-true::before { background-color: #ffffff; }
-.verdict-false::before { background-color: #ff3333; }
-.verdict-partial::before { background-color: #aaaaaa; }
+/* ── Verdict box ─────────────────────────────────────────────────── */
+.vbox {
+    margin-top: 20px;
+    padding: 22px 26px 18px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--text2);
+    background: var(--s1);
+}
+.vbox-label { font-family: var(--mono); font-size: 9px; letter-spacing: 4px; text-transform: uppercase; color: var(--text2); margin-bottom: 8px; }
+.vbox-verdict { font-family: var(--mono); font-size: 30px; font-weight: 700; text-transform: uppercase; line-height: 1; }
+.vbox-claim { font-size: 12px; color: var(--text2); font-style: italic; margin: 8px 0 10px; line-height: 1.5; }
+.conf-track { height: 2px; background: var(--border); margin: 14px 0 6px; position: relative; }
+.conf-fill  { position: absolute; left: 0; top: 0; bottom: 0; }
+.conf-lbl   { font-family: var(--mono); font-size: 10px; color: var(--text2); }
 
-.verdict-box strong {
-    font-size: 20px;
+/* Verdict colour variants */
+.vt { border-left-color: var(--green) !important; }
+.vt .vbox-verdict { color: var(--green); }
+.vt .conf-fill { background: var(--green); }
+.vf { border-left-color: var(--red) !important; }
+.vf .vbox-verdict { color: var(--red); }
+.vf .conf-fill { background: var(--red); }
+.vu { border-left-color: var(--amber) !important; }
+.vu .vbox-verdict { color: var(--amber); }
+.vu .conf-fill { background: var(--amber); }
+.vx { border-left-color: var(--text2) !important; }
+.vx .vbox-verdict { color: var(--text2); }
+.vx .conf-fill { background: var(--text2); }
+
+/* ── API Exhaustion banner ───────────────────────────────────────── */
+.api-exhausted {
+    border: 1px solid var(--red);
+    border-left: 4px solid var(--red);
+    background: rgba(239,68,68,0.07);
+    padding: 20px 24px;
+    margin: 16px 0;
+}
+.api-exhausted-title {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--red);
+    margin-bottom: 8px;
+}
+.api-exhausted-body { font-size: 13px; color: #ccc; line-height: 1.7; }
+.api-retry-timer {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--amber);
+    margin-top: 10px;
+}
+
+/* ── Pipeline progress bar ───────────────────────────────────────── */
+.prog { display: flex; border: 1px solid var(--border); margin: 16px 0 4px; }
+.ps {
+    flex: 1;
+    padding: 11px 6px 9px;
+    border-right: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 9px;
     letter-spacing: 1px;
-    font-weight: 500;
+    text-transform: uppercase;
+    color: var(--text2);
+    text-align: center;
 }
+.ps:last-child { border-right: none; }
+.ps-n { font-size: 16px; display: block; margin-bottom: 2px; line-height: 1; }
+.ps-run { color: var(--accent); background: rgba(255,204,51,0.06); border-bottom: 2px solid var(--accent); }
+.ps-ok  { color: var(--green);  background: rgba(34,197,94,0.05); }
 
-/* Debate Blocks */
-.debate-block {
-    margin-top: 16px;
-    padding: 24px;
-    border: 1px solid var(--border-color);
-    background-color: var(--surface-color);
-    border-radius: 0px;
-    font-size: 14px;
+/* ── Debate blocks ───────────────────────────────────────────────── */
+.dblock {
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    background: transparent;
+    font-size: 13px;
     line-height: 1.7;
     color: #cccccc;
-    font-family: inherit;
+    min-height: 80px;
 }
-
-/* Source Status Minimal */
-.source-verified {
-    color: #ffffff;
-    opacity: 0.9;
-}
-
-.source-failed {
-    color: #ff3333;
-    opacity: 0.9;
-}
-
-/* Headers override */
-h1, h2, h3, h4, h5, h6 {
-    color: var(--text-primary) !important;
-    text-transform: uppercase !important;
-    letter-spacing: 1.5px !important;
-    font-weight: 500 !important;
-}
-
-/* Expander/Tabs styling - STRICT hard edges */
-[data-testid="stExpander"] {
-    border: 1px solid var(--border-color) !important;
-    border-radius: 0px !important;
-    background: transparent !important;
-}
-
-[data-baseweb="tab"] {
-    border-radius: 0px !important;
-    background: transparent !important;
-    padding: 10px 20px !important;
-    border: 1px solid transparent;
-}
-
-[data-baseweb="tab-list"] {
-    border-bottom: 1px solid var(--border-color) !important;
-}
-
-[aria-selected="true"] {
-    border: 1px solid var(--border-color) !important;
-    border-bottom: 1px solid var(--bg-color) !important;
-}
-
-/* Metrics - Monospace, stark */
-[data-testid="stMetricValue"] {
-    font-family: 'Space Mono', monospace;
-    font-weight: 400;
-    font-size: 32px;
-}
-[data-testid="stMetricLabel"] {
+.dlbl {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 3px;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--text-secondary);
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.dlbl::before { content: ''; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.dpro .dlbl { color: var(--green); }
+.dpro .dlbl::before { background: var(--green); }
+.dcon .dlbl { color: var(--red); }
+.dcon .dlbl::before { background: var(--red); }
+
+/* ── Source rows ─────────────────────────────────────────────────── */
+.srow {
+    display: grid;
+    grid-template-columns: 26px 1fr auto auto;
+    align-items: center;
+    column-gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
     font-size: 12px;
 }
+.srow:last-child { border-bottom: none; }
+.snum { font-family: var(--mono); font-size: 10px; color: var(--text2); }
+.surl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: #ccc; }
+.serr { font-size: 11px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+.sfail-url { color: var(--red); }
+.sbadge { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; padding: 2px 7px; white-space: nowrap; }
+.sok  { border: 1px solid var(--green); color: var(--green); }
+.sfail { border: 1px solid var(--red); color: var(--red); }
 
-/* Footer - clean */
-.footer {
-    text-align: left;
-    color: var(--text-secondary);
-    margin-top: 120px;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    border-top: 1px solid var(--border-color);
-    padding-top: 24px;
+/* ── Feedback ────────────────────────────────────────────────────── */
+.fb-wrap-up   .stButton button { border-color: var(--green) !important; color: var(--green) !important; }
+.fb-wrap-up   .stButton button:hover { background: rgba(34,197,94,0.08) !important; }
+.fb-wrap-down .stButton button { border-color: var(--red) !important; color: var(--red) !important; }
+.fb-wrap-down .stButton button:hover { background: rgba(239,68,68,0.08) !important; }
+
+/* ── Empty state ─────────────────────────────────────────────────── */
+.empty {
+    border: 1px dashed var(--border);
+    margin-top: 28px;
+    padding: 60px 20px;
+    text-align: center;
+}
+.empty-g { font-family: var(--mono); font-size: 52px; color: var(--text); opacity: 0.07; display: block; margin-bottom: 20px; letter-spacing: -6px; line-height: 1; }
+.empty-h { font-family: var(--mono); font-size: 10px; letter-spacing: 4px; text-transform: uppercase; color: var(--text2); margin-bottom: 10px; }
+.empty-b { font-size: 13px; color: var(--text2); line-height: 1.7; max-width: 360px; margin: 0 auto; }
+
+/* ── Agent card (sidebar) ────────────────────────────────────────── */
+.ac { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.ar { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.an { font-family: var(--mono); font-size: 9px; color: var(--text2); min-width: 18px; }
+.ad { font-size: 11px; color: var(--text2); padding-left: 26px; line-height: 1.4; }
+
+/* ── Footer ──────────────────────────────────────────────────────── */
+.foot {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text2);
+    letter-spacing: 2px;
+    text-transform: uppercase;
 }
-
-/* Custom Webkit Scrollbar */
-::-webkit-scrollbar {
-    width: 6px;
-}
-::-webkit-scrollbar-track {
-    background: var(--bg-color);
-}
-::-webkit-scrollbar-thumb {
-    background: var(--border-color);
-}
-::-webkit-scrollbar-thumb:hover {
-    background: var(--text-secondary);
-}
-
-/* Divider styling */
-hr {
-    border-color: var(--border-color) !important;
-    opacity: 0.5;
-}
-
 </style>
 """, unsafe_allow_html=True)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Session state helpers
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def safe_markdown(content: str, is_html: bool = True):
-    """
-    Centralized helper for safe HTML/Markdown rendering.
-    Escapes content and ensures unsafe_allow_html is only used intentionally.
-    """
-    if is_html:
-        st.markdown(content, unsafe_allow_html=True)
-    else:
-        st.markdown(content)
+def _init() -> None:
+    defaults: dict[str, Any] = {
+        "debate_run":      False,
+        "thread_id":       str(uuid.uuid4()),
+        "result":          None,
+        "orchestrator":    None,
+        "background_task": None,
+        "executor":        ThreadPoolExecutor(max_workers=1),
+        "example_claim":   "",
+        "feedback_given":  None,
+        "debate_error":    None,   # str  – last error message
+        "retry_at":        None,   # float – epoch when retry is safe
+        "history":         [],     # list of previous dicts
+        "history_summary": "",     # text summary of older items
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
-
-import atexit
-
-def init_session_state():
-    """Initialize session state variables"""
-    if 'debate_run' not in st.session_state:
-        st.session_state.debate_run = False
-    if 'thread_id' not in st.session_state:
-        st.session_state.thread_id = str(uuid.uuid4())
-    if 'moderator_chat' not in st.session_state:
-        st.session_state.moderator_chat = []
-    if 'result' not in st.session_state:
-        st.session_state.result = None
-    if 'orchestrator' not in st.session_state:
-        st.session_state.orchestrator = None
-    if 'background_task' not in st.session_state:
-        st.session_state.background_task = None
-    if 'task_executor' not in st.session_state:
-        executor = ThreadPoolExecutor(max_workers=1)
-        st.session_state.task_executor = executor
-        
-        # Register cleanup on exit (FIX 4)
-        def shutdown_executor():
-            try:
-                executor.shutdown(wait=False)
-            except:
-                pass
-        atexit.register(shutdown_executor)
+def _cap_memory_history():
+    """Chat history capper keeping latest 10 messages, summarizing older interactions to prevent memory leaks."""
+    if len(st.session_state.history) > 10:
+        st.session_state.history = st.session_state.history[-10:]
+        st.session_state.history_summary = "Older verification requests have been archived and summarized to save memory."
 
 
-def render_header():
-    safe_markdown(
-        """
-        <div class="main-header">INSIGHTSWARM</div>
-        <div class="sub-header">
-        Multi-Agent Truth Verification Protocol
-        </div>
-        """
-    )
+@st.cache_resource
+@st.cache_resource(show_spinner=False)
+def _get_orchestrator() -> DebateOrchestrator:
+    return DebateOrchestrator()
 
 
-def render_sidebar():
-    """Render sidebar with information"""
+# ═══════════════════════════════════════════════════════════════════════════════
+# UI utilities
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def sh(content: str) -> None:
+    """Render raw HTML."""
+    _md(content, unsafe_allow_html=True)
+
+
+def sec(label: str) -> None:
+    sh(f"<p class='sec'>{html.escape(label)}</p>")
+
+
+def _vclass(verdict: str) -> str:
+    v = (verdict or "").upper()
+    if any(k in v for k in ("TRUE", "CORRECT", "ACCURATE", "SUPPORTED", "VERIFIED")):
+        return "vt"
+    if any(k in v for k in ("FALSE", "INCORRECT", "INACCURATE", "UNSUPPORTED", "DEBUNKED")):
+        return "vf"
+    if any(k in v for k in ("UNCERTAIN", "MIXED", "PARTIAL", "INSUFFICIENT", "UNVERIFIED",
+                             "EVIDENCE", "RATE_LIMITED", "UNKNOWN")):
+        return "vu"
+    return "vx"
+
+
+def _clip(url: str, n: int = 60) -> str:
+    return url if len(url) <= n else url[:n - 1] + "…"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Render helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_header() -> None:
+    sh("""
+    <div style='padding:20px 0 0'>
+      <span class='is-title'>InsightSwarm</span>
+      <p class='is-subtitle'>Multi-Agent Truth Verification Protocol</p>
+    </div>
+    <div style='height:28px'></div>
+    """)
+
+
+def render_sidebar() -> None:
     with st.sidebar:
-        safe_markdown("<h3 style='text-transform:uppercase;letter-spacing:2px;font-size:12px;color:#888;margin-bottom:16px;'>Architecture</h3>")
-        
-        safe_markdown("""
-        <div style='font-size: 13px; color: #aaa; line-height: 1.8; margin-bottom: 30px;'>
-        <p style='border-left: 1px solid #333; padding-left: 12px; margin-bottom: 16px;'>
-        <strong>01 ProAgent</strong><br/>
-        Validates claim assumptions.<br/>
-        Source aggregation.</p>
-        
-        <p style='border-left: 1px solid #333; padding-left: 12px; margin-bottom: 16px;'>
-        <strong>02 ConAgent</strong><br/>
-        Invalidates claim assumptions.<br/>
-        Adversarial execution.</p>
-        
-        <p style='border-left: 1px solid #333; padding-left: 12px; margin-bottom: 16px;'>
-        <strong>03 FactChecker</strong><br/>
-        Source verification.<br/>
-        Hallucination detection.</p>
-        
-        <p style='border-left: 1px solid #333; padding-left: 12px;'>
-        <strong>04 Moderator</strong><br/>
-        Intelligent consensus.<br/>
-        Fallacy detection.</p>
-        </div>
-        """)
-        
-        st.divider()
-        
-        st.header("Example Claims")
-        
-        example_claims = [
+        sh("<p style='font-family:var(--mono);font-size:9px;color:var(--text2);"
+           "letter-spacing:4px;text-transform:uppercase;margin-bottom:14px'>"
+           "Agent Architecture</p>")
+
+        for num, name, desc, col in [
+            ("01", "ProAgent",    "Validates claim assumptions",      "#22c55e"),
+            ("02", "ConAgent",    "Adversarial rebuttal",             "#ef4444"),
+            ("03", "FactChecker", "Source verification",              "#3b82f6"),
+            ("04", "Moderator",   "Consensus &amp; fallacy detection","#ffcc33"),
+        ]:
+            sh(f"""<div class='ac'>
+              <div class='ar'>
+                <span class='an'>{num}</span>
+                <span style='font-size:13px;font-weight:500;color:{col}'>{name}</span>
+              </div>
+              <div class='ad'>{desc}</div>
+            </div>""")
+
+        st.write("")
+        sh("<p style='font-family:var(--mono);font-size:9px;color:var(--text2);"
+           "letter-spacing:4px;text-transform:uppercase;margin:18px 0 10px'>"
+           "Example Claims</p>")
+
+        for c in [
             "Coffee prevents cancer",
             "Exercise improves mental health",
             "The Earth is flat",
             "Vaccines cause autism",
-            "AI will replace all jobs by 2030"
-        ]
-        
-        safe_markdown("<div style='font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#666;margin-bottom:12px;'>Pre-verified queries</div>")
-        for claim in example_claims:
-            if st.button(claim, key=f"example_{claim}", use_container_width=True):
-                st.session_state.example_claim = claim
+            "AI will replace all jobs by 2030",
+        ]:
+            if st.button(c, key=f"ex_{c}", use_container_width=True):
+                st.session_state.example_claim = c
                 st.rerun()
 
+        st.write("")
+        sh("""<div style='padding:10px 12px;border:1px solid var(--border);
+                          font-size:9px;color:var(--text2);
+                          font-family:var(--mono);line-height:1.8;letter-spacing:1px'>
+          POWERED BY<br>
+          <span style='color:var(--text)'>GROQ + GEMINI</span>
+        </div>""")
 
-def render_verdict(result):
-    """Render verdict with styled box"""
-    verdict = result.get('verdict', 'UNKNOWN')
-    confidence = result.get('confidence', 0.0)
-    if confidence is None:
-        confidence = 0.0
-    moderator_reasoning = result.get('moderator_reasoning', '')
-    
-    # Determine verdict class
-    verdict_class = {
-        'TRUE': 'verdict-true',
-        'FALSE': 'verdict-false',
-        'PARTIALLY TRUE': 'verdict-partial',
-        'INSUFFICIENT EVIDENCE': 'verdict-partial'
-    }.get(verdict, 'verdict-partial')
-    
-    # Escape verdict string to prevent XSS
-    escaped_verdict = html.escape(verdict)
-    
-    safe_markdown(f"""
-    <div class="verdict-box {verdict_class}">
-        <strong>{escaped_verdict}</strong><br>
-        Confidence: {confidence:.1%}
+
+def render_progress(active: int) -> None:
+    """active: 1–4 = that stage running; 5 = all done."""
+    if active == 0:
+        return
+    cells = ""
+    for i, name in enumerate(["ProAgent", "ConAgent", "FactCheck", "Moderator"], 1):
+        if   i < active:  cls, sym = "ps ps-ok",  "✓"
+        elif i == active: cls, sym = "ps ps-run",  str(i)
+        else:             cls, sym = "ps",          str(i)
+        cells += f"<div class='{cls}'><span class='ps-n'>{sym}</span>{name}</div>"
+    sh(f"<div class='prog'>{cells}</div>")
+
+
+def render_api_exhausted(retry_at: Optional[float]) -> None:
+    """Display a prominent banner when ALL providers are rate-limited."""
+    remaining = max(0, int((retry_at or 0) - time.time())) if retry_at else None
+    timer_html = (
+        f"<div class='api-retry-timer'>{remaining}s</div>"
+        if remaining is not None else ""
+    )
+    sh(f"""
+    <div class='api-exhausted'>
+      <div class='api-exhausted-title'>⚡ API Resources Exhausted</div>
+      <div class='api-exhausted-body'>
+        All Groq and Gemini API keys are currently rate-limited.<br>
+        The system automatically tried every available key and fallback provider.<br>
+        Please wait for the cooldown period before retrying.
+      </div>
+      {timer_html}
     </div>
     """)
-    
-    # Moderation Decision Chat style
-    if moderator_reasoning:
-        st.markdown("---")
-        safe_markdown("""
-        <div style='display: flex; align-items: center; margin-bottom: 20px;'>
-            <div style='width: 40px; height: 40px; border-radius: 0; border: 1px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: bold; margin-right: 15px;'>
-                M
-            </div>
-            <div>
-                <h3 style='margin: 0; font-size: 14px; letter-spacing: 2px;'>MODERATOR_DECISION_CHAT</h3>
-                <div style='font-size: 10px; color: #888; text-transform: uppercase;'>Evidence-Based Consensus Protocol</div>
-            </div>
-        </div>
-        """)
-        
-        # Sanitize for excerpt
-        escaped_reasoning = html.escape(moderator_reasoning)
-        excerpt = escaped_reasoning[:300] + ("..." if len(escaped_reasoning) > 300 else "")
-        
-        # Fix f-string backslash error and ensure safe rendering
-        formatted_excerpt = excerpt.replace('\n', '<br>')
-        safe_markdown(f"""
-        <div class="debate-block" style="border-left: 3px solid #fff; padding-left: 20px; color: #fff; margin-bottom: 10px;">
-            {formatted_excerpt}
-        </div>
-        """)
-        
-        with st.expander("VIEW FULL REASONING PROTOCOL"):
-            formatted_reasoning = escaped_reasoning.replace('\n', '<br>')
-            safe_markdown(f"""
-            <div style="font-size: 14px; line-height: 1.6; color: #ccc; font-family: 'Space Mono', monospace;">
-                {formatted_reasoning}
-            </div>
-            """)
-    
-    # NEW: Gap Analysis for Insufficient Evidence
-    if verdict == 'INSUFFICIENT EVIDENCE':
-        st.markdown("---")
-        safe_markdown("""
-        <div style='background-color: #111; border: 1px solid #333; padding: 20px;'>
-            <h4 style='font-size: 12px; color: #ff3333; margin-top:0;'>GAP_ANALYSIS_PROTOCOL</h4>
-            <p style='font-size: 13px; color: #888;'>The current evidence pool is non-decisive. Primary bottlenecks:</p>
-            <ul style='font-size: 13px; color: #aaa; padding-left: 20px;'>
-                <li>Low verification density on primary claims</li>
-                <li>Conflicting signals from verified peer-reviewed sources</li>
-                <li>High fallacy density in adversarial rebuttals</li>
-            </ul>
-        </div>
-        """)
+    if retry_at:
+        remaining_s = max(0.0, retry_at - time.time())
+        st.progress(min(1.0, 1.0 - remaining_s / max(remaining_s, 60.0)),
+                    text=f"Cooldown — retry in ~{int(remaining_s)}s")
 
 
-def render_metrics(result):
-    """Render quantitative metrics dashboard"""
-    metrics = result.get('metrics')
-    if not metrics:
+def render_empty() -> None:
+    sh("""<div class='empty'>
+      <span class='empty-g'>◈</span>
+      <p class='empty-h'>Ready to verify</p>
+      <p class='empty-b'>Type a claim and press
+        <strong style='color:var(--text)'>Verify Claim</strong>.
+        Four AI agents debate, fact-check, and deliver a verdict.
+      </p>
+    </div>""")
+
+
+def render_verdict(result: Mapping[str, Any]) -> None:
+    verdict    = str(result.get("verdict", "UNKNOWN") or "UNKNOWN")
+    confidence = float(result.get("confidence", 0.0) or 0.0)
+    claim_text = str(result.get("claim", "") or "")
+    vc  = _vclass(verdict)
+    pct = int(confidence * 100)
+
+    claim_html = (f"<div class='vbox-claim'>\"{html.escape(claim_text)}\"</div>"
+                  if claim_text else "")
+
+    sh(f"""<div class='vbox {vc}'>
+      <div class='vbox-label'>Verdict</div>
+      <div class='vbox-verdict'>{html.escape(verdict)}</div>
+      {claim_html}
+      <div class='conf-track'><div class='conf-fill' style='width:{pct}%'></div></div>
+      <div class='conf-lbl'>Confidence &nbsp;{confidence:.1%}</div>
+    </div>""")
+
+    # Handle special RATE_LIMITED verdict explicitly
+    if verdict == "RATE_LIMITED":
+        render_api_exhausted(st.session_state.get("retry_at"))
         return
-        
-    st.markdown("---")
-    safe_markdown("<h3>INTELLIGENCE_METRICS</h3>")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        cred = metrics.get('credibility', 0.0) or 0.0
-        st.metric("Evidence Credibility", f"{cred:.0%}", help="Strength of verified sources")
-    
-    with col2:
-        fallacies = metrics.get('fallacies', 0) or 0
-        st.metric("Fallacy Count", fallacies, delta=f"-{fallacies}" if fallacies > 0 else None, delta_color="inverse")
-    
-    with col3:
-        balance = metrics.get('balance', 0.5) or 0.5
-        st.metric("Rebuttal Balance", f"{balance:.1f}", help="Semantic balance between Pro and Con arguments")
+
+    if mr := result.get("moderator_reasoning"):
+        with st.expander("▸ Moderator Reasoning"):
+            sh("<div style='font-size:13px;color:#bbb;line-height:1.75'>"
+               + html.escape(str(mr)).replace("\n", "<br>") + "</div>")
 
 
-def render_verification_stats(result):
-    """Render source verification statistics"""
-    
-    # Get verification results
-    verification_results = result.get('verification_results', []) or []
-    pro_verification = result.get('pro_verification_rate', 0.0) or 0.0
-    con_verification = result.get('con_verification_rate', 0.0) or 0.0
-    
-    if not verification_results:
+def render_metrics(result: Mapping[str, Any]) -> None:
+    m = result.get("metrics") or {}
+    if not m:
         return
-    
-    # Count statuses
-    total = len(verification_results)
-    verified = sum(1 for r in verification_results if r.get('status') == 'VERIFIED')
-    hallucinated = total - verified
-    
-    safe_markdown("<h3>SOURCES</h3>")
-    
-    # Metrics row
-    col1, col2, col3, col4 = st.columns(4)
-    
+    sec("Intelligence Metrics")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Evidence Credibility", f"{float(m.get('credibility', 0.0)):.0%}")
+    c2.metric("Fallacy Count",        int(m.get("fallacies", 0)))
+    c3.metric("Rebuttal Balance",     f"{float(m.get('balance', 0.5)):.2f}")
+
+
+def render_sources(result: Mapping[str, Any]) -> None:
+    vrs = result.get("verification_results") or []
+    if not vrs:
+        return
+    sec("Source Verification")
+
+    total    = len(vrs)
+    verified = sum(1 for r in vrs if r.get("status") == "VERIFIED")
+    failed   = total - verified
+    avg_rate = (
+        float(result.get("pro_verification_rate", 0.0) or 0.0)
+        + float(result.get("con_verification_rate", 0.0) or 0.0)
+    ) / 2
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total",    total)
+    c2.metric("Verified", verified,
+              f"+{verified/total*100:.0f}%" if total else "0%")
+    c3.metric("Failed",   failed,
+              f"-{failed/total*100:.0f}%" if (failed and total) else None)
+    c4.metric("Avg Rate", f"{avg_rate:.1%}")
+
+    with st.expander("▸ Detailed Source Results"):
+        rows = ""
+        for i, vr in enumerate(vrs, 1):
+            ok   = vr.get("status") == "VERIFIED"
+            url  = _clip(vr.get("url", ""))
+            err  = html.escape(vr.get("error", "") or "")
+            badge    = f"<span class='sbadge {'sok' if ok else 'sfail'}'>{'OK' if ok else 'FAIL'}</span>"
+            url_cls  = "surl" if ok else "surl sfail-url"
+            err_cell = f"<span class='serr'>{err}</span>" if (not ok and err) else "<span></span>"
+            rows += f"""<div class='srow'>
+              <span class='snum'>{i:02d}</span>
+              <span class='{url_cls}'>{html.escape(url)}</span>
+              {err_cell}
+              {badge}
+            </div>"""
+        sh(f"<div>{rows}</div>")
+
+
+def render_debate(result: Mapping[str, Any]) -> None:
+    pros   = list(result.get("pro_arguments", []) or [])
+    cons   = list(result.get("con_arguments", []) or [])
+    rounds = min(len(pros), len(cons))
+    if not rounds:
+        return
+    sec("Debate Log")
+    for idx, tab in enumerate(st.tabs([f"Round {i+1}" for i in range(rounds)])):
+        with tab:
+            lc, rc = st.columns(2)
+            with lc:
+                sh(f"""<div class='dblock dpro'>
+                  <div class='dlbl'>Pro — Supporting</div>
+                  {html.escape(pros[idx]).replace(chr(10),'<br>')}
+                </div>""")
+            with rc:
+                sh(f"""<div class='dblock dcon'>
+                  <div class='dlbl'>Con — Rebuttal</div>
+                  {html.escape(cons[idx]).replace(chr(10),'<br>')}
+                </div>""")
+
+
+def render_feedback(result: Mapping[str, Any]) -> None:
+    sec("Feedback Protocol")
+    claim   = str(result.get("claim", "Unknown Claim") or "Unknown Claim")
+    verdict = str(result.get("verdict", "UNKNOWN") or "UNKNOWN")
+
+    if st.session_state.feedback_given:
+        sym = "✓" if st.session_state.feedback_given == "UP" else "✗"
+        msg = ("Marked accurate — thank you."
+               if st.session_state.feedback_given == "UP"
+               else "Flagged for human review.")
+        sh(f"<p style='font-family:var(--mono);font-size:10px;color:var(--text2);"
+           f"letter-spacing:1px;padding:12px 0'>{sym} &nbsp;{msg}</p>")
+        return
+
+    col1, col2, _sp = st.columns([1, 1, 4])
     with col1:
-        st.metric("Total Sources", total)
+        sh("<div class='fb-wrap-up'>")
+        if st.button("👍  Accurate", key="fb_up", use_container_width=True):
+            record_feedback(claim, verdict, "UP")
+            st.session_state.feedback_given = "UP"
+            st.rerun()
+        sh("</div>")
     with col2:
-        st.metric("Verified", verified, f"{(verified/total*100):.0f}%")
-    with col3:
-        st.metric("Failed", hallucinated, f"{(hallucinated/total*100):.0f}%")
-    with col4:
-        avg_verification = (pro_verification + con_verification) / 2
-        st.metric("Avg. Rate", f"{avg_verification:.1%}")
-    
-    # Detailed results
-    with st.expander("Detailed Verification Results", expanded=False):
-        for i, vr in enumerate(verification_results, 1):
-            status = vr.get('status', 'UNKNOWN')
-            url = vr.get('url', 'Unknown URL')
-            # Escape URL to prevent XSS
-            escaped_url = html.escape(url)
-            
-            if status == 'VERIFIED':
-                safe_markdown(f"{i}. <span class='source-verified'>{escaped_url}</span>")
-            else:
-                error = vr.get('error', 'Unknown error')
-                # Escape error message to prevent XSS
-                escaped_error = html.escape(error)
-                safe_markdown(f"{i}. <span class='source-failed'>{escaped_url}</span> - {escaped_error}")
+        sh("<div class='fb-wrap-down'>")
+        if st.button("👎  Inaccurate", key="fb_down", use_container_width=True):
+            record_feedback(claim, verdict, "DOWN")
+            st.session_state.feedback_given = "DOWN"
+            st.rerun()
+        sh("</div>")
 
 
-def render_debate_arguments(result):
-    """Render debate arguments in expandable sections"""
-    
-    pro_arguments = result.get('pro_arguments', [])
-    con_arguments = result.get('con_arguments', [])
-    pro_sources = result.get('pro_sources', [])
-    con_sources = result.get('con_sources', [])
-    
-    safe_markdown("<h3>DEBATE LOG</h3>")
-    
-    # Create tabs for each round
-    num_rounds = min(len(pro_arguments), len(con_arguments))
-    
-    if num_rounds > 0:
-        tabs = st.tabs([f"Round {i+1}" for i in range(num_rounds)])
-        
-        for i, tab in enumerate(tabs):
-            with tab:
-                col1, col2 = st.columns(2)
-                
-                # ProAgent column
-                with col1:
-                    st.markdown("### ProAgent")
-                    # Escape argument content to prevent XSS
-                    escaped_pro_arg = html.escape(pro_arguments[i])
-                    safe_markdown(f'<div class="debate-block">{escaped_pro_arg}</div>')
-                    
-                    if i < len(pro_sources) and pro_sources[i]:
-                        st.markdown("**Sources cited:**")
-                        for j, source in enumerate(pro_sources[i], 1):
-                            # Escape source URLs to prevent XSS
-                            escaped_source = html.escape(source)
-                            st.markdown(f"{j}. {escaped_source}")
-                
-                # ConAgent column
-                with col2:
-                    st.markdown("### ConAgent")
-                    # Escape argument content to prevent XSS
-                    escaped_con_arg = html.escape(con_arguments[i])
-                    safe_markdown(f'<div class="debate-block">{escaped_con_arg}</div>')
-                    
-                    if i < len(con_sources) and con_sources[i]:
-                        st.markdown("**Sources cited:**")
-                        for j, source in enumerate(con_sources[i], 1):
-                            # Escape source URLs to prevent XSS
-                            escaped_source = html.escape(source)
-                            st.markdown(f"{j}. {escaped_source}")
+def render_footer() -> None:
+    sh("""<div class='foot'>
+      <span style='color:var(--text)'>InsightSwarm</span>
+      <span>Groq + Gemini</span>
+    </div>""")
 
 
-@st.cache_resource(show_spinner=False)
-def get_orchestrator():
-    """Cache the LangGraph compilation so it doesn't recompile on every interaction"""
-    return DebateOrchestrator()
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════════════════════
 
-
-def main():
-    """Main application logic"""
-    
-    init_session_state()
+def main() -> None:
+    _init()
     render_header()
     render_sidebar()
-    
-    # Main content area
-    st.markdown("---")
-    
-    # Claim input
-    claim_input = st.text_input(
-        "SUBJECT CLAIM",
-        value=st.session_state.get('example_claim', ''),
-        placeholder="Enter natural language claim...",
-        help="System connects to Groq & Gemini for verification",
-        label_visibility="visible"
+
+    # ── Claim input ────────────────────────────────────────────────────────────
+    claim = st.text_input(
+        "Subject Claim",
+        value=st.session_state.get("example_claim", ""),
+        placeholder="Enter a natural-language claim to verify…",
+        help="Minimum 10 characters.",
     )
-    
-    col1, col2, col3 = st.columns([2, 2, 3])
-    
-    with col1:
-        analyze_button = st.button("VERIFY_CLAIM", type="primary", use_container_width=True)
-    
-    with col2:
-        if st.button("RESET", use_container_width=True):
-            st.session_state.debate_run = False
-            st.session_state.result = None
-            st.session_state.example_claim = ''
-            st.session_state.thread_id = str(uuid.uuid4())  # Reset thread isolation
+    chars = len((claim or "").strip())
+    if 0 < chars < 10:
+        st.caption(f"{chars} / 10 chars minimum")
+    elif chars >= 10:
+        st.caption(f"{chars} chars · ready")
+
+    # ── Action buttons ─────────────────────────────────────────────────────────
+    bc, rc, _ = st.columns([2, 1, 5])
+    with bc:
+        verify = st.button("Verify Claim", type="primary",
+                           use_container_width=True, disabled=(chars < 10))
+    with rc:
+        if st.button("Reset", use_container_width=True):
+            st.session_state.update(
+                debate_run=False, result=None,
+                example_claim="", feedback_given=None,
+                thread_id=str(uuid.uuid4()),
+                debate_error=None, retry_at=None,
+            )
             st.rerun()
-    
-    # Process claim
-    if analyze_button and claim_input:
-        
-        # Validation
-        if len(claim_input.strip()) < 10:
-            st.error("Please enter a claim with at least 10 characters.")
-            return
-        
-        # Fix #37: Use shared validate_claim for injection/length/quality checks
-        valid, error_msg = validate_claim(claim_input)
+
+    # ── Persistent error banner (API exhaustion / other) ───────────────────────
+    err = st.session_state.get("debate_error")
+    retry_at: Optional[float] = st.session_state.get("retry_at")
+
+    if err and not st.session_state.debate_run:
+        is_rate_limit = (
+            "rate" in err.lower()
+            or "429" in err
+            or "exhausted" in err.lower()
+            or "resource_exhausted" in err.lower()
+        )
+        if is_rate_limit:
+            render_api_exhausted(retry_at)
+        else:
+            st.error(f"Last run failed: {err}")
+
+    # ── Run debate ─────────────────────────────────────────────────────────────
+    def analyze_claim_with_streaming(claim_text: str):
+        valid, validation_err = validate_claim(claim_text)
         if not valid:
-            st.error(f"Invalid claim: {error_msg}")
-            return
-        
-        # Initialize/Retrieve orchestrator
-        with st.spinner("Initializing debate system..."):
-            try:
-                orchestrator = get_orchestrator()
-                st.session_state.orchestrator = orchestrator
-            except Exception as e:
-                st.error(f"Failed to initialize: {e}")
-                return
-        
-        # Run debate
-        st.markdown("---")
-        safe_markdown("<h3 style='font-size:18px;'>ANALYZING</h3>")
-        
+            st.error(f"Invalid claim: {validation_err}")
+            return None
+
         try:
-            # Check if task already running
-            if st.session_state.background_task is not None and not st.session_state.background_task.done():
-                st.warning("Debate already in progress. Please wait for it to complete...")
-                return
-            
-            # Using st.status for a live, streaming UX instead of a frozen while loop
-            with st.status("Initializing Debate Nodes...", expanded=True) as status:
-                st.write("Configuring adversarial agents...")
-                
-                # Start background task (in real life, orchestrator needs streaming yields, 
-                # but for now we block gracefully inside the status box so the UI isn't completely frozen)
-                st.session_state.background_task = st.session_state.task_executor.submit(
-                    st.session_state.orchestrator.run,
-                    claim_input,
-                    st.session_state.thread_id # Pass thread isolation via kwargs supported later
-                )
-                
-                status.update(label="Running 3-Round Debate...", state="running")
-                st.write("Debating...")
-                
-                # Poll gracefully
-                task = st.session_state.background_task
-                poll_interval = 0.5
-                max_wait_time = 120
-                elapsed_time = 0
-                
-                while not task.done() and elapsed_time < max_wait_time:
-                    time.sleep(poll_interval)
-                    elapsed_time += poll_interval
-                    
-                    if elapsed_time > 15 and elapsed_time < 16:
-                        st.write("FactChecker verifying cited sources...")
-                    elif elapsed_time > 30 and elapsed_time < 31:
-                        st.write("Moderator analyzing logical fallacies...")
-                
-                if task.done():
-                    result = task.result()
-                    
-                    if result.get('is_cached'):
-                        status.update(label="Loaded from Cache", state="complete", expanded=False)
-                        st.success("Lightning Fast: Result loaded from Semantic Cache.")
-                    else:
-                        status.update(label="Debate Complete", state="complete", expanded=False)
-                    
-                    st.session_state.result = result
-                    
-                    # Fix #29: Cap moderator chat memory leak if this is storing anything
-                    if len(st.session_state.moderator_chat) > 20:
-                        st.session_state.moderator_chat = st.session_state.moderator_chat[-10:]
-                        
-                    st.session_state.debate_run = True
-                    st.session_state.background_task = None
-                else:
-                    status.update(label="Analysis Timeout", state="error")
-                    st.error(f"Analysis timeout after {max_wait_time} seconds")
-                    st.session_state.background_task = None
-                    return
-            
+            st.session_state.orchestrator = _get_orchestrator()
         except Exception as e:
-            st.error(f"Analysis failed: {e}")
-            st.session_state.background_task = None
-            return
-    
-    # Display results
+            st.error(f"Orchestrator init failed: {e}")
+            return None
+
+        # Reset thread_id per claim to ensure clean graph state and prevent checkpoint memory leaks
+        st.session_state.thread_id = str(uuid.uuid4())
+        
+        with st.status(f"Verifying: {claim_text[:30]}...", expanded=True) as status:
+            st.write("Initializing argument verification agents...")
+            
+            task = st.session_state.executor.submit(
+                st.session_state.orchestrator.run, claim_text, st.session_state.thread_id
+            )
+            
+            timeout, start = 120, time.time()
+            stages = [
+                "ProAgent collecting evidence", 
+                "ConAgent building rebuttal", 
+                "FactChecker verifying cited sources", 
+                "Moderator compiling final verdict"
+            ]
+            
+            while not task.done():
+                elapsed = time.time() - start
+                if elapsed > timeout:
+                    break
+                # Approximate stages based on time
+                active_idx = min(3, int(elapsed / (timeout / 4)))
+                status.update(label=f"⏳ {stages[active_idx]} ({elapsed:.0f}s)", state="running")
+                time.sleep(0.5)
+                
+            if task.done():
+                try:
+                    res = task.result()
+                    status.update(label=f"✅ Verification complete in {time.time()-start:.0f}s", state="complete")
+                    
+                    # Store in memory history
+                    st.session_state.history.append({"claim": claim_text, "verdict": getattr(res, "verdict", "UNKNOWN")})
+                    _cap_memory_history()
+                    return res
+                except RateLimitError as e:
+                    status.update(label=f"❌ Rate Limited", state="error")
+                    st.session_state.debate_error = str(e)
+                    st.session_state.retry_at = time.time() + float(getattr(e, "retry_after", 60) or 60)
+                    return e
+                except Exception as e:
+                    status.update(label=f"❌ Debate failed: {e}", state="error")
+                    st.session_state.debate_error = str(e)
+                    return e
+            else:
+                status.update(label="⌛ Timeout exceeded", state="error")
+                st.session_state.debate_error = "Timeout exceeded."
+                return None
+
+    if verify and claim and chars >= 10:
+        task = st.session_state.background_task
+        if task and not task.done():
+            st.warning("A debate is already running — please wait.")
+        else:
+            st.session_state.debate_error = None
+            st.session_state.retry_at = None
+            st.session_state.feedback_given = None
+            
+            result = analyze_claim_with_streaming(claim)
+            
+            if isinstance(result, Exception):
+                st.session_state.debate_run = False
+                if isinstance(result, RateLimitError):
+                    render_api_exhausted(st.session_state.retry_at)
+                else:
+                    st.error(f"Debate failed: {result}")
+            elif result is not None:
+                st.session_state.result = result
+                st.session_state.debate_run = True
+            else:
+                st.session_state.debate_run = False
+
+    # ── Show results ───────────────────────────────────────────────────────────
     if st.session_state.debate_run and st.session_state.result:
-        st.markdown("---")
-        
-        result = st.session_state.result
-        
-        # Render verdict
-        render_verdict(result)
-        
-        # Render metrics dashboard (NEW)
-        render_metrics(result)
-        
-        # Render verification stats
-        render_verification_stats(result)
-        
-        st.markdown("---")
-        
-        # Render debate transcript
-        render_debate_arguments(result)
-        
-        # Provide User Feedback loop
-        st.markdown("---")
-        safe_markdown("<h3>FEEDBACK_PROTOCOL</h3>")
-        fcol1, fcol2, fcol3 = st.columns([1,1,4])
-        
-        # We need to capture the current claim and verdict for feedback
-        current_claim = st.session_state.get('result', {}).get('claim', 'Unknown Claim')
-        current_verdict = st.session_state.get('result', {}).get('verdict', 'UNKNOWN')
-        
-        with fcol1:
-            if st.button("👍 ACCURATE", key="feedback_up", help="Mark this verdict as correct"):
-                record_feedback(current_claim, current_verdict, "UP")
-                st.success("Feedback recorded. Thank you.")
-        with fcol2:
-            if st.button("👎 INCORRECT", key="feedback_down", help="Mark this verdict as flawed"):
-                record_feedback(current_claim, current_verdict, "DOWN")
-                st.success("Feedback recorded for human review.")
-        
-        # Footer
-        safe_markdown("""
-        <div class='footer'>
-            <span><strong>INSIGHTSWARM</strong></span>
-            <span>POWERED BY GROQ + GEMINI</span>
-        </div>
-        """)
+        r = cast(Mapping[str, Any], st.session_state.result)
+        render_verdict(r)
+        render_metrics(r)
+        render_sources(r)
+        render_debate(r)
+        render_feedback(r)
+        render_footer()
+    elif not st.session_state.debate_run and not err:
+        render_empty()
 
 
 if __name__ == "__main__":

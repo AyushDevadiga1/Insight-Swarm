@@ -1,6 +1,4 @@
-    
-        
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Literal
 from datetime import datetime
 
@@ -29,9 +27,19 @@ class AgentResponse(BaseModel):
     reasoning: Optional[str] = None
     metrics: Optional[Dict[str, Any]] = None
 
+    def __getitem__(self, item):
+        return getattr(self, item)
+
+    def get(self, key, default=None):
+        val = getattr(self, key, default)
+        if val is None:
+            return default
+        return val
+
 class ModeratorVerdict(BaseModel):
     """Structured verdict from the Moderator agent."""
-    verdict: Literal["TRUE", "FALSE", "PARTIALLY TRUE", "INSUFFICIENT EVIDENCE", "CONSENSUS_SETTLED", "ERROR"]
+    verdict: Literal["TRUE", "FALSE", "PARTIALLY TRUE", "INSUFFICIENT EVIDENCE",
+                     "CONSENSUS_SETTLED", "RATE_LIMITED", "UNKNOWN", "ERROR"]
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
     metrics: Optional[Dict[str, float]] = None
@@ -56,7 +64,13 @@ class DebateState(BaseModel):
     num_rounds: int = 3
     pro_evidence: List[Dict[str, Any]] = Field(default_factory=list)
     con_evidence: List[Dict[str, Any]] = Field(default_factory=list)
-    
+    # Tavily pre-fetched evidence shared at debate start
+    evidence_sources: List[Dict[str, Any]] = Field(default_factory=list)
+    verification_feedback: Optional[str] = None
+    pro_model_used: Optional[str] = None
+    con_model_used: Optional[str] = None
+    moderator_model_used: Optional[str] = None
+    system_status: Optional[str] = None
     # Compatibility with TypedDict-style access during migration
     def __getitem__(self, item):
         return getattr(self, item)
@@ -69,6 +83,15 @@ class DebateState(BaseModel):
         if val is None:
             return default
         return val
+
+    def __contains__(self, item: str) -> bool:
+        return item in self.__fields__
+
+    def keys(self):
+        return self.__fields__.keys()
+
+    def items(self):
+        return ((k, getattr(self, k)) for k in self.__fields__.keys())
 
     def to_dict(self) -> Dict[str, Any]:
         return self.dict()

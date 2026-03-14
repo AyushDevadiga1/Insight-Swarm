@@ -2,7 +2,7 @@
 ProAgent - Argues that the claim is TRUE using structured outputs.
 """
 from src.agents.base import BaseAgent, AgentResponse, DebateState
-from src.llm.client import FreeLLMClient
+from src.llm.client import FreeLLMClient, RateLimitError
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,6 +16,7 @@ class ProAgent(BaseAgent):
     def __init__(self, llm_client: FreeLLMClient):
         super().__init__(llm_client)
         self.role = "PRO"
+        self.preferred_provider = "groq"  # ProAgent uses Groq (Llama)
     
     def _format_evidence(self, evidence_bundle):
         if not evidence_bundle:
@@ -36,29 +37,38 @@ class ProAgent(BaseAgent):
             response = self.client.call_structured(
                 prompt=prompt,
                 output_schema=AgentResponse,
-                temperature=0.7
+                temperature=0.7,
+                preferred_provider=self.preferred_provider
             )
             
             # Ensure the agent field is correct
             response.agent = "PRO"
             response.round = state.round
+            response.sources = self._sanitize_sources(response.sources)
             
             self.call_count += 1
             return response
             
         except Exception as e:
-            logger.error(f"ProAgent failed to generate structured response: {e}")
-            # Fallback for critical failure
+            logger.error(f"{self.role}Agent failed to generate structured response: {e}")
+            error_msg = str(e)
+            if "QUOTA_EXHAUSTED" in error_msg:
+                argument = f"[API QUOTA EXHAUSTED] Cannot generate new argument. Please update your API keys in .env or wait for quota reset."
+                confidence = 0.0
+            else:
+                argument = f"I maintain my position that the claim '{state.claim}' is {self.role.lower()}. (LLM call failed due to technical issue)"
+                confidence = 0.5
+            
             return AgentResponse(
-                agent="PRO",
+                agent=self.role,
                 round=state.round,
-                argument=f"I maintain my position that the claim '{state.claim}' is true, based on previous evidence.",
+                argument=argument,
                 sources=[],
-                confidence=0.5
+                confidence=confidence
             )
     
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
-        evidence_bundle = state.get('pro_evidence', [])
+        evidence_bundle = state.pro_evidence or state.evidence_sources or []
         formatted_evidence = self._format_evidence(evidence_bundle)
         
         if round_num == 1:
@@ -74,10 +84,15 @@ You MUST cite the source URLs provided in the evidence section.
 Focus on being persuasive but factual."""
         else:
             con_argument = state.con_arguments[-1] if state.con_arguments else "No counter-argument yet"
+            
+            feedback_section = ""
+            if state.verification_feedback:
+                feedback_section = f"\n\n{state.verification_feedback}\n"
+                
             return f"""You are ProAgent. You must maintain that the following claim is TRUE: {state.claim}
 
 The opposing agent argued:
-{con_argument}
+{con_argument}{feedback_section}
 
 YOUR TASK:
 Directly address their rebuttal and strengthen your original case. 
