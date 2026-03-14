@@ -1,12 +1,14 @@
 from pydantic import BaseModel
-from typing import Type, Any
+from typing import Type, Any, Optional
 import os
+import re
 import threading
 import logging
 import time
+import hashlib
 from dotenv import load_dotenv
 try:
-    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type  # type: ignore
+    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_exception  # type: ignore
     HAS_TENACITY = True
 except ImportError:
     HAS_TENACITY = False
@@ -17,17 +19,30 @@ except ImportError:
     def stop_after_attempt(*args: Any, **kwargs: Any) -> Any: return None
     def wait_exponential(*args: Any, **kwargs: Any) -> Any: return None
     def retry_if_exception_type(*args: Any, **kwargs: Any) -> Any: return None
+    def retry_if_exception(*args: Any, **kwargs: Any) -> Any: return None
 
 load_dotenv()
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
+
+from src.utils.api_key_manager import get_api_key_manager
+
+class RateLimitError(RuntimeError):
+    def __init__(self, provider: str, message: str, retry_after: Optional[float] = None):
+        super().__init__(message)
+        self.provider = provider
+        self.retry_after = retry_after
 
 class FreeLLMClient:
     MAX_CALLS_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+    
+    # Configurable model names
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    
     def __init__(self):
+        # Initialize API key manager first
+        self.key_manager = get_api_key_manager()
+        
         self.groq_client = None
         self.genai_client = None
         self.groq_available = False
@@ -39,46 +54,110 @@ class FreeLLMClient:
         self._counter_lock = threading.Lock()
         self.groq_error: Optional[str] = None
         self.gemini_error: Optional[str] = None
+        self._gemini_mode: Optional[str] = None
+        self._genai_types = None
+        self._gemini_legacy = None
+        self._gemini_legacy_lock = threading.Lock()
+        self._preferred_provider: Optional[str] = None
+        
+        # Initialize providers using API key manager
+        self._init_providers()
+    
+    def _init_providers(self):
+        """Initialize LLM providers using API key manager"""
         try:
-            from groq import Groq
-            groq_key = os.getenv("GROQ_API_KEY")
-            if not groq_key:
-                raise ValueError("GROQ_API_KEY not set in environment")
-            groq_key = groq_key.strip()
-            if len(groq_key) < 30:
-                raise ValueError("GROQ_API_KEY appears invalid (too short, expected >=30 characters)")
-            if not groq_key.startswith("gsk_"):
-                raise ValueError("GROQ_API_KEY format invalid (expected to start with 'gsk_')")
-            self.groq_client = Groq(api_key=groq_key)
-            self.groq_available = True
-            logger.info("✅ Groq client initialized")
-        except Exception as e:
+            # Initialize Groq
+            groq_key = self.key_manager.get_working_key("groq")
+            if groq_key:
+                from groq import Groq
+                self.groq_client = Groq(api_key=groq_key)
+                self.groq_available = True
+                logger.info("✅ Groq client initialized")
+            else:
+                self.groq_available = False
+                self.groq_error = "No working Groq API keys available"
+                logger.warning("⚠️ Groq client not available")
+                
+        except Exception as e: # Catching general Exception for initialization issues
             self.groq_available = False
             self.groq_error = str(e)
-            logger.warning(f"⚠️  Groq initialization failed: {type(e).__name__}")
+            logger.warning(f"⚠️ Groq initialization failed: {type(e).__name__}")
+            
         try:
-            import google.generativeai as genai  # type: ignore
-            gemini_key = os.getenv("GEMINI_API_KEY")
-            if not gemini_key:
-                raise ValueError("GEMINI_API_KEY not set in environment")
-            gemini_key = gemini_key.strip()
-            if len(gemini_key) < 30:
-                raise ValueError("GEMINI_API_KEY appears invalid (too short, expected >=30 characters)")
-            genai.configure(api_key=gemini_key)  # type: ignore
-            self.genai_client = genai.GenerativeModel('gemini-2.0-flash')  # type: ignore
-            self.gemini_available = True
-            logger.info("✅ Gemini client initialized")
-        except (ImportError, AttributeError) as e:
-            self.gemini_available = False
-            self.gemini_error = f"google.generativeai initialization failed: {type(e).__name__} - likely version compatibility issue"
-            logger.warning(f"⚠️  Gemini initialization failed: {type(e).__name__} (will use Groq only)")
-        except Exception as e:
+            # Initialize Gemini
+            gemini_key = self.key_manager.get_working_key("gemini")
+            if gemini_key:
+                try:
+                    from google import genai
+                    from google.genai import types as genai_types
+                    self._genai_types = genai_types
+                    self.genai_client = genai.Client(api_key=gemini_key)
+                    self.gemini_available = True
+                    self._gemini_mode = "genai"
+                    logger.info("✅ Gemini client initialized (google.genai)")
+                except (ImportError, AttributeError):
+                    import google.generativeai as genai
+                    self._gemini_legacy = genai
+                    genai.configure(api_key=gemini_key)
+                    self.genai_client = genai.GenerativeModel(self.GEMINI_MODEL)
+                    self.gemini_available = True
+                    self._gemini_mode = "legacy"
+                    logger.warning("⚠️ Using legacy Gemini client")
+            else:
+                self.gemini_available = False
+                self.gemini_error = "No working Gemini API keys available"
+                logger.warning("⚠️ Gemini client not available")
+                
+        except Exception as e: # Catching general Exception for initialization issues
             self.gemini_available = False
             self.gemini_error = str(e)
-            logger.warning(f"⚠️  Gemini initialization failed: {type(e).__name__}")
+            logger.warning(f"⚠️ Gemini initialization failed: {type(e).__name__}")
+            
         if not self.groq_available and not self.gemini_available:
             logger.error("❌ No LLM providers available")
             raise RuntimeError("No LLM providers available. Check your API keys in .env file")
+
+    def _is_rate_limit_error(self, error: Exception) -> bool:
+        text = str(error).lower()
+        return (
+            "rate limit" in text
+            or "rate_limit" in text
+            or "resource_exhausted" in text
+            or "429" in text
+        )
+
+    def _provider_order(self, preferred_provider: Optional[str] = None) -> list:
+        if preferred_provider:
+            if preferred_provider == "gemini":
+                return ["gemini", "groq"]
+            elif preferred_provider == "groq":
+                return ["groq", "gemini"]
+        if self._preferred_provider == "gemini":
+            return ["gemini", "groq"]
+        return ["groq", "gemini"]
+
+    def _set_next_preference(self, provider: str) -> None:
+        if provider == "groq" and self.gemini_available:
+            self._preferred_provider = "gemini"
+        elif provider == "gemini" and self.groq_available:
+            self._preferred_provider = "groq"
+        else:
+            self._preferred_provider = provider
+
+    def _extract_retry_after(self, message: str) -> Optional[float]:
+        match = re.search(r"retry in\s*([0-9]+(?:\.[0-9]+)?)s", message, re.IGNORECASE)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+        match = re.search(r"retrydelay':\s*'([0-9]+)s'", message, re.IGNORECASE)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+        return None
 
     def call_structured(
         self,
@@ -86,66 +165,87 @@ class FreeLLMClient:
         output_schema: Type[BaseModel],
         temperature: float = 0.7,
         max_tokens: int = 2000,
-        max_retries: int = 2
+        max_retries: int = 2,
+        preferred_provider: Optional[str] = None
     ) -> Any:
         """
-        Calls LLM with mandatory JSON output that is parsed into a Pydantic model.
-        Falls back between providers.
+        Calls LLM with mandatory JSON output.
+        ENFORCES rate limits and respects preferred provider order.
         """
         json_prompt = f"{prompt}\n\nIMPORTANT: You MUST return a valid JSON object matching this schema:\n{output_schema.schema_json(indent=2)}"
         
         last_error = None
-        
-        # Try Groq first
-        if self.groq_available:
-            for attempt in range(max_retries + 1):
-                try:
-                    response = self.groq_client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
-                        messages=[{"role": "user", "content": json_prompt}],
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        response_format={"type": "json_object"}
-                    )
-                    content = response.choices[0].message.content or "{}"
-                    return output_schema.parse_raw(content)
-                except Exception as e:
-                    last_error = e
-                    logger.warning(f"Groq structured call failed (attempt {attempt+1}): {e}")
-                    time.sleep(1)
-        
-        # Fallback to Gemini
-        if self.gemini_available:
-            for attempt in range(max_retries + 1):
-                try:
-                    # Gemini doesn't have a rigid 'json_object' mode in the same way, but 2.0-flash is great at it
-                    response = self.genai_client.generate_content(
-                        json_prompt,
-                        generation_config={
-                            "temperature": temperature,
-                            "max_output_tokens": max_tokens,
-                            "response_mime_type": "application/json"
-                        }
-                    )
-                    content = response.text or "{}"
-                    return output_schema.parse_raw(content)
-                except Exception as e:
-                    last_error = e
-                    logger.warning(f"Gemini structured call failed (attempt {attempt+1}): {e}")
-                    time.sleep(1)
-                    
-        logger.error(f"All structured LLM calls failed. Last error: {last_error}")
+        attempted_any = False
+
+        for provider in self._provider_order(preferred_provider):
+            if provider == "groq" and self.groq_available:
+                attempted_any = True
+                for attempt in range(max_retries + 1):
+                    try:
+                        with self._counter_lock:
+                            if not self._check_rate_limit("groq", self.groq_last_call_times):
+                                raise RuntimeError("Groq rate limit exceeded")
+                        
+                        response = self.groq_client.chat.completions.create(
+                            model=self.GROQ_MODEL,
+                            messages=[{"role": "user", "content": json_prompt}],
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            response_format={"type": "json_object"}
+                        )
+                        content = response.choices[0].message.content or "{}"
+                        result = output_schema.parse_raw(content)
+                        
+                        with self._counter_lock:
+                            self.groq_last_call_times.append(time.time())
+                        return result
+                        
+                    except Exception as e:
+                        last_error = e
+                        err_str = str(e).lower()
+                        if any(kw in err_str for kw in ["429", "rate limit", "quota", "exceeded", "limit reached", "model_decommissioned"]):
+                            logger.warning(f"Groq quota/limit error: {e}")
+                            break # Try next provider
+                        logger.warning(f"Groq attempt {attempt+1} failed: {e}")
+                        if attempt < max_retries:
+                            time.sleep(1)
+
+            if provider == "gemini" and self.gemini_available:
+                attempted_any = True
+                for attempt in range(max_retries + 1):
+                    try:
+                        with self._counter_lock:
+                            if not self._check_rate_limit("gemini", self.gemini_last_call_times):
+                                raise RuntimeError("Gemini rate limit exceeded")
+                        
+                        response = self._call_gemini(
+                            json_prompt,
+                            temperature,
+                            max_tokens,
+                            timeout=30,
+                            response_mime_type="application/json"
+                        )
+                        result = output_schema.parse_raw(response)
+                        
+                        with self._counter_lock:
+                            self.gemini_last_call_times.append(time.time())
+                        return result
+                        
+                    except Exception as e:
+                        last_error = e
+                        err_str = str(e).lower()
+                        if any(kw in err_str for kw in ["429", "rate limit", "quota", "exceeded", "limit reached"]):
+                            logger.warning(f"Gemini quota/limit error: {e}")
+                            break # End attempts for this provider
+                        logger.warning(f"Gemini attempt {attempt+1} failed: {e}")
+                        if attempt < max_retries:
+                            time.sleep(1)
+
+        if not attempted_any:
+            raise RuntimeError("No LLM providers available for structured call.")
+            
+        logger.error(f"All LLM structured calls failed. Last error: {last_error}")
         raise RuntimeError(f"Failed to get structured output from LLM: {last_error}")
-        # Track usage with thread-safe counter lock
-        self.groq_calls = 0
-        self.gemini_calls = 0
-        self.groq_last_call_times = []
-        self.gemini_last_call_times = []
-        self._counter_lock = threading.Lock()
-        
-        if not self.groq_available and not self.gemini_available:
-            logger.error("❌ No LLM providers available")
-            raise RuntimeError("No LLM providers available. Check your API keys in .env file")
     
     def _check_rate_limit(self, provider: str, call_times: list) -> bool:
         """
@@ -251,72 +351,120 @@ class FreeLLMClient:
         
         groq_error = None
         gemini_error = None
-        
-        # Try Groq first (primary provider)
-        if self.groq_available:
-            try:
-                with self._counter_lock:
-                    if not self._check_rate_limit("groq", self.groq_last_call_times):
-                        rate_limit_reached = True
-                    else:
-                        rate_limit_reached = False
-                if rate_limit_reached:
-                    logger.info("   Groq rate limit reached, sleeping 5s before Gemini fallback...")
-                    time.sleep(5)
-                else:
-                    if self.groq_client is None:
-                        raise RuntimeError("Groq client not initialized")
-                    response = self._call_groq(prompt, temperature, max_tokens, timeout)
-                    self._validate_response(response)
+        last_error: Optional[Exception] = None
+        attempted_any = False
+
+        for provider in self._provider_order():
+            if provider == "groq" and self.groq_available and self.key_manager.has_working_keys("groq"):
+                groq_key = self.key_manager.get_working_key("groq")
+                if not groq_key:
+                    continue
+                groq_key_hash = hashlib.sha256(groq_key.encode()).hexdigest()[:16]
+                attempted_any = True
+                try:
                     with self._counter_lock:
-                        self.groq_calls += 1
-                        self.groq_last_call_times.append(time.time())
-                        call_count = self.groq_calls
-                    logger.info(f"✅ Groq call #{call_count} successful")
-                    return response
-            except Exception as e:
-                groq_error = str(e)
-                logger.warning(f"⚠️  Groq failed: {type(e).__name__}")
-                logger.debug(f"   Error details: {groq_error[:100]}")  # type: ignore
-                logger.info("   Attempting Gemini fallback...")
-        
-        # Fallback to Gemini
-        if self.gemini_available:
-            try:
-                with self._counter_lock:
-                    if not self._check_rate_limit("gemini", self.gemini_last_call_times):
-                        rate_limit_reached = True
+                        rate_limit_reached = not self._check_rate_limit("groq", self.groq_last_call_times)
+                    if rate_limit_reached:
+                        logger.info("   Groq rate limit reached, trying Gemini fallback...")
                     else:
-                        rate_limit_reached = False
-                if rate_limit_reached:
-                    logger.warning("❌ Gemini rate limit also reached")
-                else:
-                    if self.genai_client is None:
-                        raise RuntimeError("Gemini client not initialized")
-                    response = self._call_gemini(prompt, temperature, max_tokens, timeout)
-                    self._validate_response(response)
+                        from groq import Groq
+                        groq_client = Groq(api_key=groq_key)
+                        response = self._call_groq(prompt, temperature, max_tokens, timeout, groq_client=groq_client)
+                        self._validate_response(response)
+                        with self._counter_lock:
+                            self.groq_calls += 1
+                            self.groq_last_call_times.append(time.time())
+                            call_count = self.groq_calls
+                        logger.info(f"✅ Groq call #{call_count} successful")
+                        self._set_next_preference("groq")
+                        self.key_manager.report_key_success("groq", groq_key_hash)
+                        return response
+                except Exception as e: # Catching general Exception for API call issues
+                    if self._is_rate_limit_error(e):
+                        retry_after = self._extract_retry_after(str(e))
+                        self.key_manager.report_key_failure("groq", groq_key_hash, e)
+                        last_error = RateLimitError("groq", str(e), retry_after)
+                        continue
+                    groq_error = str(e)
+                    last_error = e
+                    self.key_manager.report_key_failure("groq", groq_key_hash, e)
+                    logger.warning(f"⚠️  Groq failed: {type(e).__name__}")
+                    logger.debug(f"   Error details: {groq_error[:100]}")
+                    logger.info("   Attempting Gemini fallback...")
+
+            if provider == "gemini" and self.gemini_available and self.key_manager.has_working_keys("gemini"):
+                gemini_key = self.key_manager.get_working_key("gemini")
+                if not gemini_key:
+                    continue
+                gemini_key_hash = hashlib.sha256(gemini_key.encode()).hexdigest()[:16]
+                attempted_any = True
+                try:
                     with self._counter_lock:
-                        self.gemini_calls += 1
-                        self.gemini_last_call_times.append(time.time())
-                        call_count = self.gemini_calls
-                    logger.info(f"✅ Gemini fallback call #{call_count} successful")
-                    return response
-            except Exception as e:
-                gemini_error = str(e)
-                logger.error(f"❌ Gemini also failed: {type(e).__name__}")
-                logger.debug(f"   Error details: {gemini_error[:100]}")  # type: ignore
+                        rate_limit_reached = not self._check_rate_limit("gemini", self.gemini_last_call_times)
+                    if rate_limit_reached:
+                        logger.warning("❌ Gemini rate limit also reached")
+                    else:
+                        response = self._call_gemini(
+                            prompt,
+                            temperature,
+                            max_tokens,
+                            timeout,
+                            gemini_key=gemini_key
+                        )
+                        self._validate_response(response)
+                        with self._counter_lock:
+                            self.gemini_calls += 1
+                            self.gemini_last_call_times.append(time.time())
+                            call_count = self.gemini_calls
+                        logger.info(f"✅ Gemini call #{call_count} successful")
+                        self._set_next_preference("gemini")
+                        self.key_manager.report_key_success("gemini", gemini_key_hash)
+                        return response
+                except Exception as e: # Catching general Exception for API call issues
+                    if self._is_rate_limit_error(e):
+                        retry_after = self._extract_retry_after(str(e))
+                        self.key_manager.report_key_failure("gemini", gemini_key_hash, e)
+                        last_error = RateLimitError("gemini", str(e), retry_after)
+                        continue
+                    gemini_error = str(e)
+                    last_error = e
+                    self.key_manager.report_key_failure("gemini", gemini_key_hash, e)
+                    logger.error(f"❌ Gemini also failed: {type(e).__name__}")
+                    logger.debug(f"   Error details: {gemini_error[:100]}")
+
+        if not attempted_any:
+            raise RateLimitError("all", "No available API keys (all providers rate limited).")
+        if isinstance(last_error, RateLimitError):
+            raise last_error
+        
+        # Both providers failed - try offline fallback
+        if self._try_offline_fallback():
+            logger.warning("🔄 Using offline fallback mode")
+            return self._get_offline_fallback_text(prompt)
         
         # Both providers failed
         error_msg = "All LLM providers failed. Check your API keys and network connection."
         logger.error(error_msg)
         raise RuntimeError(error_msg)
-    
+    def _is_rate_limit_exception(self, e: Exception) -> bool:
+        return self._is_rate_limit_error(e)
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        # Using lambda since we don't have self in the decorator scope easily, wait, 
+        # tenacity retry_if_exception needs a boolean returning callable.
+        # It's better to just catch the RateLimitError bubbled up or check string:
+        retry=retry_if_exception(lambda e: "rate limit" in str(e).lower() or "429" in str(e) or "exhausted" in str(e).lower()),
+        reraise=True
+    )
     def _call_groq(
         self, 
         prompt: str, 
         temperature: float,
         max_tokens: int,
-        timeout: int
+        timeout: int,
+        groq_client: Optional[Any] = None
     ) -> str:
         """
         Call Groq API using current Llama model
@@ -331,8 +479,11 @@ class FreeLLMClient:
             Response text
         """
         try:
-            response = self.groq_client.chat.completions.create(
-                model="llama-3-8b-8192",
+            client = groq_client or self.groq_client
+            if client is None:
+                raise RuntimeError("Groq client not initialized")
+            response = client.chat.completions.create(
+                model=self.GROQ_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -343,19 +494,27 @@ class FreeLLMClient:
                 raise ValueError("Groq returned empty response")
             return response.choices[0].message.content or ""
         
-        except Exception as e:
+        except Exception as e: # Catching general Exception for API call issues
             logger.debug(f"Groq API error: {type(e).__name__}")
             raise
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception(lambda e: "rate limit" in str(e).lower() or "429" in str(e) or "exhausted" in str(e).lower()),
+        reraise=True
+    )
     def _call_gemini(
         self, 
         prompt: str, 
         temperature: float,
         max_tokens: int,
-        timeout: int
+        timeout: int,
+        gemini_key: Optional[str] = None,
+        response_mime_type: Optional[str] = None
     ) -> str:
         """
-        Call Gemini API using google.generativeai SDK
+        Call Gemini API using google.genai (preferred) or google.generativeai (legacy) SDK
         
         Args:
             prompt: User prompt
@@ -367,21 +526,49 @@ class FreeLLMClient:
             Response text
         """
         try:
-            response = self.genai_client.generate_content(
-                prompt,
-                generation_config={
+            if gemini_key is None:
+                gemini_key = self.key_manager.get_working_key("gemini")
+            if not gemini_key:
+                raise RuntimeError("No working Gemini API keys available")
+
+            if self._gemini_mode == "genai" and self._genai_types is not None:
+                from google import genai
+                client = genai.Client(api_key=gemini_key)
+                config_kwargs = {
                     "temperature": temperature,
-                    "max_output_tokens": max_tokens,
-                },
-                request_options={"timeout": timeout}
-            )
+                    "max_output_tokens": max_tokens
+                }
+                if response_mime_type:
+                    config_kwargs["response_mime_type"] = response_mime_type
+                config = self._genai_types.GenerateContentConfig(**config_kwargs)
+                response = client.models.generate_content(
+                    model=self.GEMINI_MODEL,
+                    contents=prompt,
+                    config=config,
+                )
+            else:
+                if self._gemini_legacy is None:
+                    raise RuntimeError("Legacy Gemini client not initialized")
+                with self._gemini_legacy_lock:
+                    self._gemini_legacy.configure(api_key=gemini_key)
+                    model = self._gemini_legacy.GenerativeModel(self.GEMINI_MODEL)
+                    generation_config = {
+                        "temperature": temperature,
+                        "max_output_tokens": max_tokens,
+                    }
+                    if response_mime_type:
+                        generation_config["response_mime_type"] = response_mime_type
+                    response = model.generate_content(
+                        prompt,
+                        generation_config=generation_config,
+                    )
             
             if not response or not response.text:
                 raise ValueError("Gemini returned empty response")
             
             return response.text
         
-        except Exception as e:
+        except Exception as e: # Catching general Exception for API call issues
             logger.debug(f"Gemini API error: {type(e).__name__}")
             raise
     
@@ -401,10 +588,16 @@ class FreeLLMClient:
             "total_calls": groq_count + gemini_count
         }
 
+    def _try_offline_fallback(self) -> bool:
+        """Check if offline fallback should be enabled"""
+        return os.getenv("ENABLE_OFFLINE_FALLBACK", "false").lower() in ("true", "1", "yes")
 
-# ============================================
-# TESTING CODE (run this file directly)
-# ============================================
+    def _get_offline_fallback_text(self, prompt: str) -> str:
+        """Return a safe text fallback when all providers fail."""
+        return (
+            "I'm currently unable to complete this request due to API rate limits "
+            "or temporary outages. Please try again in a few moments."
+        )
 
 if __name__ == "__main__":
     print("\n" + "="*60)
