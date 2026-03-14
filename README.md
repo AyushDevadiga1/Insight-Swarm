@@ -2,9 +2,6 @@
 
 AI-powered fact-checking using adversarial debate and source verification.
 
-## 🌟 Live Demo
-
-**Try it now:** https://insightswarm.streamlit.app
 
 - **API Resilience & Recovery** (NEW - Day 5)
   - Proactive rate-limit enforcement
