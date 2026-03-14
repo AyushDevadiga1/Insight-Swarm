@@ -10,6 +10,12 @@ SECURITY FEATURES:
 
 import sys
 from pathlib import Path
+import os
+import pytest
+
+RUN_PROGRESS_TESTS = os.getenv("RUN_PROGRESS_TESTS", "").strip().lower() in ("1", "true", "yes")
+if not RUN_PROGRESS_TESTS:
+    pytest.skip("Progress tests are manual; set RUN_PROGRESS_TESTS=1 to enable.", allow_module_level=True)
 
 # Add parent directory to path for imports when running directly
 sys.path.insert(0, str(Path(__file__).parent))
