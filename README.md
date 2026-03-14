@@ -6,9 +6,13 @@ AI-powered fact-checking using adversarial debate and source verification.
 
 **Try it now:** https://insightswarm.streamlit.app
 
-## 🎯 Features
+- **API Resilience & Recovery** (NEW - Day 5)
+  - Proactive rate-limit enforcement
+  - Graceful "API Exhaustion" instructions (no more raw errors)
+  - Hardened Gemini 2.0 Flash integration
+  - Auto-fallback from Groq to Gemini
 
-- **Moderator Decision Chat** (NEW - Day 7/Current)
+- **Moderator Decision Chat** (NEW - Day 4)
   - Intelligent evidence-based consensus
   - Distinct chat-style reasoning interface
   - Fallacy and credibility analysis
@@ -18,10 +22,10 @@ AI-powered fact-checking using adversarial debate and source verification.
   - Detects hallucinated sources
   - Content matching with fuzzy logic
 
-- **Weighted Consensus**
-  - Arguments weighted by source quality
-  - FactChecker gets 2x weight (objective)
-  - Conservative verdicts when sources fail
+- **Semantic Caching & Instant Results** (NEW - Day 5)
+  - Pre-seeded cache for 20+ common claims
+  - Instant results for repeated queries
+  - Significant reduce in API consumption
 
 ## 🏗️ Architecture
 
@@ -174,9 +178,12 @@ Verdict Weighting:
 - ✅ CLI interface
 - ✅ Error handling & logging
 - ✅ Rate limiting & timeout protection
+- ✅ **API Resilience & Quota Exhaustion handling** (NEW)
+- ✅ **Google Gemini 2.0 Flash Hardening** (NEW)
+- ✅ **Semantic Cache Pre-seeding** (NEW)
+- ✅ **Streamlit web interface (cached & optimized)**
 
 ### In Development
-- 🔄 Streamlit web interface (streamlit run app.py)
 - 🔄 REST API endpoints
 - 🔄 Advanced analytics
 
@@ -192,6 +199,7 @@ Verdict Weighting:
 - [Day 2 Review](progress/D2/DAY_2.md) - Project evolution from Day 1 to Day 2
 - [Security Report](progress/D2/SECURITY.md) - Security features and testing
 - [Verification Report](DAY_3_VERIFICATION_REPORT.md) - Day 3 FactChecker implementation
+- [Day 5 Resilience Report](progress/D5/D5_Progress_Report.md) - API stabilization and cache pre-seeding
 
 ## 📚 How to Use
 
@@ -308,6 +316,6 @@ MIT License - see [LICENSE](LICENSE) file
 
 ---
 
-**Last Updated:** March 12, 2026
-**Version:** 1.0.0 (Production Ready)
+**Last Updated:** March 14, 2026
+**Version:** 1.1.0 (Resilience Update)
 **Test Status:** 38/38 Passing ✅
