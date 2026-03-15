@@ -42,15 +42,16 @@ def validate_claim(claim: str) -> Tuple[bool, str]:
     if len(claim.split()) < 3:
         return False, "Claim too short (minimum 3 words)."
     
-    # Prompt injection patterns
+    # Prompt injection patterns with boundaries to avoid false positives in scientific claims (#28)
     injection_patterns = [
-        "ignore previous instructions",
-        "ignore all previous",
-        "disregard all previous",
-        "system:",
+        r"ignore\s+previous\s+instructions",
+        r"ignore\s+all\s+previous",
+        r"disregard\s+all\s+previous",
+        r"\bsystem\s*:\s*",  # Matches 'system:' but not 'ecosystem:'
     ]
+    import re
     for pattern in injection_patterns:
-        if pattern in claim.lower():
+        if re.search(pattern, claim.lower()):
             return False, "Prompt injection detected."
     
     return True, ""
