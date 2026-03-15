@@ -456,7 +456,6 @@ def _cap_memory_history():
         st.session_state.history_summary = "Older verification requests have been archived and summarized to save memory."
 
 
-@st.cache_resource
 @st.cache_resource(show_spinner=False)
 def _get_orchestrator() -> DebateOrchestrator:
     return DebateOrchestrator()
@@ -616,15 +615,20 @@ def render_verdict(result: Mapping[str, Any]) -> None:
       <div class='conf-lbl'>Confidence &nbsp;{confidence:.1%}</div>
     </div>""")
 
-    # Handle special RATE_LIMITED verdict explicitly
-    if verdict == "RATE_LIMITED":
-        render_api_exhausted(st.session_state.get("retry_at"))
+    # Handle special RATE_LIMITED/SYSTEM_ERROR verdicts explicitly
+    if verdict in ("RATE_LIMITED", "SYSTEM_ERROR"):
+        if verdict == "RATE_LIMITED":
+            render_api_exhausted(st.session_state.get("retry_at"))
+        else:
+            st.warning("The analysis was interrupted by a system-level error. This usually indicates an API failure or transient network issue.")
         return
 
-    if mr := result.get("moderator_reasoning"):
-        with st.expander("▸ Moderator Reasoning"):
+    # Prioritize 'reasoning' (full) over 'argument' (truncated)
+    display_reasoning = result.get("reasoning") or result.get("moderator_reasoning") or result.get("argument")
+    if display_reasoning:
+        with st.expander("▸ Moderator Analysis & Reasoning", expanded=True):
             sh("<div style='font-size:13px;color:#bbb;line-height:1.75'>"
-               + html.escape(str(mr)).replace("\n", "<br>") + "</div>")
+               + html.escape(str(display_reasoning)).replace("\n", "<br>") + "</div>")
 
 
 def render_metrics(result: Mapping[str, Any]) -> None:
@@ -804,17 +808,25 @@ def main() -> None:
             st.error(f"Orchestrator init failed: {e}")
             return None
 
-        # Reset thread_id per claim to ensure clean graph state and prevent checkpoint memory leaks
+        # Always use a fresh UUID so each submission gets a clean LangGraph state.
+        # Deduplication of identical claims is handled by the semantic cache in
+        # debate.run(), not here.
         st.session_state.thread_id = str(uuid.uuid4())
         
         with st.status(f"Verifying: {claim_text[:30]}...", expanded=True) as status:
             st.write("Initializing argument verification agents...")
             
-            task = st.session_state.executor.submit(
-                st.session_state.orchestrator.run, claim_text, st.session_state.thread_id
-            )
+            try:
+                task = st.session_state.executor.submit(
+                    st.session_state.orchestrator.run, claim_text, st.session_state.thread_id
+                )
+            except RuntimeError as e:
+                # Handle case where executor is shutting down or closed
+                status.update(label="❌ System error: Executor not available", state="error")
+                st.error(f"Execution failed: {e}")
+                return None
             
-            timeout, start = 120, time.time()
+            timeout, start = 180, time.time()
             stages = [
                 "ProAgent collecting evidence", 
                 "ConAgent building rebuttal", 
@@ -837,7 +849,8 @@ def main() -> None:
                     status.update(label=f"✅ Verification complete in {time.time()-start:.0f}s", state="complete")
                     
                     # Store in memory history
-                    st.session_state.history.append({"claim": claim_text, "verdict": getattr(res, "verdict", "UNKNOWN")})
+                    verdict_str = getattr(res, "verdict", "UNKNOWN")
+                    st.session_state.history.append({"claim": claim_text, "verdict": verdict_str})
                     _cap_memory_history()
                     return res
                 except RateLimitError as e:
@@ -850,8 +863,8 @@ def main() -> None:
                     st.session_state.debate_error = str(e)
                     return e
             else:
-                status.update(label="⌛ Timeout exceeded", state="error")
-                st.session_state.debate_error = "Timeout exceeded."
+                status.update(label="⌛ Timeout exceeded (180s)", state="error")
+                st.session_state.debate_error = "The debate took too long and was terminated."
                 return None
 
     if verify and claim and chars >= 10:
