@@ -47,6 +47,44 @@ class TavilyEvidenceRetriever:
                 logger.error(f"Failed to initialize Tavily client: {e}")
                 self.client = None
     
+    def search_adversarial(self, claim: str, max_results: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Perform two targeted searches: one for supporting evidence and one for rebuttals.
+        Ensures both Pro and Con agents have high-quality, relevant data.
+        """
+        if not self.client:
+            return {"pro": [], "con": []}
+        try:
+            # Pro search: Focus on confirmation and established facts
+            pro_query = f"{claim} facts and supporting evidence"
+            pro_resp = self.client.search(query=pro_query, search_depth="advanced", max_results=max_results)
+            
+            # Con search: Focus on controversies, rebuttals, and counter-arguments
+            con_query = f"{claim} rebuttals counter-arguments controversy"
+            con_resp = self.client.search(query=con_query, search_depth="advanced", max_results=max_results)
+
+            def _format_res(results):
+                return [{
+                    'title': r.get('title', ''),
+                    'url': r.get('url', ''),
+                    'content': r.get('content', '')[:600],
+                    'score': r.get('score', 0.0)
+                } for r in results.get('results', [])]
+
+            data = {
+                "pro": _format_res(pro_resp),
+                "con": _format_res(con_resp)
+            }
+            logger.info(f"⚖️ Dual-sided search complete: {len(data['pro'])} Pro / {len(data['con'])} Con sources.")
+            return data
+        except Exception as e:
+            err_str = str(e).lower()
+            if "429" in err_str or "rate limit" in err_str:
+                logger.warning(f"⚠️ Tavily rate limit reached: {e}")
+            else:
+                logger.error(f"Adversarial search failed: {e}")
+            return {"pro": [], "con": []}
+
     def search_evidence(self, claim: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """
         Search for evidence related to a claim.

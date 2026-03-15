@@ -45,13 +45,19 @@ class TemporalVerifier:
             
         content_years = self.extract_years(content)
         
+        # If no years found in content, we cannot verify alignment, so we waive it
+        # rather than failing. This prevents NASA/standard articles from failing 
+        # just because they don't explicitly mention the year cited in the arg.
+        if not content_years:
+            return True, "No temporal markers found in source content; alignment waived."
+            
         # Check for intersection
         overlap = claim_years.intersection(content_years)
         if overlap:
             return True, f"Temporal alignment found for years: {', '.join(overlap)}"
             
         missing_years = claim_years - content_years
-        return False, f"Temporal mismatch: Claim cites years {', '.join(missing_years)} which are missing from source"
+        return False, f"Temporal mismatch: Claim cites years {', '.join(missing_years)} which are missing from source content"
 
 # Quick test
 if __name__ == "__main__":
