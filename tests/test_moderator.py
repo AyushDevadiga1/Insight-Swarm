@@ -19,18 +19,16 @@ def test_moderator_analysis():
     print("Moderator Agent Test")
     print("="*70)
     
+    from src.core.models import ModeratorVerdict
+    
     # Initialize with Mock client for determinisims
     client = MagicMock(spec=FreeLLMClient)
-    client.call.return_value = """
-VERDICT: TRUE
-CONFIDENCE: 0.85
-METRICS:
-- CREDIBILITY_SCORE: 0.9
-- FALLACY_COUNT: 1
-- BALANCE_SCORE: 0.5
-REASONING:
-The evidence for coffee's health benefits is well-supported by multiple studies.
-    """
+    client.call_structured.return_value = ModeratorVerdict(
+        verdict="TRUE",
+        confidence=0.85,
+        reasoning="The evidence for coffee's health benefits is well-supported.",
+        metrics={"credibility": 0.9, "balance": 0.5}
+    )
     moderator = Moderator(client)
     
     # Mock debate state
@@ -62,7 +60,6 @@ The evidence for coffee's health benefits is well-supported by multiple studies.
         pro_verification_rate=0.85,
         con_verification_rate=0.75,
         verification_results=[],
-        fact_check_result="5 out of 6 sources verified",
         moderator_reasoning=None,
     )
     

@@ -24,6 +24,7 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.orchestration.debate import DebateOrchestrator
+from src.core.models import AgentResponse
 
 if tabulate is None:
     import pytest
@@ -57,13 +58,17 @@ def evaluate_claim(orchestrator: DebateOrchestrator, claim: str, claim_type: str
     try:
         result = orchestrator.run(claim)
         
+        # Convert Pydantic state to dict for evaluation logic
+        res_dict = result.dict()
+        
         # Calculate statistics
-        total_sources = len(result.get('verification_results', []) or [])
+        # Use res_dict instead of result directly since DebateState is Pydantic
+        total_sources = len(res_dict.get('verification_results', []) or [])
         
         if total_sources > 0:
-            verified = sum(1 for r in result['verification_results'] 
+            verified = sum(1 for r in res_dict['verification_results'] 
                           if r['status'] == 'VERIFIED')
-            hallucinated = sum(1 for r in result['verification_results'] 
+            hallucinated = sum(1 for r in res_dict['verification_results'] 
                               if r['status'] in ['NOT_FOUND', 'CONTENT_MISMATCH', 'TIMEOUT'])
             verification_rate = verified / total_sources
         else:
@@ -73,8 +78,8 @@ def evaluate_claim(orchestrator: DebateOrchestrator, claim: str, claim_type: str
         
         # Log results
         logger.info(f"\n✅ Debate completed successfully")
-        logger.info(f"\nVERDICT: {result['verdict']}")
-        logger.info(f"CONFIDENCE: {result['confidence']:.1%}")
+        logger.info(f"\nVERDICT: {res_dict['verdict']}")
+        logger.info(f"CONFIDENCE: {res_dict['confidence']:.1%}")
         
         logger.info(f"\nSOURCE VERIFICATION:")
         logger.info(f"  Total sources cited: {total_sources}")
@@ -83,26 +88,26 @@ def evaluate_claim(orchestrator: DebateOrchestrator, claim: str, claim_type: str
         logger.info(f"  📈 Verification rate: {verification_rate:.0%}")
         
         logger.info(f"\nAGUMENT VERIFICATION RATES:")
-        logger.info(f"  PRO agent sources verified: {result.get('pro_verification_rate', 0):.0%}")
-        logger.info(f"  CON agent sources verified: {result.get('con_verification_rate', 0):.0%}")
+        logger.info(f"  PRO agent sources verified: {res_dict.get('pro_verification_rate', 0):.0%}")
+        logger.info(f"  CON agent sources verified: {res_dict.get('con_verification_rate', 0):.0%}")
         
         logger.info(f"\nARGUMENT SUMMARY:")
-        logger.info(f"  PRO arguments: {len(result['pro_arguments'])} rounds")
-        logger.info(f"  CON arguments: {len(result['con_arguments'])} rounds")
+        logger.info(f"  PRO arguments: {len(res_dict['pro_arguments'])} rounds")
+        logger.info(f"  CON arguments: {len(res_dict['con_arguments'])} rounds")
         
         return {
             'claim_type': claim_type,
             'claim': claim,
-            'verdict': result['verdict'],
-            'confidence': result['confidence'],
+            'verdict': res_dict['verdict'],
+            'confidence': res_dict['confidence'],
             'total_sources': total_sources,
             'verified_sources': verified,
             'hallucinated_sources': hallucinated,
             'verification_rate': verification_rate,
-            'pro_verification_rate': result.get('pro_verification_rate', 0.0),
-            'con_verification_rate': result.get('con_verification_rate', 0.0),
-            'pro_args': len(result['pro_arguments']),
-            'con_args': len(result['con_arguments']),
+            'pro_verification_rate': res_dict.get('pro_verification_rate', 0.0),
+            'con_verification_rate': res_dict.get('con_verification_rate', 0.0),
+            'pro_args': len(res_dict['pro_arguments']),
+            'con_args': len(res_dict['con_arguments']),
             'status': 'SUCCESS'
         }
     
@@ -137,19 +142,28 @@ def main():
     
     # Initialize orchestrator
     # Setup global mocks for LLM and Network
-    llm_patcher = patch('src.llm.client.FreeLLMClient.call')
+    llm_patcher = patch('src.llm.client.FreeLLMClient.call_structured')
     requests_patcher = patch('requests.get')
     
     mock_llm = llm_patcher.start()
     mock_requests = requests_patcher.start()
     
-    # Configure LLM mock
-    mock_llm.return_value = "ARGUMENT:\nThis is a mock argument.\n\nSOURCES:\n- https://mock-source.com/page1\nVERDICT: TRUE\nCONFIDENCE: 0.9\nREASONING: Mock reasoning.\nCREDIBILITY_SCORE: 0.8\nFALLACY_COUNT: 0\nBALANCE_SCORE: 0.5"
+    # Configure LLM mock with AgentResponse object
+    mock_llm.return_value = AgentResponse(
+        agent="PRO",
+        round=1,
+        argument="This is a mock argument for testing with verified content.",
+        sources=["https://mock-source.com/page1"],
+        verdict="TRUE",
+        confidence=0.9,
+        reasoning="Mock reasoning confirmed by sources.",
+        metrics={"credibility_score": 0.8, "fallacy_count": 0, "balance_score": 0.5}
+    )
     
     # Configure requests mock
     mock_response = MagicMock()
     mock_response.status_code = 200
-    mock_response.text = "This is some mock source content that matches our productivity claim coffee antioidants cancer productivity verification."
+    mock_response.text = "This is some mock source content that matches our productivity claim coffee antioxidants cancer productivity verification."
     mock_requests.return_value = mock_response
 
     logger.info("Initializing DebateOrchestrator with FactChecker (MOCKED)...")

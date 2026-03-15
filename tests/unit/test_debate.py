@@ -1,5 +1,5 @@
 """
-Integration test: ProAgent and ConAgent debating
+Unit test: ProAgent and ConAgent logic check.
 """
 import os
 import sys
@@ -32,8 +32,8 @@ def debate_setup():
     )
     
     def mock_call_structured(prompt, output_schema, **kwargs):
-        system_prompt = kwargs.get("system_prompt", "")
-        if "pro" in system_prompt.lower() or "pro" in prompt.lower():
+        # Identify agent based on role in prompt or kwargs
+        if "PRO" in prompt or kwargs.get("preferred_provider") == "groq":
             return pro_response
         return con_response
 
