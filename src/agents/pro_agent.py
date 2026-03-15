@@ -2,7 +2,7 @@
 ProAgent - Argues that the claim is TRUE using structured outputs.
 """
 from src.agents.base import BaseAgent, AgentResponse, DebateState
-from src.llm.client import FreeLLMClient, RateLimitError
+from src.llm.client import FreeLLMClient
 import logging
 
 logger = logging.getLogger(__name__)
@@ -79,9 +79,8 @@ EVIDENCE TO CITE:
 {formatted_evidence}
 
 YOUR TASK:
-Build the strongest possible case FOR this claim. 
-You MUST cite the source URLs provided in the evidence section.
-Focus on being persuasive but factual."""
+Build the strongest possible case FOR this claim using ONLY the provided evidence. 
+You MUST cite the source URLs provided. Focus on being persuasive but factual."""
         else:
             con_argument = state.con_arguments[-1] if state.con_arguments else "No counter-argument yet"
             

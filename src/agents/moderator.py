@@ -18,6 +18,7 @@ class Moderator(BaseAgent):
     def __init__(self, llm_client: FreeLLMClient):
         super().__init__(llm_client)
         self.role = "MODERATOR"
+        self.preferred_provider = "groq"
 
     def generate(self, state: DebateState) -> AgentResponse:
         """Analyze complete debate and produce reasoned verdict."""
@@ -59,12 +60,12 @@ class Moderator(BaseAgent):
         # Check if the error came from quota (passed via state or last exception)
         reason = state.moderator_reasoning or "Unknown error"
         if "QUOTA_EXHAUSTED" in reason.upper() or "429" in reason or "rate limit" in reason.lower():
-            verdict = "INSUFFICIENT EVIDENCE"
-            argument = "API quota exhausted. Cannot complete fact-checking. Please add fresh Groq/Gemini keys in .env or wait."
+            verdict = "RATE_LIMITED"
+            argument = "Critical service outage: All available LLM quotas are exhausted. Verification cannot proceed."
             confidence = 0.0
         else:
-            verdict = "INSUFFICIENT EVIDENCE"
-            argument = "Technical error during moderation. Defaulting to insufficient evidence."
+            verdict = "SYSTEM_ERROR"
+            argument = "A technical interruption occurred within the moderation protocol."
             confidence = 0.0
         
         return AgentResponse(
@@ -84,10 +85,12 @@ class Moderator(BaseAgent):
         
         verification_summary = ""
         if state.pro_verification_rate is not None:
+            pro_rate = state.pro_verification_rate
+            con_rate = (state.con_verification_rate or 0.0) if state.con_verification_rate is not None else 0.0
             verification_summary = f"""
 SOURCE VERIFICATION SUMMARY:
-- ProAgent Verification Rate: {state.pro_verification_rate:.1%}
-- ConAgent Verification Rate: {state.con_verification_rate or 0.0:.1%}
+- ProAgent Verification Rate: {pro_rate:.1%}
+- ConAgent Verification Rate: {con_rate:.1%}
 """
 
         return f"""You are the impartial Moderator in a formal fact-checking debate.
@@ -103,48 +106,12 @@ CON ARGUMENTS (Opposing Claim):
 
 YOUR TASK:
 Analyze the debate quality, assess source credibility, identify logical fallacies, and determine a final verdict.
-Be rigorous, objective, and neutral."""
+Be rigorous, objective, and neutral. 
 
-    def _parse_moderator_response(self, text: str):
-        """Parse a freeform moderator response into structured fields."""
-        verdict = "INSUFFICIENT EVIDENCE"
-        confidence = 0.0
-        reasoning = ""
-        metrics = {}
+GUIDELINES FOR VERDICT:
+- Prefer 'TRUE' or 'FALSE' if a clear preponderance of verifiable evidence exists.
+- Use 'PARTIALLY TRUE' for multi-faceted claims with mixed evidence.
+- ONLY use 'INSUFFICIENT EVIDENCE' if NO verifiable sources are found or the providers totally failed.
+- Avoid 'wait-and-see' hesitation; make a definitive call based on the available data.
+"""
 
-        if not text:
-            return verdict, confidence, reasoning, metrics
-
-        for raw in text.splitlines():
-            line = raw.strip()
-            if not line:
-                continue
-            # Normalize "VERDICT - TRUE" to "VERDICT: TRUE"
-            if " - " in line and ":" not in line:
-                line = line.replace(" - ", ":", 1)
-            if ":" in line:
-                key, value = line.split(":", 1)
-                key = key.strip().lower()
-                value = value.strip()
-                if key.startswith("verdict"):
-                    v = value.lower()
-                    if "partially" in v:
-                        verdict = "PARTIALLY TRUE"
-                    elif "insufficient" in v:
-                        verdict = "INSUFFICIENT EVIDENCE"
-                    elif "true" in v:
-                        verdict = "TRUE"
-                    elif "false" in v:
-                        verdict = "FALSE"
-                elif key.startswith("confidence"):
-                    try:
-                        confidence = float(value)
-                    except ValueError:
-                        pass
-                elif key.startswith("reasoning"):
-                    reasoning = value
-
-        if not reasoning:
-            reasoning = text.strip()
-
-        return verdict, confidence, reasoning, metrics

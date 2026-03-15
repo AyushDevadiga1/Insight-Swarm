@@ -78,7 +78,7 @@ class DebateOrchestrator:
             {"retry": "revision", "proceed": "moderator"}
         )
         
-        workflow.add_edge("revision", "moderator")
+        workflow.add_edge("revision", "fact_checker")
         workflow.add_edge("moderator", "verdict")
         workflow.add_edge("verdict", END)
         
@@ -122,7 +122,7 @@ class DebateOrchestrator:
         if isinstance(state, dict):
             round_num = state.get("round", 1)
             num_rounds = state.get("num_rounds", 3)
-            return "end" if round_num >= num_rounds else "continue"
+            return "end" if round_num > num_rounds else "continue"
         if state.round > state.num_rounds:
             return "end"
         return "continue"
@@ -143,53 +143,71 @@ class DebateOrchestrator:
         return "proceed"
 
     def _verification_gate_node(self, state: DebateState) -> DebateState:
-        """
-        Verify sources after Round 1, inject failures back into Round 2.
-        State round was incremented by ConAgent, so Round 2 means we just finished Round 1.
-        """
-        if state.round != 2:
+        # round_idx is 0-based index of the round just completed.
+        # len(state.pro_sources) equals the number of completed rounds.
+        round_idx = len(state.pro_sources) - 1
+
+        # Do not run on the very first entry (no sources yet) or on the
+        # final round (verification feedback would never be used by any agent).
+        if round_idx < 0 or round_idx >= state.num_rounds - 1:
             return state
-            
-        logger.info("Running mid-debate verification gate...")
-        
-        # Verify all sources cited in Round 1
-        round_1_sources = []
-        if state.pro_sources and len(state.pro_sources) > 0:
-            argument = state.pro_arguments[0] if state.pro_arguments else ""
-            for url in state.pro_sources[0]:
-                round_1_sources.append((url, "PRO", argument))
-        if state.con_sources and len(state.con_sources) > 0:
-            argument = state.con_arguments[0] if state.con_arguments else ""
-            for url in state.con_sources[0]:
-                round_1_sources.append((url, "CON", argument))
-                
+
+        logger.info("Running mid-debate verification gate for round %d...", round_idx + 1)
+
+        sources_to_check = []
+        if len(state.pro_sources) > round_idx:
+            argument = state.pro_arguments[round_idx] if len(state.pro_arguments) > round_idx else ""
+            for url in state.pro_sources[round_idx]:
+                sources_to_check.append((url, "PRO", argument))
+        if len(state.con_sources) > round_idx:
+            argument = state.con_arguments[round_idx] if len(state.con_arguments) > round_idx else ""
+            for url in state.con_sources[round_idx]:
+                sources_to_check.append((url, "CON", argument))
+
         failed_sources = []
-        for url, agent, argument in round_1_sources:
+        for url, agent, argument in sources_to_check:
             try:
-                # Bypass internal threading in FactChecker and just check synchronously
                 verification = self.fact_checker._verify_url(url, agent, argument)
                 if verification.status != "VERIFIED":
                     failed_sources.append(url)
             except Exception as e:
                 logger.warning(f"Verification gate failed for {url}: {e}")
                 failed_sources.append(url)
-                
+
         if failed_sources:
             state.verification_feedback = (
-                "WARNING: The following sources failed verification:\\n" +
-                "\\n".join(f"- {url}" for url in failed_sources) +
-                "\\n\\nYou must revise your argument without these sources."
+                "WARNING: The following sources failed verification:\n" +
+                "\n".join(f"- {url}" for url in failed_sources) +
+                "\n\nYou must revise your argument without these sources."
             )
             logger.info(f"Verification gate caught {len(failed_sources)} failed sources.")
-            
+
         return state
 
     def _retry_revision_node(self, state: DebateState) -> DebateState:
         logger.info("Revision loop triggered")
         state.retry_count += 1
-        # In a real revision we would pass feedback, for now just rerun the agents
-        state = self._pro_agent_node(state)
-        state = self._con_agent_node(state)
+
+        # Temporarily set round to the last real debate round so agents build
+        # prompts for the correct context (not round 4 which does not exist).
+        saved_round = state.round
+        state.round = state.num_rounds  # = 3
+
+        pro_resp = self.pro_agent.generate(state)
+        if state.pro_arguments:
+            state.pro_arguments[-1] = pro_resp.argument
+        if state.pro_sources:
+            state.pro_sources[-1] = pro_resp.sources
+
+        con_resp = self.con_agent.generate(state)
+        if state.con_arguments:
+            state.con_arguments[-1] = con_resp.argument
+        if state.con_sources:
+            state.con_sources[-1] = con_resp.sources
+
+        # Restore the post-increment round value so the rest of the graph
+        # sees the correct state.
+        state.round = saved_round
         return state
     
     def _fact_checker_node(self, state: DebateState) -> DebateState:
@@ -287,18 +305,14 @@ class DebateOrchestrator:
             state.metrics = response.metrics
             return state
         except RateLimitError as e:
+            # Only reachable if generate() re-raises instead of falling back.
             logger.error("Moderator rate limited; aborting debate run.")
             state.verdict = "RATE_LIMITED"
             state.confidence = 0.0
-            retry_hint = f" Retry after ~{e.retry_after:.0f}s." if e.retry_after else ""
-            state.moderator_reasoning = f"Rate limit exceeded while contacting the model.{retry_hint}"
+            if not state.moderator_reasoning:
+                retry_hint = f" Retry after ~{e.retry_after:.0f}s." if e.retry_after else ""
+                state.moderator_reasoning = f"Rate limit exceeded.{retry_hint}"
             state.metrics = {}
-            return state
-        except Exception as e:
-            logger.error(f"Moderator failed: {e}")
-            state.verdict = "ERROR"
-            state.confidence = 0.0
-            state.moderator_reasoning = str(e)
             return state
 
     def _verdict_node(self, state: DebateState) -> DebateState:
@@ -317,11 +331,15 @@ class DebateOrchestrator:
             state.is_cached = True
             return state
         
-        # Retrieve evidence before debate
+        # Retrieve dual-sided evidence before debate for balanced analysis
         tavily = get_tavily_retriever()
-        evidence_sources = tavily.search_evidence(claim, max_results=5)
+        adversarial_sources = tavily.search_adversarial(claim, max_results=5)
         
-        initial_state = DebateState(claim=claim, evidence_sources=evidence_sources)
+        initial_state = DebateState(
+            claim=claim, 
+            pro_evidence=adversarial_sources["pro"],
+            con_evidence=adversarial_sources["con"]
+        )
         try:
             config = {"configurable": {"thread_id": thread_id}}
             final_state = self.graph.invoke(initial_state, config=config)
@@ -341,11 +359,19 @@ class DebateOrchestrator:
                 if not final_state.moderator_reasoning:
                     final_state.moderator_reasoning = "No verdict was produced due to upstream errors."
             
-            # Save to cache only when verdict is valid
-            if final_state.verdict and final_state.verdict not in ("ERROR", "RATE_LIMITED"):
-                set_cached_verdict(claim, final_state.to_dict())
+            # Save to cache only when verdict is valid and confidence is high enough to be meaningful
+            # This prevents technical failures (INSUFFICIENT EVIDENCE with 0.0 confidence)
+            # from being poisoned into the semantic cache.
+            # Serialization uses recursive json parsing to avoid losing nested models (#08)
+            if final_state.verdict and final_state.verdict not in ("ERROR", "RATE_LIMITED", "SYSTEM_ERROR"):
+                if final_state.verdict != "INSUFFICIENT EVIDENCE" or final_state.confidence > 0.1:
+                    import json
+                    state_json = json.loads(final_state.json())
+                    set_cached_verdict(claim, state_json)
+                else:
+                    logger.warning("Skipping cache write for low-confidence Insufficient Evidence.")
             else:
-                logger.warning("Skipping cache write due to missing or error verdict.")
+                logger.warning(f"Skipping cache write due to invalid verdict: {final_state.verdict}")
             return final_state
         except Exception as e:
             logger.error(f"Debate failed: {e}")

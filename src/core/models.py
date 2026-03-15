@@ -2,6 +2,8 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Literal
 from datetime import datetime
 
+_MISSING = object()
+
 class SourceVerification(BaseModel):
     """Result of verifying a single source."""
     url: str
@@ -31,10 +33,8 @@ class AgentResponse(BaseModel):
         return getattr(self, item)
 
     def get(self, key, default=None):
-        val = getattr(self, key, default)
-        if val is None:
-            return default
-        return val
+        val = getattr(self, key, _MISSING)
+        return default if val is _MISSING else val
 
 class ModeratorVerdict(BaseModel):
     """Structured verdict from the Moderator agent."""
@@ -76,13 +76,13 @@ class DebateState(BaseModel):
         return getattr(self, item)
     
     def __setitem__(self, key, value):
+        if key not in self.__fields__:
+            raise KeyError(f"Unknown DebateState field: {key!r}")
         setattr(self, key, value)
         
     def get(self, key, default=None):
-        val = getattr(self, key, default)
-        if val is None:
-            return default
-        return val
+        val = getattr(self, key, _MISSING)
+        return default if val is _MISSING else val
 
     def __contains__(self, item: str) -> bool:
         return item in self.__fields__

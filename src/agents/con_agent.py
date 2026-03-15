@@ -2,7 +2,7 @@
 ConAgent - Argues that the claim is FALSE using structured outputs.
 """
 from src.agents.base import BaseAgent, AgentResponse, DebateState
-from src.llm.client import FreeLLMClient, RateLimitError
+from src.llm.client import FreeLLMClient
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ class ConAgent(BaseAgent):
     def __init__(self, llm_client: FreeLLMClient):
         super().__init__(llm_client)
         self.role = "CON"
-        self.preferred_provider = "gemini"  # ConAgent uses Gemini
+        self.preferred_provider = "groq"  # ConAgent uses Groq
     
     def _format_evidence(self, evidence_bundle):
         if not evidence_bundle:
@@ -85,22 +85,25 @@ EVIDENCE TO CITE:
 {formatted_evidence}
 
 YOUR TASK:
-Build the strongest possible case AGAINST this claim. 
-You MUST cite the source URLs provided in the evidence section.
-Focus on identifying flaws in the Pro argument and presenting counter-evidence."""
+Build the strongest possible case AGAINST this claim using the PROVIDED REBUTTAL EVIDENCE. 
+You MUST cite the source URLs. Focus on identifying flaws in the Pro argument and presenting counter-evidence from these specific sources."""
         else:
-            pro_rebuttal = state.pro_arguments[-1] if len(state.pro_arguments) > 1 else "No Pro rebuttal yet"
+            # Identify the new rebuttal to challenge
+            latest_pro = state.pro_arguments[-1] if state.pro_arguments else "No Pro argument yet"
             
             feedback_section = ""
             if state.verification_feedback:
-                feedback_section = f"\n\n{state.verification_feedback}\n"
+                feedback_section = f"\n\nVERIFICATION FEEDBACK:\n{state.verification_feedback}\n"
                 
             return f"""You are ConAgent. You must maintain that the following claim is FALSE: {state.claim}
 
-The opposing agent responded with:
-{pro_rebuttal}{feedback_section}
+YOUR PREVIOUS ARGUMENT:
+{state.con_arguments[-1] if state.con_arguments else "Establishing initial case."}
+
+THE OPPOSING AGENT'S LATEST REBUTTAL:
+{latest_pro}{feedback_section}
 
 YOUR TASK:
-Directly address their rebuttal and reinforce your original case. 
-Use NEW evidence if available in your previous research:
+Directly address their latest points while reinforcing your own previous case. 
+Use NEW evidence if available or cite existing sources to debunk their claims:
 {formatted_evidence}"""

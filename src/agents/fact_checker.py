@@ -37,7 +37,6 @@ class FactChecker(BaseAgent):
         logger.info("FactChecker verifying all debate sources...")
         
         all_sources = []
-        all_sources = []
         # PRO sources
         for i, round_sources in enumerate(state.pro_sources):
             argument = state.pro_arguments[i] if i < len(state.pro_arguments) else ""
@@ -120,7 +119,11 @@ class FactChecker(BaseAgent):
             if resp.status_code == 200:
                 content = resp.text
                 
-                if claim:
+                # Only apply temporal verification when the claim explicitly
+                # references a 4-digit year.  Generic claims have no temporal
+                # constraint so skipping is correct.
+                import re as _re
+                if claim and _re.search(r'\b(?:19|20)\d{2}\b', claim):
                     from src.utils.temporal_verifier import TemporalVerifier
                     tv = TemporalVerifier()
                     is_aligned, msg = tv.verify_alignment(claim, content)

@@ -94,42 +94,39 @@ class SemanticCache:
     def _init_db(self):
         """Initializes the SQLite unified database"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            c = conn.cursor()
-            
-            # Table for verdicts with embeddings
-            c.execute('''
-                CREATE TABLE IF NOT EXISTS claim_cache (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    claim_text TEXT NOT NULL,
-                    claim_embedding BLOB NOT NULL,
-                    verdict_data TEXT NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    expires_at DATETIME NOT NULL
-                )
-            ''')
-            
-            # Table for user feedback
-            c.execute('''
-                CREATE TABLE IF NOT EXISTS user_feedback (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    claim_text TEXT NOT NULL,
-                    verdict TEXT NOT NULL,
-                    feedback_type TEXT NOT NULL,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Indexes
-            c.execute('CREATE INDEX IF NOT EXISTS idx_cache_expires ON claim_cache(expires_at)')
-            c.execute('CREATE INDEX IF NOT EXISTS idx_feedback_claim ON user_feedback(claim_text)')
-            
-            conn.commit()
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+                
+                # Table for verdicts with embeddings
+                c.execute('''
+                    CREATE TABLE IF NOT EXISTS claim_cache (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        claim_text TEXT NOT NULL,
+                        claim_embedding BLOB NOT NULL,
+                        verdict_data TEXT NOT NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        expires_at DATETIME NOT NULL
+                    )
+                ''')
+                
+                # Table for user feedback
+                c.execute('''
+                    CREATE TABLE IF NOT EXISTS user_feedback (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        claim_text TEXT NOT NULL,
+                        verdict TEXT NOT NULL,
+                        feedback_type TEXT NOT NULL,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Indexes
+                c.execute('CREATE INDEX IF NOT EXISTS idx_cache_expires ON claim_cache(expires_at)')
+                c.execute('CREATE INDEX IF NOT EXISTS idx_feedback_claim ON user_feedback(claim_text)')
+                
+                conn.commit()
         except Exception as e:
             logger.error(f"Failed to initialize unified cache DB: {e}")
-        finally:
-            if 'conn' in locals():
-                conn.close()
 
     def get_verdict(self, claim: str, similarity_threshold: float = 0.92) -> Optional[Dict[str, Any]]:
         """Retrieves a cached verdict using semantic similarity"""
@@ -141,18 +138,16 @@ class SemanticCache:
             query_embedding = self._encode(claim)
             if query_embedding is None:
                 return None
-            conn = sqlite3.connect(self.db_path)
-            c = conn.cursor()
             
-            now = datetime.now().isoformat()
-            c.execute('''
-                SELECT claim_text, claim_embedding, verdict_data, created_at 
-                FROM claim_cache 
-                WHERE expires_at > ?
-            ''', (now,))
-            
-            rows = c.fetchall()
-            conn.close()
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+                now = datetime.now().isoformat()
+                c.execute('''
+                    SELECT claim_text, claim_embedding, verdict_data, created_at 
+                    FROM claim_cache 
+                    WHERE expires_at > ?
+                ''', (now,))
+                rows = c.fetchall()
             
             best_match = None
             best_similarity = 0.0
@@ -196,28 +191,26 @@ class SemanticCache:
             created_at = datetime.now()
             expires_at = created_at + timedelta(days=self.ttl_days)
             
-            conn = sqlite3.connect(self.db_path)
-            c = conn.cursor()
-            c.execute('''
-                INSERT INTO claim_cache (claim_text, claim_embedding, verdict_data, created_at, expires_at)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (claim, embedding_bytes, json.dumps(verdict_data), created_at.isoformat(), expires_at.isoformat()))
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+                c.execute('''
+                    INSERT INTO claim_cache (claim_text, claim_embedding, verdict_data, created_at, expires_at)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (claim, embedding_bytes, json.dumps(verdict_data), created_at.isoformat(), expires_at.isoformat()))
+                conn.commit()
         except Exception as e:
             logger.error(f"Cache write error: {e}")
 
     def record_user_feedback(self, claim: str, verdict: str, feedback_type: str):
         """Records user thumbs up/down"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            c = conn.cursor()
-            c.execute('''
-                INSERT INTO user_feedback (claim_text, verdict, feedback_type)
-                VALUES (?, ?, ?)
-            ''', (claim, verdict, feedback_type))
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+                c.execute('''
+                    INSERT INTO user_feedback (claim_text, verdict, feedback_type)
+                    VALUES (?, ?, ?)
+                ''', (claim, verdict, feedback_type))
+                conn.commit()
         except Exception as e:
             logger.error(f"Feedback record error: {e}")
 
