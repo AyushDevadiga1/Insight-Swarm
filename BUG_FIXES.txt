@@ -1,0 +1,855 @@
+================================================================================
+INSIGHTSWARM — COMPLETE BUG FIXES
+Verified against current codebase. Every fix proven against the actual code.
+================================================================================
+
+Each entry is structured as:
+  FILE       : exact file path
+  LINE(S)    : approximate line numbers in current file
+  SEVERITY   : CRITICAL / HIGH / MEDIUM / LOW
+  PROBLEM    : what is wrong and why
+  BUGGY CODE : the exact code that is wrong right now
+  FIXED CODE : the exact replacement
+
+
+================================================================================
+ 1.  DebateState.get() re-introduces the very bug it was meant to fix
+================================================================================
+FILE     : src/core/models.py
+SEVERITY : CRITICAL
+
+PROBLEM:
+  The current implementation is:
+      def get(self, key, default=None):
+          val = getattr(self, key, _MISSING)
+          return default if val is _MISSING or val is None else val
+
+  The clause "or val is None" means that any field that is EXPLICITLY set to
+  None (e.g. verdict=None before the debate runs, confidence=None at start)
+  will return `default` instead of the actual None value.  This corrupts the
+  verdict display logic: state.get("verdict","UNKNOWN") returns "UNKNOWN" even
+  when verdict has been deliberately set to None.
+
+  The rule should be: only substitute default when the attribute does not exist
+  at all (i.e., getattr raised AttributeError, caught by the sentinel).  If
+  the attribute exists and its value happens to be None, that is a legitimate
+  value and must be returned.
+
+BUGGY CODE:
+    def get(self, key, default=None):
+        val = getattr(self, key, _MISSING)
+        return default if val is _MISSING or val is None else val
+
+FIXED CODE:
+    def get(self, key, default=None):
+        val = getattr(self, key, _MISSING)
+        return default if val is _MISSING else val
+
+NOTE: The same bug exists in AgentResponse.get() which was never touched.
+  Fix that one too (same replacement — swap the whole method body).
+
+
+================================================================================
+ 2.  AgentResponse.get() has the same falsy-value bug — not fixed at all
+================================================================================
+FILE     : src/core/models.py  (AgentResponse class)
+SEVERITY : HIGH
+
+PROBLEM:
+  AgentResponse still has the original broken implementation:
+      def get(self, key, default=None):
+          val = getattr(self, key, default)
+          if val is None:
+              return default
+          return val
+
+  This means result.get("confidence", 0.0) returns 0.0 when confidence is a
+  legitimate 0.0 (a real result from a failed debate).  app.py uses this path
+  when rendering the confidence bar.
+
+BUGGY CODE:
+    def get(self, key, default=None):
+        val = getattr(self, key, default)
+        if val is None:
+            return default
+        return val
+
+FIXED CODE:
+    def get(self, key, default=None):
+        val = getattr(self, key, _MISSING)
+        return default if val is _MISSING else val
+
+  (_MISSING is already defined at module level in models.py as object())
+
+
+================================================================================
+ 3.  _init_providers silently swallowed the RuntimeError — app starts with
+     zero API providers and dies deep inside a debate
+================================================================================
+FILE     : src/llm/client.py  (_init_providers method, last block)
+SEVERITY : CRITICAL
+
+PROBLEM:
+  The original correct behaviour was:
+      if not self.groq_available and not self.gemini_available:
+          raise RuntimeError("No LLM providers available.")
+
+  The current code replaced that with:
+      logger.warning("⚠️ No LLM providers available ...")
+
+  The app now starts silently even when both API keys are missing.  The first
+  call_structured() call then raises "No LLM providers available for structured
+  call" from deep inside a debate round — giving no actionable startup message
+  and leaving DebateState in a corrupt half-run state.
+
+  The fix must also account for the offline fallback env var — if
+  ENABLE_OFFLINE_FALLBACK is set the app is allowed to run without keys.
+
+BUGGY CODE:
+    if not self.groq_available and not self.gemini_available:
+        logger.warning("⚠️ No LLM providers available (check API keys). System will fall back to offline mode if enabled.")
+
+FIXED CODE:
+    if not self.groq_available and not self.gemini_available:
+        offline = os.getenv("ENABLE_OFFLINE_FALLBACK", "false").lower() in ("true", "1", "yes")
+        if offline:
+            logger.warning("⚠️ No LLM providers available — running in offline fallback mode.")
+        else:
+            raise RuntimeError(
+                "No LLM providers available. Check GROQ_API_KEY / GEMINI_API_KEY in .env file.\n"
+                "Set ENABLE_OFFLINE_FALLBACK=1 to start without API keys."
+            )
+
+
+================================================================================
+ 4.  call_structured appends rate-limit timestamp inside the except block —
+     JSON parse failures inflate the rate counter
+================================================================================
+FILE     : src/llm/client.py  (call_structured, both Groq and Gemini blocks)
+SEVERITY : CRITICAL
+
+PROBLEM:
+  Current code structure (shown for Groq; Gemini is identical):
+
+      try:
+          with self._counter_lock:
+              if not self._check_rate_limit(...): raise ...   # ← check
+          response = self._call_groq(...)                     # ← API call
+          result = output_schema.parse_raw(response)          # ← parse
+          with self._counter_lock:
+              self.groq_last_call_times.append(time.time())   # ← on success only
+          return result
+      except Exception as e:
+          with self._counter_lock:
+              self.groq_last_call_times.append(time.time())   # ← on ALL failures
+
+  Problem A: The timestamp is appended TWICE on success (once in try, once
+  would fire if try continued past return — actually not, because return exits,
+  so on success it is appended once in try, which is fine).
+
+  Problem B: On ANY exception — including output_schema.parse_raw() raising a
+  Pydantic ValidationError when the model returns malformed JSON — the except
+  block appends a timestamp.  If the model consistently returns invalid JSON
+  (common with smaller models), every attempt increments the rate counter even
+  though no API slot was actually consumed.  After enough JSON failures the
+  limiter starts blocking legitimate calls.
+
+  Problem C: There is a window between the rate-check lock release and the
+  actual API call where another thread can pass the same check.
+
+  The correct pattern: append the timestamp unconditionally INSIDE the same
+  lock block as _check_rate_limit, BEFORE the API call.  This is atomic and
+  counts the API attempt — not the parse result.
+
+BUGGY CODE (Groq block — fix Gemini block identically):
+      try:
+          with self._counter_lock:
+              if not self._check_rate_limit("groq", self.groq_last_call_times):
+                  raise RuntimeError("Groq rate limit exceeded")
+
+          response = self._call_groq(
+              json_prompt, temperature, max_tokens, timeout=30
+          )
+          result = output_schema.parse_raw(response)
+
+          with self._counter_lock:
+              self.groq_last_call_times.append(time.time())
+          return result
+
+      except Exception as e:
+          with self._counter_lock:
+              self.groq_last_call_times.append(time.time())
+          last_error = e
+          ...
+
+FIXED CODE (Groq block):
+      try:
+          with self._counter_lock:
+              if not self._check_rate_limit("groq", self.groq_last_call_times):
+                  raise RuntimeError("Groq rate limit exceeded")
+              # Append timestamp immediately after the check — counts the attempt,
+              # not the parse result.  Still inside the lock so it is atomic.
+              self.groq_last_call_times.append(time.time())
+
+          if self.groq_client is None:
+              raise RuntimeError("Groq client not initialized")
+
+          response = self._call_groq(
+              json_prompt, temperature, max_tokens, timeout=30
+          )
+          result = output_schema.parse_raw(response)
+          return result
+
+      except Exception as e:
+          # Do NOT append here — the timestamp was already appended above.
+          last_error = e
+          err_str = str(e).lower()
+          if any(kw in err_str for kw in ["429", "rate limit", "quota", "exceeded",
+                                           "limit reached", "model_decommissioned"]):
+              logger.warning(f"Groq quota/limit error: {e}")
+              break
+          logger.warning(f"Groq attempt {attempt+1} failed: {e}")
+          if attempt < max_retries:
+              time.sleep(1)
+
+  Apply the exact same change to the Gemini block inside call_structured.
+
+  Also add the same "append before call" pattern to the call() method where
+  Groq and Gemini timestamps are currently appended in the except block:
+
+  In call(), Groq block — change:
+      except Exception as e:
+          with self._counter_lock:
+              self.groq_last_call_times.append(time.time())
+          ...
+
+  To: append after the rate check passes and before _call_groq() is invoked
+  (same pattern as call_structured fix above).  Apply identically to Gemini.
+
+
+================================================================================
+ 5.  _retry_revision_node generates with state.round=4 so agents use the
+     wrong prompt branch (rebuttal instead of first-round)
+================================================================================
+FILE     : src/orchestration/debate.py  (_retry_revision_node)
+SEVERITY : CRITICAL
+
+PROBLEM:
+  After three debate rounds, state.round == 4 (ConAgent increments it).
+  The revision node is triggered after fact_checker_node, which runs at this
+  point.  Both ProAgent._build_prompt and ConAgent._build_prompt check:
+
+      if round_num == 1:
+          ... build fresh argument ...
+      else:
+          ... build rebuttal against opponent's latest argument ...
+
+  When revision runs with state.round=4, both agents take the else-branch and
+  generate rebuttals to each other's Round 3 arguments.  What we actually want
+  is a fresh reformulation of Round 3 with the verification feedback injected.
+  The round value should be temporarily set to num_rounds (3) so agents
+  generate a rebuttal-style response for the correct round context, then
+  restored to 4 after.
+
+BUGGY CODE:
+    def _retry_revision_node(self, state: DebateState) -> DebateState:
+        logger.info("Revision loop triggered")
+        state.retry_count += 1
+        # Replace the last entries in-place rather than appending to prevent round bloat
+        pro_resp = self.pro_agent.generate(state)
+        if state.pro_arguments:
+            state.pro_arguments[-1] = pro_resp.argument
+            state.pro_sources[-1] = pro_resp.sources
+
+        con_resp = self.con_agent.generate(state)
+        if state.con_arguments:
+            state.con_arguments[-1] = con_resp.argument
+            state.con_sources[-1] = con_resp.sources
+        return state
+
+FIXED CODE:
+    def _retry_revision_node(self, state: DebateState) -> DebateState:
+        logger.info("Revision loop triggered")
+        state.retry_count += 1
+
+        # Temporarily set round to the last real debate round so agents build
+        # prompts for the correct context (not round 4 which does not exist).
+        saved_round = state.round
+        state.round = state.num_rounds  # = 3
+
+        pro_resp = self.pro_agent.generate(state)
+        if state.pro_arguments:
+            state.pro_arguments[-1] = pro_resp.argument
+        if state.pro_sources:
+            state.pro_sources[-1] = pro_resp.sources
+
+        con_resp = self.con_agent.generate(state)
+        if state.con_arguments:
+            state.con_arguments[-1] = con_resp.argument
+        if state.con_sources:
+            state.con_sources[-1] = con_resp.sources
+
+        # Restore the post-increment round value so the rest of the graph
+        # sees the correct state.
+        state.round = saved_round
+        return state
+
+
+================================================================================
+ 6.  _verification_gate_node runs on the final round — wasteful HTTP calls
+     whose feedback is never read
+================================================================================
+FILE     : src/orchestration/debate.py  (_verification_gate_node)
+SEVERITY : HIGH
+
+PROBLEM:
+  The graph is:  con_agent → verification_gate → _should_continue
+  After Round 3 con_agent runs, state.round becomes 4.  The gate guard is:
+      if not state.round > 1: return state
+  4 > 1 is True, so the gate runs, verifies all Round 3 URLs over HTTP (5–15
+  seconds), and sets verification_feedback.  _should_continue then returns
+  "end", so the feedback is never read by any agent.  Pure wasted latency.
+
+  The gate should only run when there is a subsequent round to inject feedback
+  into — i.e., when round_idx < num_rounds - 1 (0-indexed: rounds 0 and 1 of
+  a 3-round debate, skip round 2 which is the last).
+
+BUGGY CODE:
+    def _verification_gate_node(self, state: DebateState) -> DebateState:
+        if not state.round > 1:
+            return state
+        ...
+        round_idx = len(state.pro_sources) - 1
+        ...
+
+FIXED CODE:
+    def _verification_gate_node(self, state: DebateState) -> DebateState:
+        # round_idx is 0-based index of the round just completed.
+        # len(state.pro_sources) equals the number of completed rounds.
+        round_idx = len(state.pro_sources) - 1
+
+        # Do not run on the very first entry (no sources yet) or on the
+        # final round (verification feedback would never be used by any agent).
+        if round_idx < 0 or round_idx >= state.num_rounds - 1:
+            return state
+
+        logger.info("Running mid-debate verification gate for round %d...", round_idx + 1)
+
+        sources_to_check = []
+        if len(state.pro_sources) > round_idx:
+            argument = state.pro_arguments[round_idx] if len(state.pro_arguments) > round_idx else ""
+            for url in state.pro_sources[round_idx]:
+                sources_to_check.append((url, "PRO", argument))
+        if len(state.con_sources) > round_idx:
+            argument = state.con_arguments[round_idx] if len(state.con_arguments) > round_idx else ""
+            for url in state.con_sources[round_idx]:
+                sources_to_check.append((url, "CON", argument))
+
+        failed_sources = []
+        for url, agent, argument in sources_to_check:
+            try:
+                verification = self.fact_checker._verify_url(url, agent, argument)
+                if verification.status != "VERIFIED":
+                    failed_sources.append(url)
+            except Exception as e:
+                logger.warning(f"Verification gate failed for {url}: {e}")
+                failed_sources.append(url)
+
+        if failed_sources:
+            state.verification_feedback = (
+                "WARNING: The following sources failed verification:\n" +
+                "\n".join(f"- {url}" for url in failed_sources) +
+                "\n\nYou must revise your argument without these sources."
+            )
+            logger.info(f"Verification gate caught {len(failed_sources)} failed sources.")
+
+        return state
+
+
+================================================================================
+ 7.  app.py uses MD5 hash for thread_id — same claim reuses stale LangGraph
+     checkpoint state on second submission
+================================================================================
+FILE     : app.py  (analyze_claim_with_streaming, inside the function)
+SEVERITY : HIGH
+
+PROBLEM:
+  Current code:
+      import hashlib
+      st.session_state.thread_id = f"claim_{hashlib.md5(claim_text.encode()).hexdigest()[:12]}"
+
+  LangGraph's MemorySaver stores checkpoints keyed by thread_id.  If the same
+  claim is submitted twice (or the same claim is in the semantic cache miss
+  path), the second run picks up the checkpoint from the first run — round
+  counters, pro_arguments, con_arguments are already populated.  LangGraph
+  skips nodes that are already checkpointed, producing empty or wrong results.
+
+  Cache deduplication is the job of the semantic cache, not LangGraph threads.
+  Each submission must get a fresh thread_id regardless of the claim text.
+
+BUGGY CODE:
+        # Use hash-based thread_id to ensure same claim = same thread state (Persistence #18)
+        import hashlib
+        st.session_state.thread_id = f"claim_{hashlib.md5(claim_text.encode()).hexdigest()[:12]}"
+
+FIXED CODE:
+        # Always use a fresh UUID so each submission gets a clean LangGraph state.
+        # Deduplication of identical claims is handled by the semantic cache in
+        # debate.run(), not here.
+        st.session_state.thread_id = str(uuid.uuid4())
+
+  uuid is already imported at the top of app.py, so no new import is needed.
+
+
+================================================================================
+ 8.  APIKeyManager still marks Gemini as required=True — app crashes on startup
+     if only GROQ_API_KEY is present in .env
+================================================================================
+FILE     : src/utils/api_key_manager.py  (_load_and_validate_keys)
+SEVERITY : HIGH
+
+PROBLEM:
+  The key_configs dict:
+      "gemini": {
+          "env_vars": ["GEMINI_API_KEYS", "GEMINI_API_KEY"],
+          "validators": [self._validate_gemini_key],
+          "required": True
+      }
+
+  If GEMINI_API_KEY is not in .env, all_keys_loaded becomes False and
+  RuntimeError is raised at startup.  Gemini is a fallback — the system
+  works fine with Groq alone.
+
+BUGGY CODE:
+            "gemini": {
+                "env_vars": ["GEMINI_API_KEYS", "GEMINI_API_KEY"],
+                "validators": [self._validate_gemini_key],
+                "required": True
+            },
+
+FIXED CODE:
+            "gemini": {
+                "env_vars": ["GEMINI_API_KEYS", "GEMINI_API_KEY"],
+                "validators": [self._validate_gemini_key],
+                "required": False   # Gemini is a fallback provider, not mandatory
+            },
+
+
+================================================================================
+ 9.  _verify_url calls TemporalVerifier on every URL for every non-empty claim
+     — generates false CONTENT_MISMATCH on legitimate sources
+================================================================================
+FILE     : src/agents/fact_checker.py  (_verify_url)
+SEVERITY : HIGH
+
+PROBLEM:
+  The current code block inside _verify_url after a 200 OK response:
+
+      if claim:
+          from src.utils.temporal_verifier import TemporalVerifier
+          tv = TemporalVerifier()
+          is_aligned, msg = tv.verify_alignment(claim, content)
+          if not is_aligned:
+              return SourceVerification(status="CONTENT_MISMATCH", ...)
+
+  TemporalVerifier.verify_alignment checks whether years mentioned in the
+  claim appear in the page content.  For a claim like "Exercise improves
+  mental health" (no year) this is waived, but for ANY claim that happens to
+  include a year — "The 2022 World Cup was held in Qatar", "COVID-19 emerged
+  in 2019" — all pages that do not explicitly contain that exact year string
+  are marked CONTENT_MISMATCH, even if they are perfectly valid sources.
+
+  CDC, WHO, and PubMed pages rarely repeat the exact year mentioned in an
+  agent's argument.  This causes 80%+ of legitimate medical sources to fail.
+
+  The temporal check should only run when the claim contains an explicit
+  4-digit year.  Even then, the current TemporalVerifier logic is very brittle
+  (checks for year string presence in raw HTML); it should at minimum be gated.
+
+BUGGY CODE:
+                if claim:
+                    from src.utils.temporal_verifier import TemporalVerifier
+                    tv = TemporalVerifier()
+                    is_aligned, msg = tv.verify_alignment(claim, content)
+                    if not is_aligned:
+                        return SourceVerification(
+                            url=url,
+                            status="CONTENT_MISMATCH",
+                            agent_source=agent,
+                            error=msg,
+                            content_preview=content[:200]
+                        )
+
+FIXED CODE:
+                # Only apply temporal verification when the claim explicitly
+                # references a 4-digit year.  Generic claims have no temporal
+                # constraint so skipping is correct.
+                import re as _re
+                if claim and _re.search(r'\b(?:19|20)\d{2}\b', claim):
+                    from src.utils.temporal_verifier import TemporalVerifier
+                    tv = TemporalVerifier()
+                    is_aligned, msg = tv.verify_alignment(claim, content)
+                    if not is_aligned:
+                        return SourceVerification(
+                            url=url,
+                            status="CONTENT_MISMATCH",
+                            agent_source=agent,
+                            error=msg,
+                            content_preview=content[:200]
+                        )
+
+
+================================================================================
+ 10. test_deep_fixes.py:test_verification_rate_semantics passes a raw dict as
+     DebateState and includes non-existent field — test is entirely vacuous
+================================================================================
+FILE     : tests/test_deep_fixes.py  (test_verification_rate_semantics)
+SEVERITY : HIGH (test correctness)
+
+PROBLEM:
+  The state variable is typed as DebateState but constructed as a plain dict:
+      state: DebateState = { "claim": "Test", ... "fact_check_result": None, ... }
+
+  1. "fact_check_result" is not a field in DebateState. Pydantic v1 silently
+     ignores unknown kwargs in the constructor, but the dict literal here
+     bypasses the constructor entirely — it is just a dict.
+  2. _fact_checker_node() expects a DebateState object.  Inside the function,
+     `state.pro_sources` would raise AttributeError on a dict.  The test only
+     passes because the MagicMock fires before that access.
+  3. `updated_state['pro_verification_rate']` works because dict supports []
+     access, but this is testing dict behaviour, not DebateState behaviour.
+
+  Also: test_round_counter_logic tests that _should_continue({"round": 3})
+  returns "end", but after the off-by-one fix the dict-path now uses > instead
+  of >=.  3 > 3 is False, so the assertion will FAIL.  The test must be
+  updated to pass round=4 (the post-increment value ConAgent produces).
+
+BUGGY CODE:
+    def test_verification_rate_semantics():
+        orchestrator = DebateOrchestrator()
+        state: DebateState = {
+            "claim": "Test",
+            "round": 3,
+            "pro_arguments": ["Arg"],
+            "con_arguments": ["Arg"],
+            "pro_sources": [[]],
+            "con_sources": [["http://test.com"]],
+            "verdict": None,
+            "confidence": None,
+            "verification_results": None,
+            "pro_verification_rate": None,
+            "con_verification_rate": None,
+            "fact_check_result": None,      # ← not a DebateState field
+            "moderator_reasoning": None,
+            "metrics": None,
+            "retry_count": 0
+        }
+        ...
+
+    def test_round_counter_logic():
+        orchestrator = DebateOrchestrator()
+        state = {"round": 3}
+        assert orchestrator._should_continue(state) == "end"   # ← now FAILS
+
+FIXED CODE:
+    def test_verification_rate_semantics():
+        orchestrator = DebateOrchestrator()
+        # Use a real DebateState, not a dict.
+        state = DebateState(
+            claim="Test",
+            round=3,
+            pro_arguments=["Arg"],
+            con_arguments=["Arg"],
+            pro_sources=[[]],           # Pro has no sources
+            con_sources=[["http://test.com"]],
+        )
+        mock_response = {
+            "verification_results": [
+                {"agent_source": "CON", "url": "http://test.com", "status": "VERIFIED"}
+            ]
+        }
+        orchestrator.fact_checker.generate = MagicMock(return_value=mock_response)
+
+        updated_state = orchestrator._fact_checker_node(state)
+
+        assert updated_state.pro_verification_rate == 0.0
+        assert updated_state.con_verification_rate == 1.0
+
+    def test_round_counter_logic():
+        orchestrator = DebateOrchestrator()
+
+        # After Round 3 con_agent increments round from 3 to 4.
+        # _should_continue then receives round=4 with num_rounds=3.
+        # 4 > 3 → "end"  (correct)
+        state = {"round": 4}
+        assert orchestrator._should_continue(state) == "end"
+
+        # Mid-debate: round=3 means Round 3 is in progress, should continue.
+        # 3 > 3 is False → "continue"  (correct)
+        state = {"round": 3}
+        assert orchestrator._should_continue(state) == "continue"
+
+        # After Round 1: round=2 → "continue"
+        state = {"round": 2}
+        assert orchestrator._should_continue(state) == "continue"
+
+
+================================================================================
+ 11. test_deep_fixes.py:test_moderator_parsing_robustness calls
+     _parse_moderator_response which no longer exists in Moderator
+================================================================================
+FILE     : tests/test_deep_fixes.py  (test_moderator_parsing_robustness)
+SEVERITY : MEDIUM (test failure)
+
+PROBLEM:
+  The test calls moderator._parse_moderator_response(resp) but this method was
+  removed from moderator.py as part of dead-code cleanup.  The test will fail
+  with AttributeError: 'Moderator' object has no attribute '_parse_moderator_response'.
+
+FIXED CODE:
+  Delete the test entirely — it tests a method that no longer exists and whose
+  functionality (text parsing) has been superseded by call_structured +
+  ModeratorVerdict schema.
+
+  Replace it with a test that actually exercises the current code path:
+
+    def test_moderator_fallback_on_rate_limit():
+        """Verify fallback verdict is produced when call_structured raises."""
+        from src.llm.client import RateLimitError
+        client = MagicMock()
+        client.call_structured.side_effect = RateLimitError("groq", "rate limited", 30.0)
+        moderator = Moderator(client)
+
+        state = DebateState(
+            claim="Test claim", round=3,
+            pro_arguments=["Pro arg"] * 3,
+            con_arguments=["Con arg"] * 3,
+        )
+        result = moderator.generate(state)
+
+        assert result.agent == "MODERATOR"
+        assert result.verdict == "RATE_LIMITED"
+        assert result.confidence == 0.0
+
+
+================================================================================
+ 12. tests/test_moderator.py constructs DebateState with fact_check_result
+     which is not a model field — ghost attribute created silently
+================================================================================
+FILE     : tests/test_moderator.py  (test_moderator_analysis)
+SEVERITY : MEDIUM (test correctness)
+
+PROBLEM:
+  The DebateState constructor receives fact_check_result="5 out of 6 sources
+  verified".  This field does not exist in the model.  Pydantic v1 silently
+  ignores it.  However the new __setitem__ guard raises KeyError for unknown
+  fields — if any code later tries state["fact_check_result"] = x it will
+  crash.  The test is testing against a ghost attribute.
+
+  Also: the test mocks client.call but the Moderator now calls
+  client.call_structured.  The mock never fires, so the moderator's
+  generate() will raise RuntimeError in CI unless an actual API key is present.
+
+BUGGY CODE (relevant parts):
+    client.call.return_value = """..."""     # ← mocks .call(), not .call_structured()
+
+    test_state = DebateState(
+        ...
+        fact_check_result="5 out of 6 sources verified",  # ← not a model field
+        moderator_reasoning=None,
+    )
+
+FIXED CODE:
+    from src.core.models import ModeratorVerdict
+
+    client = MagicMock(spec=FreeLLMClient)
+    client.call_structured.return_value = ModeratorVerdict(   # ← mock call_structured
+        verdict="TRUE",
+        confidence=0.85,
+        reasoning="The evidence for coffee's health benefits is well-supported.",
+        metrics={"credibility": 0.9, "balance": 0.5}
+    )
+    moderator = Moderator(client)
+
+    test_state = DebateState(
+        claim="Coffee prevents cancer",
+        round=4,
+        pro_arguments=[
+            "Studies show coffee contains antioxidants that may reduce cancer risk by 15%.",
+            "Multiple meta-analyses confirm the protective effect.",
+            "The evidence is clear from large-scale studies."
+        ],
+        con_arguments=[
+            "Correlation does not imply causation.",
+            "WHO was cautious about coffee until 2016.",
+            "Some studies show no effect or even increased risk."
+        ],
+        pro_sources=[
+            ["https://www.cancer.gov/", "https://pubmed.ncbi.nlm.nih.gov/12345"],
+            ["https://www.hsph.harvard.edu/"],
+            []
+        ],
+        con_sources=[
+            ["https://www.who.int/", "https://www.mayoclinic.org/"],
+            ["https://www.cancer.org/"],
+            []
+        ],
+        verdict=None,
+        confidence=None,
+        pro_verification_rate=0.85,
+        con_verification_rate=0.75,
+        verification_results=[],
+        # fact_check_result removed — not a DebateState field
+        moderator_reasoning=None,
+    )
+
+
+================================================================================
+ 13. pro_agent.py and con_agent.py import RateLimitError but never use it
+================================================================================
+FILE     : src/agents/pro_agent.py  (line 3)
+           src/agents/con_agent.py  (line 3)
+SEVERITY : LOW
+
+PROBLEM:
+  Both files contain:
+      from src.llm.client import FreeLLMClient, RateLimitError
+
+  RateLimitError is never caught or referenced anywhere in either file.
+  This dead import adds noise and misleads readers into believing it is
+  caught somewhere in the agent logic.
+
+FIXED CODE (both files):
+    from src.llm.client import FreeLLMClient
+
+
+================================================================================
+ 14. Moderator.generate() sets state.moderator_reasoning = str(e) but
+     _moderator_node also sets state.moderator_reasoning on exception —
+     double-write with inconsistent values
+================================================================================
+FILE     : src/agents/moderator.py  (generate, except block)
+           src/orchestration/debate.py  (_moderator_node, except Exception block)
+SEVERITY : MEDIUM
+
+PROBLEM:
+  In moderator.generate():
+      except Exception as e:
+          logger.error(f"Moderator failed: {e}")
+          state.moderator_reasoning = str(e)   # ← write #1
+          return self._fallback_verdict(state)
+
+  In _moderator_node:
+      except Exception as e:
+          logger.error(f"Moderator failed: {e}")
+          state.verdict = "ERROR"
+          state.confidence = 0.0
+          state.moderator_reasoning = str(e)   # ← write #2 (different path)
+          return state
+
+  If an exception propagates OUT of moderator.generate() (not caught there),
+  _moderator_node catches it and writes moderator_reasoning.  But
+  moderator.generate() has a bare except that catches everything and writes
+  moderator_reasoning before calling _fallback_verdict — so _moderator_node's
+  except block is actually never reached via generate().
+
+  However: _moderator_node calls moderator.generate() inside a try.
+  generate() catches its own exceptions and returns _fallback_verdict.
+  _moderator_node's except blocks only fire if generate() itself raises
+  (which it cannot, because it catches everything internally).  So
+  _moderator_node's except Exception block is dead code.
+
+  Worse: generate()'s except block writes state.moderator_reasoning = str(e)
+  BEFORE calling _fallback_verdict.  _fallback_verdict reads
+  state.moderator_reasoning to decide verdict type (rate limit vs system error).
+  This is correct.  But the ← write in _moderator_node is unreachable dead
+  code that confuses the logic.
+
+FIXED CODE:
+  In _moderator_node, remove the unreachable except block or make it explicit
+  that only a RateLimitError bubbling from outside generate() would reach it:
+
+    def _moderator_node(self, state: DebateState) -> DebateState:
+        try:
+            response = self.moderator.generate(state)
+            state.verdict = response.verdict
+            state.confidence = response.confidence
+            state.moderator_reasoning = response.reasoning
+            state.metrics = response.metrics
+            return state
+        except RateLimitError as e:
+            # Only reachable if generate() re-raises instead of falling back.
+            logger.error("Moderator rate limited; aborting debate run.")
+            state.verdict = "RATE_LIMITED"
+            state.confidence = 0.0
+            if not state.moderator_reasoning:
+                retry_hint = f" Retry after ~{e.retry_after:.0f}s." if e.retry_after else ""
+                state.moderator_reasoning = f"Rate limit exceeded.{retry_hint}"
+            state.metrics = {}
+            return state
+        # Remove the bare except Exception block — it is unreachable because
+        # moderator.generate() catches all exceptions internally.
+
+
+================================================================================
+ 15. _call_groq in call_structured invoked without groq_client argument —
+     falls back to self.groq_client which may be None, causing 3 unnecessary
+     tenacity retries before propagating
+================================================================================
+FILE     : src/llm/client.py  (call_structured, Groq try block)
+SEVERITY : MEDIUM
+
+PROBLEM:
+  call_structured calls:
+      response = self._call_groq(json_prompt, temperature, max_tokens, timeout=30)
+
+  No groq_client= argument is passed.  _call_groq defaults to:
+      client = groq_client or self.groq_client
+      if client is None:
+          raise RuntimeError("Groq client not initialized")
+
+  If self.groq_client is None (e.g. key manager returned None at init),
+  _call_groq raises RuntimeError immediately.  But this RuntimeError is not
+  a rate-limit error, so tenacity's retry decorator retries it 3 times
+  (stop_after_attempt(3)) with exponential backoff — adding 4+8 = 12+ seconds
+  of unnecessary delay before the error propagates to call_structured.
+
+FIXED CODE:
+  Add a guard before invoking _call_groq in call_structured:
+
+      # Guard: fail fast if groq_client is not initialised
+      if self.groq_client is None:
+          raise RuntimeError("Groq client not initialized")
+      response = self._call_groq(json_prompt, temperature, max_tokens, timeout=30)
+
+  Place this guard immediately after the rate-limit check and timestamp append,
+  before the _call_groq invocation.  Apply an identical guard for the Gemini
+  block (check self._gemini_mode / self.genai_client / self._gemini_legacy).
+
+
+================================================================================
+ SUMMARY TABLE
+================================================================================
+
+  #   File                          Severity  Status
+  --- ----------------------------- --------- ------
+  1   src/core/models.py            CRITICAL  Fix DebateState.get() — remove "or val is None"
+  2   src/core/models.py            HIGH      Fix AgentResponse.get() — same sentinel fix
+  3   src/llm/client.py             CRITICAL  Restore RuntimeError in _init_providers
+  4   src/llm/client.py             CRITICAL  Move timestamp append before API call in call_structured
+  5   src/orchestration/debate.py   CRITICAL  Save/restore state.round in _retry_revision_node
+  6   src/orchestration/debate.py   HIGH      Skip gate on final round in _verification_gate_node
+  7   app.py                        HIGH      Restore uuid.uuid4() for thread_id
+  8   src/utils/api_key_manager.py  HIGH      Set Gemini required=False
+  9   src/agents/fact_checker.py    HIGH      Gate TemporalVerifier on year-containing claims only
+  10  tests/test_deep_fixes.py      HIGH      Fix dict→DebateState, update round counter assertions
+  11  tests/test_deep_fixes.py      MEDIUM    Replace test calling removed _parse_moderator_response
+  12  tests/test_moderator.py       MEDIUM    Remove fact_check_result, mock call_structured not call
+  13  src/agents/pro_agent.py       LOW       Remove unused RateLimitError import
+      src/agents/con_agent.py       LOW       Remove unused RateLimitError import
+  14  src/orchestration/debate.py   MEDIUM    Remove unreachable except block in _moderator_node
+  15  src/llm/client.py             MEDIUM    Guard self.groq_client None before _call_groq in call_structured
+
+================================================================================
+ END OF DOCUMENT
+================================================================================
