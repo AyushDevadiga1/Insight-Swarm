@@ -45,6 +45,7 @@ class APIKeyManager:
 
     def __init__(self):
         self.keys: Dict[str, List[APIKeyInfo]] = {}
+        self._reverse_lookup: Dict[str, str] = {}  # key_hash -> actual_key (O(1) lookup #17)
         self._load_and_validate_keys()
         self._health_check_interval = 300  # 5 minutes
         self._last_health_check = 0
@@ -63,7 +64,7 @@ class APIKeyManager:
             "gemini": {
                 "env_vars": ["GEMINI_API_KEYS", "GEMINI_API_KEY"],
                 "validators": [self._validate_gemini_key],
-                "required": True
+                "required": False   # Gemini is a fallback provider, not mandatory
             },
             "tavily": {
                 "env_vars": ["TAVILY_API_KEY"],
@@ -106,8 +107,8 @@ class APIKeyManager:
         if not all_keys_loaded:
             raise RuntimeError(
                 "❌ Critical API keys missing or invalid. Please check your .env file.\n"
-                "Required: GROQ_API_KEY, GEMINI_API_KEY\n"
-                "Optional: TAVILY_API_KEY\n"
+                "Required: GROQ_API_KEY\n"
+                "Optional: GEMINI_API_KEY, TAVILY_API_KEY\n"
                 "See README.md for setup instructions."
             )
 
@@ -154,6 +155,8 @@ class APIKeyManager:
             try:
                 if validator(key):
                     key_info.status = APIKeyStatus.VALID
+                    # Store in reverse lookup for O(1) retrieval (#17)
+                    self._reverse_lookup[key_hash] = key
                     break
             except Exception as e:
                 logger.debug(f"Key validation failed for {provider}: {e}")
@@ -201,23 +204,8 @@ class APIKeyManager:
         return self._get_actual_key(provider, key_info.key_hash)
 
     def _get_actual_key(self, provider: str, key_hash: str) -> Optional[str]:
-        """Retrieve actual key by hash (reverse lookup)"""
-        # This is a simplified version - in production you'd want a secure key store
-        env_vars = {
-            "groq": ["GROQ_API_KEYS", "GROQ_API_KEY"],
-            "gemini": ["GEMINI_API_KEYS", "GEMINI_API_KEY"],
-            "tavily": ["TAVILY_API_KEY"]
-        }
-
-        for env_var in env_vars.get(provider, []):
-            value = os.getenv(env_var)
-            if value:
-                keys = [value] if not env_var.endswith("S") else [k.strip() for k in value.split(",")]
-                for key in keys:
-                    if hashlib.sha256(key.encode()).hexdigest()[:16] == key_hash:
-                        return key
-
-        return None
+        """Retrieve actual key by hash (reverse lookup - O(1) #17)"""
+        return self._reverse_lookup.get(key_hash)
 
     def report_key_failure(self, provider: str, key_hash: str, error: Exception):
         """Report that an API key failed"""
@@ -231,7 +219,12 @@ class APIKeyManager:
 
                 # Implement exponential backoff
                 error_text = str(error).lower()
-                if "rate limit" in error_text or "resource_exhausted" in error_text or "429" in error_text:
+                
+                # Check for permanent "0 quota" errors which indicate account/config issues
+                if "limit: 0" in error_text or "quota: 0" in error_text:
+                    key_info.status = APIKeyStatus.INVALID
+                    logger.error(f"❌ {provider} key has zero quota (config issue): {error_text}")
+                elif "rate limit" in error_text or "resource_exhausted" in error_text or "429" in error_text:
                     key_info.status = APIKeyStatus.RATE_LIMITED
                     backoff_time = min(60 * (2 ** key_info.consecutive_failures), 3600)  # Max 1 hour
                     key_info.cooldown_until = time.time() + backoff_time
