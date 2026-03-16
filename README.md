@@ -1,318 +1,198 @@
-# InsightSwarm - Multi-Agent Fact-Checking System
+# 🦅 InsightSwarm: Multi-Agent Fact-Checking System
 
-AI-powered fact-checking using adversarial debate and source verification.
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://streamlit.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-
-- **API Resilience & Recovery** (NEW - Day 5)
-  - Proactive rate-limit enforcement
-  - Graceful "API Exhaustion" instructions (no more raw errors)
-  - Hardened Gemini 2.0 Flash integration
-  - Auto-fallback from Groq to Gemini
-
-- **Moderator Decision Chat** (NEW - Day 4)
-  - Intelligent evidence-based consensus
-  - Distinct chat-style reasoning interface
-  - Fallacy and credibility analysis
-
-- **Source Verification** (NEW - Day 3)
-  - Validates cited URLs
-  - Detects hallucinated sources
-  - Content matching with fuzzy logic
-
-- **Semantic Caching & Instant Results** (NEW - Day 5)
-  - Pre-seeded cache for 20+ common claims
-  - Instant results for repeated queries
-  - Significant reduce in API consumption
-
-## 🏗️ Architecture
-
-```
-User Claim
-    ↓
-3-Round Debate (ProAgent ↔ ConAgent)
-    ↓
-FactChecker (Verifies all sources)
-    ↓
-Weighted Verdict (Accounts for source quality)
-    ↓
-User sees: Verdict + Confidence + Verification Report
-```
-
-## 📊 Tech Stack
-
-- **LLMs:** Groq (Llama 3.1 70B), Google Gemini 2.0 Flash
-- **Orchestration:** LangGraph
-- **Source Verification:** BeautifulSoup, FuzzyWuzzy
-- **UI:** Streamlit
-- **Testing:** pytest (38 tests, 100% passing)
-
-## 🚀 Quick Start
-
-### Local Setup
-
-```bash
-# Clone repository
-git clone https://github.com/AyushDevadiga1/Insight-Swarm.git
-cd InsightSwarm
-
-# Create virtual environment
-python3.11 -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up API keys
-cp .env.example .env
-# Edit .env with your API keys
-
-# Run CLI
-python main.py
-
-# Run web interface
-streamlit run app.py
-```
-
-## 🔑 API Keys
-
-You'll need free API keys from:
-- **Groq API** (Llama 3.1 70B): https://console.groq.com
-- **Google Gemini API** (Backup): https://aistudio.google.com
-
-Both offer free tiers with sufficient daily limits.
-
-## 📝 Example Claims
-
-Test the system with these claims:
-
-- "Coffee prevents cancer"
-- "Exercise improves mental health"
-- "Vaccines cause autism"
-- "The Earth is flat"
-- "AI will replace all jobs by 2030"
-- "Regular coffee consumption reduces heart disease risk"
-- "Mobile phones cause brain cancer"
-
-## 📈 Test Results
-
-✅ **Unit Tests:** 23/23 passing (100%)
-✅ **Integration Tests:** 6/6 passing (100%)
-✅ **Validation Tests:** 8/8 passing (100%)
-✅ **Total: 37/37 passing (100% success rate)**
-
-Test coverage includes:
-- Source extraction and verification
-- Fuzzy string matching accuracy
-- URL validation (success, 404, timeout)
-- Hallucination detection
-- Weighted verdict calculation
-- Multi-claim debate scenarios
-
-## 🎓 Innovation
-
-### What Makes InsightSwarm Unique?
-
-Unlike traditional debate systems that blindly trust cited sources, InsightSwarm:
-
-1. **Verifies every URL** - Checks if sources actually exist
-2. **Detects hallucinations** - Identifies when agents cite fake sources (23% of AI responses)
-3. **Weights by verification** - Downgrades arguments with unverified sources
-4. **Objective FactChecker** - 2x weight for factual verification vs. subjective debate
-
-### The Problem We Solve
-
-Traditional AI fact-checkers:
-- ❌ Trust agent's sources without verification
-- ❌ Can't detect when agents fabricate sources
-- ❌ Give equal weight to verified and unverified claims
-
-InsightSwarm:
-- ✅ Verifies every cited URL
-- ✅ Detects hallucinated sources
-- ✅ Weights verdict by source verification rate
-- ✅ Shows transparent verification report
-
-### FactChecker Example
-
-```
-Claim: "Coffee prevents cancer"
-
-ProAgent claims: "Studies show coffee reduces cancer risk by 15%"
-  Sources: [https://nature-medicine.org/study, https://fake-cure.xyz/evidence]
-
-ConAgent says: "Other studies show increased risks for certain populations"
-  Sources: [https://health-today.org/risks, https://nonexistent.invalid/data]
-
-FactChecker verifies:
-  ✅ nature-medicine.org → EXISTS, content matches → VERIFIED
-  ❌ fake-cure.xyz → 404 NOT FOUND → HALLUCINATED
-  ✅ health-today.org → EXISTS, content matches → VERIFIED
-  ❌ nonexistent.invalid → CONNECTION TIMEOUT → HALLUCINATED
-
-Verdict Weighting:
-  PRO sources: 50% verified (1/2)
-  CON sources: 50% verified (1/2)
-  Result: PARTIALLY TRUE (50-50 adjusted by verification)
-```
-
-## 🏆 Project Status
-
-**Status:** ✅ PRODUCTION READY
-
-## 🏆 Project Status
-
-**Status:** ✅ PRODUCTION READY
-
-### Completed Features
-- ✅ Multi-agent debate system (4 agents)
-- ✅ FactChecker agent with source verification
-- ✅ Moderator agent with decision reasoning
-- ✅ Moderator Decision Chat UI in Streamlit
-- ✅ Fuzzy string matching for content validation
-- ✅ Hallucination detection
-- ✅ Weighted verdict calculation with verification rates
-- ✅ Comprehensive test suite (38 tests)
-- ✅ CLI interface
-- ✅ Error handling & logging
-- ✅ Rate limiting & timeout protection
-- ✅ **API Resilience & Quota Exhaustion handling** (NEW)
-- ✅ **Google Gemini 2.0 Flash Hardening** (NEW)
-- ✅ **Semantic Cache Pre-seeding** (NEW)
-- ✅ **Streamlit web interface (cached & optimized)**
-
-### In Development
-- 🔄 REST API endpoints
-- 🔄 Advanced analytics
-
-### Planned
-- 📋 Real-time optimization (<60s per claim)
-- 📋 Multilingual support
-- 📋 Image/video fact-checking
-- 📋 Mobile application
-
-## 📄 Documentation
-
-- [Architecture Diagrams](progress/D2/ARCHITECTURE_DIAGRAMS.md) - System design & dataflow
-- [Day 2 Review](progress/D2/DAY_2.md) - Project evolution from Day 1 to Day 2
-- [Security Report](progress/D2/SECURITY.md) - Security features and testing
-- [Verification Report](DAY_3_VERIFICATION_REPORT.md) - Day 3 FactChecker implementation
-- [Day 5 Resilience Report](progress/D5/D5_Progress_Report.md) - API stabilization and cache pre-seeding
-
-## 📚 How to Use
-
-### Command Line
-
-```bash
-python main.py
-```
-
-Then enter claims:
-```
-Enter claim to verify (or 'quit'): Coffee prevents cancer
-🔍 Analyzing: "Coffee prevents cancer"
-⏳ Running 3-round debate...
-
-[Debate output with verification results]
-
-VERDICT: PARTIALLY TRUE
-CONFIDENCE: 68.2%
-
-[Verification Report with source details]
-```
-
-### Web Interface
-
-```bash
-streamlit run app.py
-```
-
-Opens interactive web UI where you can:
-- Enter claims with interactive input
-- See real-time debate progress
-- View verification status for each source
-- Explore debate transcripts
-
-### Python SDK
-
-```python
-from src.orchestration.debate import DebateOrchestrator
-
-orchestrator = DebateOrchestrator()
-result = orchestrator.run("Coffee prevents cancer")
-
-print(f"Verdict: {result['verdict']}")
-print(f"Confidence: {result['confidence']:.1%}")
-print(f"Verified sources: {len(result['verification_results'])}")
-```
-
-## 🧪 Testing
-
-### Run Tests
-
-```bash
-# All tests
-pytest tests/ -v
-
-# Specific test suite
-pytest tests/unit/test_fact_checker.py -v
-
-# With coverage
-pytest tests/ --cov=src
-```
-
-### Test Day 3 Implementation
-
-```bash
-# Validation script
-python validate_day3.py
-
-# Look for:
-# ✅ ALL VALIDATION TESTS PASSED
-# ✅ FactChecker agent fully implemented
-# ✅ Source verification working
-# ✅ Weighted consensus working
-```
-
-## 🔒 Security Features
-
-- ✅ Input validation (non-null, length limits)
-- ✅ Response validation (type checking, content verification)
-- ✅ Rate limiting (5 calls/min per provider)
-- ✅ Timeout protection (1-300 seconds configurable)
-- ✅ Thread-safe operations
-- ✅ No API key exposure in errors
-- ✅ Comprehensive error handling
-
-## 👥 Contributing
-
-To contribute:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make changes and test (`pytest tests/ -v`)
-4. Commit changes (`git commit -m 'Add amazing feature'`)
-5. Push branch (`git push origin feature/amazing-feature`)
-6. Open Pull Request
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file
-
-## 🙏 Credits
-
-- **Groq** for fast Llama 3.1 70B inference
-- **Google** for Gemini API
-- **Claude** for development guidance
-- **Bharat College of Engineering** for research support
-
-## 📞 Support
-
-- **Issues:** Create a GitHub issue for bugs
-- **Discussions:** Use GitHub Discussions for questions
-- **Email:** contact form on website
+InsightSwarm is a state-of-the-art multi-agent system designed to verify complex claims using adversarial debate and rigorous source verification. By leveraging multiple LLM providers (Groq, Gemini) and semantic caching, it provides transparent, fact-based verdicts while actively detecting AI hallucinations.
 
 ---
 
-**Last Updated:** March 14, 2026
-**Version:** 1.1.0 (Resilience Update)
-**Test Status:** 38/38 Passing ✅
+## 📖 Table of Contents
+1. [Prerequisites](#-prerequisites)
+2. [Quick Start](#-quick-start)
+3. [Detailed Installation](#-detailed-installation)
+4. [Environment Configuration](#-environment-configuration)
+5. [How to Generate API Keys](#-how-to-generate-api-keys)
+6. [Usage Guide](#-usage-guide)
+7. [Antigravity / VS Code Integration](#-antigravity--vs-code-integration)
+8. [Architecture](#-architecture)
+9. [Troubleshooting](#-troubleshooting)
+
+---
+
+## 🛠 Prerequisites
+
+Before starting, ensure you have the following installed on your machine:
+
+- **Python 3.11+**: The system is optimized for Python 3.11 features. [Download here](https://www.python.org/downloads/).
+- **Git**: For cloning the repository.
+- **VS Code / Antigravity**: Recommended IDE for the best development experience.
+- **Internet Connection**: Required for API calls to LLM providers.
+
+---
+
+## 🚀 Quick Start (For Experts)
+
+```bash
+git clone https://github.com/AyushDevadiga1/Insight-Swarm.git
+cd InsightSwarm
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+# OR (Windows PowerShell)
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+# Create .env and add GROQ_API_KEY, GEMINI_API_KEY, TAVILY_API_KEY
+streamlit run app.py
+```
+
+---
+
+## 📥 Detailed Installation
+
+### Step 1: Clone the Repository
+Open your terminal (or Antigravity terminal) and run:
+```bash
+git clone https://github.com/AyushDevadiga1/Insight-Swarm.git
+cd InsightSwarm
+```
+
+### Step 2: Set Up Virtual Environment
+Creating a virtual environment ensures that the project's dependencies don't conflict with your global Python setup.
+```bash
+# Create the environment
+python -m venv .venv
+
+# Activate it (Windows CMD)
+.venv\Scripts\activate
+
+# Activate it (Windows PowerShell)
+.\.venv\Scripts\Activate.ps1
+
+# Activate it (Mac/Linux)
+source .venv/bin/activate
+```
+> [!TIP]
+> You will know it's activated when you see `(.venv)` at the start of your terminal prompt.
+
+### Step 3: Install Dependencies
+Install all required libraries including Streamlit, LangGraph, and various LLM clients.
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 🔑 Environment Configuration
+
+The system requires API keys to interact with Large Language Models. These keys must be stored in a `.env` file in the root directory.
+
+### Create the .env File
+In the root directory of `InsightSwarm`, create a file named `.env` and add the following content:
+
+```env
+# Required: Groq API Key (Primary Provider)
+GROQ_API_KEY=your_groq_key_here
+
+# Required: Google Gemini API Key (Fallback Provider)
+GEMINI_API_KEY=your_gemini_key_here
+
+# Required: Tavily API Key (Search/Verification)
+TAVILY_API_KEY=your_tavily_key_here
+
+# Optional: LLM Configuration
+LLM_TEMPERATURE=0.7
+MAX_TOKENS=2000
+```
+
+> [!IMPORTANT]
+> Never commit your `.env` file to GitHub. It is already included in `.gitignore`.
+
+---
+
+## 🔑 How to Generate API Keys
+
+If you don't have the API keys yet, follow these steps to create them:
+
+### 1. Groq API Key
+1. Visit the [Groq Console](https://console.groq.com/).
+2. Sign up or log in with your account.
+3. Navigate to the **"API Keys"** section on the left sidebar.
+4. Click **"Create API Key"**, give it a name (e.g., "InsightSwarm"), and copy the generated key.
+
+### 2. Google Gemini API Key
+1. Go to [Google AI Studio](https://aistudio.google.com/).
+2. Log in with your Google account.
+3. Click on the **"Get API key"** button on the top left.
+4. Click **"Create API key in new project"**.
+5. Copy the key once it's displayed.
+
+### 3. Tavily API Key
+1. Go to [Tavily AI](https://tavily.com/).
+2. Click **"Sign Up"** or **"Login"**.
+3. Once logged in, you will be taken to your **API Dashboard**.
+4. Copy the API Key shown under the "Overview" tab.
+
+---
+
+## 🎮 Usage Guide
+
+### 1. Web Interface (Recommended)
+The Streamlit interface provides a visual, interactive experience showing real-time debate progress.
+```bash
+streamlit run app.py
+```
+After running, your browser should open automatically to `http://localhost:8501`.
+
+### 2. Command Line Interface (CLI)
+For quick verification directly in the terminal:
+```bash
+python main.py
+```
+
+---
+
+## 🌌 Antigravity / VS Code Integration
+
+If you are using **Antigravity** or **VS Code**, follow these tips for a better workflow:
+
+1. **Python Interpreter**: Press `Ctrl+Shift+P` and type "Python: Select Interpreter". Choose the one pointing to `.venv/Scripts/python.exe`.
+2. **Integrated Terminal**: Use the built-in terminal (`Ctrl+` `) to keep your environment active while you code.
+3. **Environment Variables**: The IDE automatically detects `.env` files, making it easy to manage your API keys.
+
+---
+
+## 🏗 Architecture
+
+InsightSwarm operates on a "Trust but Verify" model:
+
+1. **Adversarial Debate**: A `ProAgent` and `ConAgent` debate the claim for 3 rounds.
+2. **Fact Verification**: The `FactChecker` agent extracts URLs from the debate and verifies their existence and content.
+3. **Consensus**: The `Moderator` analyzes the debate and verification results to produce a final verdict.
+4. **Weighted Scoring**: Claims backed by verified sources get higher weight than those with unverified or hallucinated links.
+
+```mermaid
+graph TD
+    A[User Claim] --> B[Adversarial Debate]
+    B --> C[FactChecker]
+    C --> D[URL Verification]
+    D --> E[Weighted Verdict]
+    E --> F[Transparent Report]
+```
+
+---
+
+## ❓ Troubleshooting
+
+- **ModuleNotFoundError**: Ensure your virtual environment is activated and you ran `pip install -r requirements.txt`.
+- **API Quota Errors**: If you hit a rate limit, the system automatically attempts to switch to your fallback provider (e.g., Gemini). Ensure both keys are set for maximum resilience.
+- **Port 8501 Busy**: If Streamlit won't start, another app is using the port. Try `streamlit run app.py --server.port 8502`.
+- **Missing API Keys**: The system will raise a `RuntimeError` on startup if mandatory keys (Groq, Gemini, Tavily) are missing from `.env`.
+
+---
+
+## 📜 License
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+---
+*Created by [Ayush Devadiga](https://github.com/AyushDevadiga1)*
