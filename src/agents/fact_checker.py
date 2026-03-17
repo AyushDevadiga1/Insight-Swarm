@@ -8,6 +8,9 @@ from typing import List, Dict, Optional, Tuple, Any
 from src.agents.base import BaseAgent, DebateState
 from src.core.models import SourceVerification, AgentResponse
 import concurrent.futures
+import re
+from src.utils.temporal_verifier import TemporalVerifier
+from src.utils.trust_scorer import TrustScorer
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,19 @@ class FactChecker(BaseAgent):
         self._fuzz_init_lock = threading.Lock()
         self.fuzz = None
         self._initialize_fuzzy_support()
+        
+        # Phase 3: Semantic Verification
+        self.model = None
+        self._initialize_semantic_model()
+
+    def _initialize_semantic_model(self):
+        try:
+            from sentence_transformers import SentenceTransformer
+            # Using a lightweight, fast model suitable for CPU-heavy envs like Streamlit
+            self.model = SentenceTransformer('all-MiniLM-L6-v2')
+            logger.info("Semantic verification model (all-MiniLM-L6-v2) initialized.")
+        except Exception as e:
+            logger.warning(f"Failed to initialize sentence-transformers: {e}")
     
     def _initialize_fuzzy_support(self):
         with self._fuzz_init_lock:
@@ -31,6 +47,7 @@ class FactChecker(BaseAgent):
                 self.fuzz = fuzz
             except ImportError:
                 logger.warning("rapidfuzz not installed - fuzzy matching disabled")
+                self.fuzz = None
 
     def generate(self, state: DebateState) -> AgentResponse:
         """Verify all sources cited and return structured results."""
@@ -54,7 +71,9 @@ class FactChecker(BaseAgent):
                 futures = {executor.submit(self._verify_url, url, agent, argument): url for url, agent, argument in all_sources}
                 for future in concurrent.futures.as_completed(futures):
                     try:
-                        results.append(future.result())
+                        res = future.result()
+                        if res is not None:
+                            results.append(res)
                     except Exception as e:
                         logger.error(f"Failed to verify {futures[future]}: {e}")
 
@@ -122,9 +141,7 @@ class FactChecker(BaseAgent):
                 # Only apply temporal verification when the claim explicitly
                 # references a 4-digit year.  Generic claims have no temporal
                 # constraint so skipping is correct.
-                import re as _re
-                if claim and _re.search(r'\b(?:19|20)\d{2}\b', claim):
-                    from src.utils.temporal_verifier import TemporalVerifier
+                if claim and re.search(r'\b(?:19|20)\d{2}\b', claim):
                     tv = TemporalVerifier()
                     is_aligned, msg = tv.verify_alignment(claim, content)
                     if not is_aligned:
@@ -136,11 +153,60 @@ class FactChecker(BaseAgent):
                             content_preview=content[:200]
                         )
                 
+                # Phase 3: Semantic Verification
+                if self.model and claim:
+                    # Split content into sentences for more granular matching
+                    sentences = re.split(r'(?<=[.!?])\s+', content)
+                    if sentences:
+                        # Extract sentences that contain ANY relevant keywords from the claim to save time
+                        keywords = set(re.findall(r'\w+', claim.lower()))
+                        candidate_sentences = [
+                            s for s in sentences 
+                            if len(s) > 20 and any(kw in s.lower() for kw in keywords)
+                        ]
+                        
+                        if candidate_sentences:
+                            from sklearn.metrics.pairwise import cosine_similarity
+                            import numpy as np
+                            
+                            claim_embedding = self.model.encode([claim])
+                            sentence_embeddings = self.model.encode(candidate_sentences)
+                            
+                            similarities = cosine_similarity(claim_embedding, sentence_embeddings)[0]
+                            max_sim = np.max(similarities)
+                            
+                            if max_sim > 0.75:
+                                trust_score = TrustScorer.get_score(url)
+                                trust_level = TrustScorer.get_tier_label(trust_score)
+
+                                return SourceVerification(
+                                    url=url,
+                                    status="VERIFIED",
+                                    agent_source=agent,
+                                    confidence=float(max_sim),
+                                    trust_score=trust_score,
+                                    trust_tier=trust_level,
+                                    content_preview=candidate_sentences[np.argmax(similarities)][:200]
+                                )
+                            else:
+                                return SourceVerification(
+                                    url=url,
+                                    status="CONTENT_MISMATCH",
+                                    agent_source=agent,
+                                    error=f"Semantic similarity tool low: {max_sim:.2f}",
+                                    content_preview=content[:200]
+                                )
+
+                trust_score = TrustScorer.get_score(url)
+                trust_level = TrustScorer.get_tier_label(trust_score)
+
                 return SourceVerification(
                     url=url,
                     status="VERIFIED",
                     agent_source=agent,
                     confidence=1.0,
+                    trust_score=trust_score,
+                    trust_tier=trust_level,
                     content_preview=content[:200]
                 )
             return SourceVerification(url=url, status="NOT_FOUND", agent_source=agent, error=f"HTTP {resp.status_code}")

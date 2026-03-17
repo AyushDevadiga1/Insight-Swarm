@@ -36,16 +36,61 @@ class Moderator(BaseAgent):
             
             self.call_count += 1
             
+            # Math: (arg_quality * 0.3) + (avg_ver_rate * 0.3) + (avg_trust * 0.2) + (consensus * 0.2)
+            
+            arg_quality = 0.5
+            if result.metrics and "argument_quality" in result.metrics:
+                arg_quality = result.metrics["argument_quality"] / 100.0 if result.metrics["argument_quality"] > 1 else result.metrics["argument_quality"]
+            
+            pro_rate = state.pro_verification_rate or 0.0
+            con_rate = state.con_verification_rate or 0.0
+            avg_ver_rate = (pro_rate + con_rate) / 2
+
+            # Extract trust scores from state metrics (populated by FactChecker)
+            trust_scores = []
+            if state.metrics and "verification_results" in state.metrics:
+                for res in state.metrics["verification_results"]:
+                    if res.get("status") == "VERIFIED":
+                        trust_scores.append(res.get("trust_score", 0.5))
+            avg_trust = sum(trust_scores) / len(trust_scores) if trust_scores else 0.5
+            
+            consensus_score = 0.5
+            if state.metrics and "consensus" in state.metrics:
+                consensus_data = state.metrics["consensus"]
+                if consensus_data.get("verdict") == result.verdict:
+                    consensus_score = consensus_data.get("score", 0.8)
+                elif consensus_data.get("verdict") == "DEBATE":
+                    consensus_score = 0.5
+                else:
+                    consensus_score = 0.2
+            
+            composite_confidence = (arg_quality * 0.3) + (avg_ver_rate * 0.3) + (avg_trust * 0.2) + (consensus_score * 0.2)
+            
+            # Update metrics with breakdown
+            final_metrics = result.metrics or {}
+            final_metrics.update({
+                "confidence_breakdown": {
+                    "argument_quality_weight": 0.3,
+                    "argument_quality_score": arg_quality,
+                    "verification_weight": 0.3,
+                    "verification_score": avg_ver_rate,
+                    "trust_weight": 0.2,
+                    "trust_score": avg_trust,
+                    "consensus_weight": 0.2,
+                    "consensus_score": consensus_score
+                }
+            })
+
             # Convert ModeratorVerdict to AgentResponse for state compatibility
             return AgentResponse(
                 agent="MODERATOR",
                 round=state.round,
                 argument=result.reasoning[:500] + "..." if len(result.reasoning) > 500 else result.reasoning,
                 sources=[],
-                confidence=result.confidence,
+                confidence=float(composite_confidence),
                 verdict=result.verdict,
                 reasoning=result.reasoning,
-                metrics=result.metrics
+                metrics=final_metrics
             )
             
         except Exception as e:
@@ -113,5 +158,11 @@ GUIDELINES FOR VERDICT:
 - Use 'PARTIALLY TRUE' for multi-faceted claims with mixed evidence.
 - ONLY use 'INSUFFICIENT EVIDENCE' if NO verifiable sources are found or the providers totally failed.
 - Avoid 'wait-and-see' hesitation; make a definitive call based on the available data.
+
+STRUCTURED OUTPUT REQUIREMENTS:
+In your metrics dictionary, include:
+- "argument_quality": A score from 0.0 to 1.0 reflecting the logical strength of the arguments.
+- "logical_fallacies": List of any fallacies detected.
+- "credibility_score": A score from 0.0 to 1.0 for overall evidence credibility.
 """
 

@@ -1,0 +1,32 @@
+[
+  {
+    "claim": "The moon is made of green cheese and NASA faked the smell.",
+    "verdict": "SYSTEM_ERROR",
+    "confidence": 0.0,
+    "reasoning": "System fallback triggered: Failed to get structured output from LLM: 1 validation error for ModeratorVerdict\nmetrics.logical_fallacies\n  Input should be a valid number [type=float_type, input_value=['appeal to ignorance', '...rpretation of evidence'], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.12/v/float_type"
+  },
+  {
+    "claim": "Does 1+1=3 in base-2 logic?",
+    "verdict": "SYSTEM_ERROR",
+    "confidence": 0.0,
+    "reasoning": "System fallback triggered: No LLM providers available for structured call."
+  },
+  {
+    "claim": "Vaccines contain lizard DNA for mind control.",
+    "verdict": "SYSTEM_ERROR",
+    "confidence": 0.0,
+    "reasoning": "System fallback triggered: No LLM providers available for structured call."
+  },
+  {
+    "claim": "The 2024 US election was rigged by time-traveling aliens.",
+    "verdict": "SYSTEM_ERROR",
+    "confidence": 0.0,
+    "reasoning": "System fallback triggered: No LLM providers available for structured call."
+  },
+  {
+    "claim": "Is it ethical to lie if it saves a life?",
+    "verdict": "SYSTEM_ERROR",
+    "confidence": 0.0,
+    "reasoning": "System fallback triggered: No LLM providers available for structured call."
+  }
+]

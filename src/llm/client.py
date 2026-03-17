@@ -196,7 +196,12 @@ class FreeLLMClient:
                         with self._counter_lock:
                             if not self._check_rate_limit("groq", self.groq_last_call_times):
                                 raise RuntimeError("Groq rate limit exceeded")
+                            # #4: Atomic timestamp append before the call
                             self.groq_last_call_times.append(time.time())
+
+                        # #15: Guard fast fail if Groq client not initialised
+                        if self.groq_client is None:
+                            raise RuntimeError("Groq client not initialized")
 
                         # Update client with current working key
                         from groq import Groq
@@ -238,7 +243,14 @@ class FreeLLMClient:
                         with self._counter_lock:
                             if not self._check_rate_limit("gemini", self.gemini_last_call_times):
                                 raise RuntimeError("Gemini rate limit exceeded")
+                            # #4: Atomic timestamp append before the call
                             self.gemini_last_call_times.append(time.time())
+
+                        # #15: Guard fast fail if Gemini client not initialised
+                        if self._gemini_mode == "genai" and self.genai_client is None:
+                            raise RuntimeError("Gemini GenAI client not initialized")
+                        if self._gemini_mode == "legacy" and self._gemini_legacy is None:
+                            raise RuntimeError("Gemini legacy client not initialized")
 
                         response = self._call_gemini(
                             json_prompt, temperature, max_tokens, timeout=30, gemini_key=gemini_key

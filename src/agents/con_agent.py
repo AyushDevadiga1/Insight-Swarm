@@ -16,7 +16,7 @@ class ConAgent(BaseAgent):
     def __init__(self, llm_client: FreeLLMClient):
         super().__init__(llm_client)
         self.role = "CON"
-        self.preferred_provider = "groq"  # ConAgent uses Groq
+        self.preferred_provider = "gemini"  # ConAgent prefers Gemini
     
     def _format_evidence(self, evidence_bundle):
         if not evidence_bundle:
@@ -68,7 +68,8 @@ class ConAgent(BaseAgent):
             )
     
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
-        evidence_bundle = state.con_evidence or state.evidence_sources or []
+        # RAAD: Prioritize global evidence_sources for strict grounding
+        evidence_bundle = state.evidence_sources or state.con_evidence or []
         formatted_evidence = self._format_evidence(evidence_bundle)
         
         # ConAgent always challenges the latest ProAgent argument
