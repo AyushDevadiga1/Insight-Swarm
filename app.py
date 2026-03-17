@@ -817,55 +817,44 @@ def main() -> None:
             st.write("Initializing argument verification agents...")
             
             try:
-                task = st.session_state.executor.submit(
-                    st.session_state.orchestrator.run, claim_text, st.session_state.thread_id
-                )
-            except RuntimeError as e:
-                # Handle case where executor is shutting down or closed
-                status.update(label="❌ System error: Executor not available", state="error")
-                st.error(f"Execution failed: {e}")
-                return None
-            
-            timeout, start = 180, time.time()
-            stages = [
-                "ProAgent collecting evidence", 
-                "ConAgent building rebuttal", 
-                "FactChecker verifying cited sources", 
-                "Moderator compiling final verdict"
-            ]
-            
-            while not task.done():
-                elapsed = time.time() - start
-                if elapsed > timeout:
-                    break
-                # Approximate stages based on time
-                active_idx = min(3, int(elapsed / (timeout / 4)))
-                status.update(label=f"⏳ {stages[active_idx]} ({elapsed:.0f}s)", state="running")
-                time.sleep(0.5)
+                # Use the new stream method for real-time updates
+                orchestrator = _get_orchestrator()
+                stream = orchestrator.stream(claim_text, str(uuid.uuid4()))
                 
-            if task.done():
-                try:
-                    res = task.result()
-                    status.update(label=f"✅ Verification complete in {time.time()-start:.0f}s", state="complete")
+                start_time = time.time()
+                last_node = ""
+                
+                for event_type, state in stream:
+                    if event_type == "cache_hit":
+                        status.update(label="✅ Found in semantic cache", state="complete")
+                        return state
                     
-                    # Store in memory history
-                    verdict_str = getattr(res, "verdict", "UNKNOWN")
-                    st.session_state.history.append({"claim": claim_text, "verdict": verdict_str})
-                    _cap_memory_history()
-                    return res
-                except RateLimitError as e:
-                    status.update(label=f"❌ Rate Limited", state="error")
-                    st.session_state.debate_error = str(e)
-                    st.session_state.retry_at = time.time() + float(getattr(e, "retry_after", 60) or 60)
-                    return e
-                except Exception as e:
-                    status.update(label=f"❌ Debate failed: {e}", state="error")
-                    st.session_state.debate_error = str(e)
-                    return e
-            else:
-                status.update(label="⌛ Timeout exceeded (180s)", state="error")
-                st.session_state.debate_error = "The debate took too long and was terminated."
-                return None
+                    # Update status based on state changes
+                    if state.verdict and event_type == "complete":
+                        status.update(label=f"✅ Verification complete in {time.time()-start_time:.0f}s", state="complete")
+                        return state
+                    
+                    if event_type == "error":
+                        status.update(label="❌ System error", state="error")
+                        return state
+
+                    # Deduce stage from state metrics or round
+                    current_round = state.round
+                    if not state.pro_arguments:
+                        msg = "Searching for evidence..."
+                    elif len(state.pro_arguments) > len(state.con_arguments):
+                        msg = f"ConAgent rebutting Round {current_round}..."
+                    elif len(state.pro_arguments) == len(state.con_arguments):
+                        msg = f"ProAgent arguing Round {current_round}..."
+                    else:
+                        msg = "Running verification protocols..."
+                        
+                    status.update(label=f"⏳ {msg} ({time.time()-start_time:.0f}s)", state="running")
+                    
+            except Exception as e:
+                status.update(label=f"❌ Debate failed: {e}", state="error")
+                st.session_state.debate_error = str(e)
+                return e
 
     if verify and claim and chars >= 10:
         task = st.session_state.background_task
