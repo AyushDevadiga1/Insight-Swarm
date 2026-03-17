@@ -18,7 +18,7 @@ def mock_client():
         verdict="TRUE",
         confidence=0.9,
         reasoning="The evidence strongly supports the claim.",
-        metrics={"evidence_quality": 0.9}
+        metrics={"argument_quality": 0.9}
     )
     return client
 
@@ -34,7 +34,9 @@ def balanced_debate():
         pro_arguments=["Pro arg"] * 3,
         con_arguments=["Con arg"] * 3,
         pro_sources=[["url1"]] * 3,
-        con_sources=[["url2"]] * 3
+        con_sources=[["url2"]] * 3,
+        pro_verification_rate=0.8,
+        con_verification_rate=0.8
     )
 
 def test_moderator_initialization(moderator):
@@ -44,12 +46,13 @@ def test_moderator_generates_verdict(moderator, balanced_debate):
     result = moderator.generate(balanced_debate)
     assert result.agent == "MODERATOR"
     assert result.verdict == "TRUE"
-    assert result.confidence == 0.9
+    # New math: (0.9*0.4) + (0.8*0.35) + (0.5*0.25) = 0.36 + 0.28 + 0.125 = 0.765
+    assert result.confidence == pytest.approx(0.765)
 
 def test_moderator_fallback_verdict(moderator, balanced_debate):
     fallback = moderator._fallback_verdict(balanced_debate)
     assert fallback.agent == "MODERATOR"
-    assert fallback.verdict in ['TRUE', 'FALSE', 'PARTIALLY TRUE', 'INSUFFICIENT EVIDENCE']
+    assert fallback.verdict in ['TRUE', 'FALSE', 'PARTIALLY TRUE', 'INSUFFICIENT EVIDENCE', 'SYSTEM_ERROR', 'RATE_LIMITED']
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
