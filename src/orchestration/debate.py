@@ -3,15 +3,19 @@ DebateOrchestrator - Coordinates multi-round debate using LangGraph and Pydantic
 """
 import sys
 import logging
+import sqlite3
 from pathlib import Path
-from typing import Dict, List, Any, Optional, cast, Literal
+from src.utils.temporal_verifier import TemporalVerifier
+from src.utils.claim_decomposer import ClaimDecomposer
+from src.utils.summarizer import Summarizer
+from typing import TypedDict, List, Dict, Optional, Annotated, Literal, Any
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.core.models import DebateState, AgentResponse
+from src.core.models import DebateState, AgentResponse, ConsensusResponse
 from src.agents.pro_agent import ProAgent
 from src.agents.con_agent import ConAgent
 from src.agents.fact_checker import FactChecker
@@ -19,6 +23,7 @@ from src.agents.moderator import Moderator
 from src.orchestration.cache import get_cached_verdict, set_cached_verdict, get_cache
 from src.utils.tavily_retriever import get_tavily_retriever
 from src.llm.client import FreeLLMClient, RateLimitError
+from src.utils.url_helper import URLNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +49,12 @@ class DebateOrchestrator:
         self.con_agent = con_agent or ConAgent(self.client)
         self.fact_checker = fact_checker or FactChecker(self.client)
         self.moderator = moderator or Moderator(self.client)
-        self.checkpointer = MemorySaver()
+        self.summarizer = Summarizer(self.client)
+        
+        # Phase 18: Persistent Sqlite Checkpointing (#18)
+        # Using direct connection instead of context manager to maintain persistence in long-lived object
+        self.conn = sqlite3.connect("insightswarm_graph.db", check_same_thread=False)
+        self.checkpointer = SqliteSaver(self.conn)
         self.graph = self._build_graph()
     
     def _build_graph(self) -> Any:
@@ -52,24 +62,36 @@ class DebateOrchestrator:
         # LangGraph works with Pydantic models by using their field annotations
         workflow = StateGraph(DebateState)
         
+        workflow.add_node("consensus_check", self._consensus_check_node)
         workflow.add_node("pro_agent", self._pro_agent_node)
         workflow.add_node("con_agent", self._con_agent_node)
         workflow.add_node("fact_checker", self._fact_checker_node)
         workflow.add_node("moderator", self._moderator_node)
         workflow.add_node("verdict", self._verdict_node)
         workflow.add_node("revision", self._retry_revision_node)
-        workflow.add_node("verification_gate", self._verification_gate_node)
+        workflow.add_node("summarizer", self._summarize_node)
         
-        workflow.set_entry_point("pro_agent")
+        # Define edges
+        workflow.add_edge(START, "consensus_check")
+        
+        workflow.add_conditional_edges(
+            "consensus_check",
+            self._should_debate,
+            {
+                "skip": "moderator",
+                "debate": "summarizer"
+            }
+        )
+        
+        workflow.add_edge("summarizer", "pro_agent")
+        
         workflow.add_edge("pro_agent", "con_agent")
         
         # Insert mid-debate verification gate after ConAgent
-        workflow.add_edge("con_agent", "verification_gate")
-        
         workflow.add_conditional_edges(
-            "verification_gate",
+            "con_agent",
             self._should_continue,
-            {"continue": "pro_agent", "end": "fact_checker"}
+            {"continue": "summarizer", "end": "fact_checker"}
         )
         
         workflow.add_conditional_edges(
@@ -89,6 +111,72 @@ class DebateOrchestrator:
         logger.warning("Switching all agents to Gemini fallback mode due to consistent errors.")
         self.client.groq_available = False
         self.client._preferred_provider = "gemini"
+
+    def _summarize_node(self, state: DebateState) -> DebateState:
+        """NEW: Phase 5 Context Management (#20, #29)."""
+        if state.round > 2:
+            logger.info("Debate round > 2, generating summary of history.")
+            state.summary = self.summarizer.summarize_history(state)
+        
+        # Phase 5: History Capping (#29)
+        if len(state.pro_arguments) > 5:
+            logger.info("History exceeds 5 rounds, capping to save memory.")
+            state.pro_arguments = state.pro_arguments[-5:]
+            state.con_arguments = state.con_arguments[-5:]
+            
+        return state
+
+    def _consensus_check_node(self, state: DebateState) -> DebateState:
+        """NEW: Phase 3 Consensus Pre-Check Node using LLM."""
+        logger.info(f"Consensus pre-check for claim: {state.claim}")
+        
+        prompt = f"""You are a Consensus Checker. Determine if there is a massive, widely accepted scientific or authoritative consensus on the following claim.
+CLAIM: {state.claim}
+
+Respond in JSON format:
+{{
+  "verdict": "TRUE" | "FALSE" | "NEUTRAL" | "DEBATE",
+  "reasoning": "Brief explanation citing authoritative bodies (WHO, NASA, CDC, etc.)",
+  "confidence": 0.0-1.0
+}}
+
+If the claim is factually settled (e.g. Earth is round), return TRUE/FALSE. 
+If it is controversial or requires current events analysis, return DEBATE.
+"""
+        try:
+            # Use Gemini for cheap, fast consensus check
+            # Use Gemini for cheap, fast consensus check
+            response = self.client.call_structured(
+                prompt=prompt,
+                output_schema=ConsensusResponse,
+                temperature=0.1,
+                preferred_provider="gemini"
+            )
+            
+            # response is now a ConsensusResponse object
+            if response.verdict != "DEBATE" and response.confidence > 0.9:
+                state.verdict = response.verdict
+                state.confidence = response.confidence
+                state.moderator_reasoning = f"Consensus Pre-Check: {response.reasoning}"
+                logger.info(f"Consensus found: {state.verdict}")
+            
+            # Save raw consensus data for Moderator's composite score
+            if state.metrics is None: state.metrics = {}
+            state.metrics["consensus"] = {
+                "verdict": response.verdict,
+                "reasoning": response.reasoning,
+                "score": response.confidence
+            }
+            
+        except Exception as e:
+            logger.warning(f"Consensus check failed: {e}")
+            
+        return state
+
+    def _should_debate(self, state: DebateState) -> Literal["skip", "debate"]:
+        if state.verdict in ("TRUE", "FALSE", "NEUTRAL") and state.confidence > 0.9:
+            return "skip"
+        return "debate"
 
     def _safe_error_response(self, agent_name: str, round_num: int, claim: str, error: str) -> AgentResponse:
         """Return a safe fallback structured response to prevent app crashes."""
@@ -136,8 +224,8 @@ class DebateOrchestrator:
             return "proceed"
         
         # existing rate checks...
-        pro_rate = state.pro_verification_rate or 0.0
-        con_rate = state.con_verification_rate or 0.0
+        pro_rate = state.pro_verification_rate if state.pro_verification_rate is not None else 0.0
+        con_rate = state.con_verification_rate if state.con_verification_rate is not None else 0.0
         if (pro_rate < 0.3 or con_rate < 0.3) and state.retry_count < 1:
             return "retry"
         return "proceed"
@@ -165,6 +253,11 @@ class DebateOrchestrator:
                 sources_to_check.append((url, "CON", argument))
 
         failed_sources = []
+        # #15: Guard gemini_key None before passing
+        gemini_key = self.client.key_manager.get_working_key("gemini")
+        if not gemini_key:
+            raise RuntimeError("No working Gemini API keys available for verification")
+        
         for url, agent, argument in sources_to_check:
             try:
                 verification = self.fact_checker._verify_url(url, agent, argument)
@@ -213,54 +306,8 @@ class DebateOrchestrator:
     def _fact_checker_node(self, state: DebateState) -> DebateState:
         logger.info("FactChecker verifying sources...")
         try:
-            # Sanitize sources before handing to FactChecker to reduce noisy fetch attempts.
-            def _sanitize_list_of_sources(list_of_lists):
-                import re
-                from urllib.parse import urlparse
-
-                URL_RE = re.compile(r"(https?://[^\s\)\]\}<>\"']+)")
-                BARE_DOMAIN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-\.]+\.[A-Za-z]{2,}([/?#].*)?$")
-
-                sanitized = []
-                skipped = 0
-                for round_sources in list_of_lists:
-                    new_round = []
-                    for s in round_sources:
-                        try:
-                            if not isinstance(s, str):
-                                s = str(s)
-                            original = s.strip()
-                            if not original:
-                                skipped += 1
-                                continue
-
-                            # Extract embedded URLs like "Source Name - https://example.com"
-                            match = URL_RE.search(original)
-                            if match:
-                                new_round.append(match.group(1))
-                                continue
-
-                            parsed = urlparse(original)
-                            if parsed.scheme in ("http", "https") and parsed.netloc:
-                                new_round.append(original)
-                                continue
-
-                            # Heuristic: bare domains like 'www.example.com' -> add https://
-                            if " " not in original and BARE_DOMAIN_RE.match(original):
-                                new_round.append("https://" + original)
-                                continue
-
-                            # Otherwise treat as a non-URL citation/title and skip
-                            skipped += 1
-                        except Exception:
-                            skipped += 1
-                    sanitized.append(new_round)
-                if skipped:
-                    logger.info("Skipped %d non-URL sources during sanitization", skipped)
-                return sanitized
-
-            state.pro_sources = _sanitize_list_of_sources(state.pro_sources)
-            state.con_sources = _sanitize_list_of_sources(state.con_sources)
+            state.pro_sources = URLNormalizer.sanitize_list(state.pro_sources)
+            state.con_sources = URLNormalizer.sanitize_list(state.con_sources)
 
             response = self.fact_checker.generate(state)
             if isinstance(response, dict):
@@ -322,9 +369,16 @@ class DebateOrchestrator:
     def run(self, claim: str, thread_id: str = "default") -> DebateState:
         logger.info(f"Running debate on: {claim}")
         
+        # Phase 5: Claim Decomposition (#09)
+        decomposer = ClaimDecomposer(self.client)
+        sub_claims = decomposer.decompose(claim)
+        target_claim = sub_claims[0] # For now, focus on the primary atomic claim
+        if len(sub_claims) > 1:
+            logger.info(f"Multi-part claim detected. Processing primary part: '{target_claim}'")
+        
         # Check unified semantic cache first
         cache = get_cache()
-        cached_result = cache.get_verdict(claim)
+        cached_result = cache.get_verdict(target_claim)
         if cached_result:
             # Reconstruct state from cached result
             state = DebateState.parse_obj(cached_result)
@@ -338,7 +392,8 @@ class DebateOrchestrator:
         initial_state = DebateState(
             claim=claim, 
             pro_evidence=adversarial_sources["pro"],
-            con_evidence=adversarial_sources["con"]
+            con_evidence=adversarial_sources["con"],
+            evidence_sources=adversarial_sources["pro"] + adversarial_sources["con"] # RAAD: Root grounded context
         )
         try:
             config = {"configurable": {"thread_id": thread_id}}
@@ -364,10 +419,10 @@ class DebateOrchestrator:
             # from being poisoned into the semantic cache.
             # Serialization uses recursive json parsing to avoid losing nested models (#08)
             if final_state.verdict and final_state.verdict not in ("ERROR", "RATE_LIMITED", "SYSTEM_ERROR"):
-                if final_state.verdict != "INSUFFICIENT EVIDENCE" or final_state.confidence > 0.1:
+                if final_state.verdict != "INSUFFICIENT EVIDENCE" or (final_state.confidence is not None and final_state.confidence > 0.1):
                     import json
                     state_json = json.loads(final_state.json())
-                    set_cached_verdict(claim, state_json)
+                    set_cached_verdict(target_claim, state_json) # Cache target_claim
                 else:
                     logger.warning("Skipping cache write for low-confidence Insufficient Evidence.")
             else:
@@ -378,7 +433,72 @@ class DebateOrchestrator:
             initial_state.verdict = "INSUFFICIENT EVIDENCE"
             initial_state.confidence = 0.0
             initial_state.moderator_reasoning = f"System-level error (likely API quota): {str(e)}"
+            initial_state.metrics = {}
             return initial_state
+
+        tavily = get_tavily_retriever()
+    def stream(self, claim: str, thread_id: str = "default"):
+        """Stream debate progress for real-time UI updates."""
+        logger.info(f"Steaming debate on: {claim}")
+        
+        # Phase 5: Claim Decomposition (#09)
+        decomposer = ClaimDecomposer(self.client)
+        sub_claims = decomposer.decompose(claim)
+        target_claim = sub_claims[0]
+        if len(sub_claims) > 1:
+            logger.info(f"Multi-part claim detected in stream. Processing primary part: '{target_claim}'")
+
+        # Check cache first
+        cache = get_cache()
+        cached_result = cache.get_verdict(target_claim)
+        if cached_result:
+            from src.core.models import DebateState
+            state = DebateState.parse_obj(cached_result)
+            state.is_cached = True
+            yield "cache_hit", state
+            return
+
+        # Phase 3: RAAD - Retrieve First
+        tavily = get_tavily_retriever()
+        adversarial_sources = tavily.search_adversarial(target_claim, max_results=5)
+        
+        initial_state = DebateState(
+            claim=target_claim, 
+            pro_evidence=adversarial_sources["pro"],
+            con_evidence=adversarial_sources["con"],
+            evidence_sources=adversarial_sources["pro"] + adversarial_sources["con"] # RAAD: Root grounded context
+        )
+        
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        # Stream from LangGraph
+        last_state = initial_state
+        try:
+            for event in self.graph.stream(initial_state, config=config, stream_mode="values"):
+                # LangGraph 'values' mode returns the state after each node
+                if isinstance(event, dict):
+                    last_state = DebateState.parse_obj(event)
+                else:
+                    last_state = event
+                
+                # Determine current active node if possible, or just yield state
+                yield "progress", last_state
+                
+            # Final caching logic
+            if last_state.verdict and last_state.verdict not in ("ERROR", "RATE_LIMITED", "SYSTEM_ERROR"):
+                if last_state.verdict != "INSUFFICIENT EVIDENCE" or (last_state.confidence is not None and last_state.confidence > 0.1):
+                    import json
+                    state_json = json.loads(last_state.json())
+                    set_cached_verdict(target_claim, state_json)
+            
+            yield "complete", last_state
+            
+        except Exception as e:
+            logger.error(f"Stream failed: {e}")
+            last_state.verdict = "INSUFFICIENT EVIDENCE"
+            last_state.confidence = 0.0
+            last_state.moderator_reasoning = f"System-level error during streaming: {str(e)}"
+            yield "error", last_state
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
