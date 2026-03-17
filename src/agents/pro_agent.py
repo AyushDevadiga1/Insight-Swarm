@@ -16,7 +16,7 @@ class ProAgent(BaseAgent):
     def __init__(self, llm_client: FreeLLMClient):
         super().__init__(llm_client)
         self.role = "PRO"
-        self.preferred_provider = "groq"  # ProAgent uses Groq (Llama)
+        self.preferred_provider = "groq"  # ProAgent prefers Groq (Llama)
     
     def _format_evidence(self, evidence_bundle):
         if not evidence_bundle:
@@ -68,7 +68,8 @@ class ProAgent(BaseAgent):
             )
     
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
-        evidence_bundle = state.pro_evidence or state.evidence_sources or []
+        # RAAD: Prioritize global evidence_sources for strict grounding
+        evidence_bundle = state.evidence_sources or state.pro_evidence or []
         formatted_evidence = self._format_evidence(evidence_bundle)
         
         if round_num == 1:
