@@ -14,6 +14,8 @@ class SourceVerification(BaseModel):
     agent_source: Optional[Literal["PRO", "CON"]] = None
     matched_claim: Optional[str] = None
     similarity_score: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    trust_score: Optional[float] = Field(default=0.5, ge=0.0, le=1.0)
+    trust_tier: Optional[str] = "GENERAL"
 
     def to_dict(self) -> Dict[str, Any]:
         return self.dict()
@@ -42,7 +44,7 @@ class ModeratorVerdict(BaseModel):
                      "CONSENSUS_SETTLED", "RATE_LIMITED", "UNKNOWN", "ERROR"]
     confidence: float = Field(ge=0.0, le=1.0)
     reasoning: str
-    metrics: Optional[Dict[str, float]] = None
+    metrics: Optional[Dict[str, Any]] = None
 
 class DebateState(BaseModel):
     """Complete state of the debate workflow."""
@@ -60,7 +62,10 @@ class DebateState(BaseModel):
     moderator_reasoning: Optional[str] = None
     metrics: Optional[Dict[str, Any]] = None
     retry_count: int = 0
-    is_cached: bool = False
+    is_cached: Optional[bool] = False
+    
+    # Phase 5: Advanced Intelligence
+    summary: Optional[str] = ""
     num_rounds: int = 3
     pro_evidence: List[Dict[str, Any]] = Field(default_factory=list)
     con_evidence: List[Dict[str, Any]] = Field(default_factory=list)
@@ -95,3 +100,8 @@ class DebateState(BaseModel):
 
     def to_dict(self) -> Dict[str, Any]:
         return self.dict()
+
+class ConsensusResponse(BaseModel):
+    verdict: str
+    reasoning: str
+    confidence: float
