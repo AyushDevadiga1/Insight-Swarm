@@ -21,6 +21,14 @@ except ImportError:
     def retry_if_exception_type(*args: Any, **kwargs: Any) -> Any: return None
     def retry_if_exception(*args: Any, **kwargs: Any) -> Any: return None
 
+import json
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+    print("WARNING: requests library not installed - Cerebras/OpenRouter disabled")
+
 load_dotenv()
 logger = logging.getLogger(__name__)
 
@@ -59,6 +67,17 @@ class FreeLLMClient:
         self._gemini_legacy = None
         self._gemini_legacy_lock = threading.Lock()
         self._preferred_provider: Optional[str] = None
+        
+        self.cerebras_client = None
+        self.openrouter_client = None
+        self.cerebras_available = False
+        self.openrouter_available = False
+        self.cerebras_calls = 0
+        self.openrouter_calls = 0
+        self.cerebras_last_call_times = []
+        self.openrouter_last_call_times = []
+        self.cerebras_error: Optional[str] = None
+        self.openrouter_error: Optional[str] = None
         
         # Initialize providers using API key manager
         self._init_providers()
@@ -113,7 +132,39 @@ class FreeLLMClient:
             self.gemini_error = str(e)
             logger.warning(f"⚠️ Gemini initialization failed: {type(e).__name__}")
             
-        if not self.groq_available and not self.gemini_available:
+        try:
+            # Initialize Cerebras
+            cerebras_key = self.key_manager.get_working_key("cerebras")
+            if cerebras_key and HAS_REQUESTS:
+                self.cerebras_available = True
+                logger.info("✅ Cerebras client initialized")
+            else:
+                self.cerebras_available = False
+                self.cerebras_error = "No working Cerebras API keys available"
+                logger.warning("⚠️ Cerebras client not available")
+                
+        except Exception as e:
+            self.cerebras_available = False
+            self.cerebras_error = str(e)
+            logger.warning(f"⚠️ Cerebras initialization failed: {type(e).__name__}")
+
+        try:
+            # Initialize OpenRouter
+            openrouter_key = self.key_manager.get_working_key("openrouter")
+            if openrouter_key and HAS_REQUESTS:
+                self.openrouter_available = True
+                logger.info("✅ OpenRouter client initialized")
+            else:
+                self.openrouter_available = False
+                self.openrouter_error = "No working OpenRouter API keys available"
+                logger.warning("⚠️ OpenRouter client not available")
+                
+        except Exception as e:
+            self.openrouter_available = False
+            self.openrouter_error = str(e)
+            logger.warning(f"⚠️ OpenRouter initialization failed: {type(e).__name__}")
+            
+        if not self.groq_available and not self.gemini_available and not self.cerebras_available and not self.openrouter_available:
             offline = os.getenv("ENABLE_OFFLINE_FALLBACK", "false").lower() in ("true", "1", "yes")
             if offline:
                 logger.warning("⚠️ No LLM providers available — running in offline fallback mode.")
@@ -133,22 +184,34 @@ class FreeLLMClient:
         )
 
     def _provider_order(self, preferred_provider: Optional[str] = None) -> list:
+        '''Return provider priority order based on preference and availability'''
         if preferred_provider:
-            if preferred_provider == "gemini":
-                return ["gemini", "groq"]
+            if preferred_provider == "cerebras":
+                return ["cerebras", "openrouter", "groq", "gemini"]
+            elif preferred_provider == "openrouter":
+                return ["openrouter", "cerebras", "groq", "gemini"]
             elif preferred_provider == "groq":
-                return ["groq", "gemini"]
-        if self._preferred_provider == "gemini":
-            return ["gemini", "groq"]
-        return ["groq", "gemini"]
+                return ["groq", "cerebras", "openrouter", "gemini"]
+            elif preferred_provider == "gemini":
+                return ["gemini", "openrouter", "cerebras", "groq"]
+        
+        # Default: Cerebras first (fastest), then OpenRouter (diverse), then fallbacks
+        if self._preferred_provider == "cerebras":
+            return ["cerebras", "openrouter", "groq", "gemini"]
+        elif self._preferred_provider == "openrouter":
+            return ["openrouter", "cerebras", "groq", "gemini"]
+        
+        return ["cerebras", "openrouter", "groq", "gemini"]
 
     def _set_next_preference(self, provider: str) -> None:
-        if provider == "groq" and self.gemini_available:
-            self._preferred_provider = "gemini"
-        elif provider == "gemini" and self.groq_available:
-            self._preferred_provider = "groq"
-        else:
-            self._preferred_provider = provider
+        # Round robin / priority shift
+        providers = ["cerebras", "openrouter", "groq", "gemini"]
+        try:
+            current_idx = providers.index(provider)
+            next_idx = (current_idx + 1) % len(providers)
+            self._preferred_provider = providers[next_idx]
+        except ValueError:
+            self._preferred_provider = "cerebras"
 
     def _extract_retry_after(self, message: str) -> Optional[float]:
         match = re.search(r"retry in\s*([0-9]+(?:\.[0-9]+)?)s", message, re.IGNORECASE)
@@ -170,9 +233,11 @@ class FreeLLMClient:
         prompt: str,
         output_schema: Type[BaseModel],
         temperature: float = 0.7,
-        max_tokens: int = 2000,
+        max_tokens: int = 1000,
         max_retries: int = 2,
-        preferred_provider: Optional[str] = None
+        preferred_provider: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout: int = 60
     ) -> Any:
         """
         Calls LLM with mandatory JSON output.
@@ -184,6 +249,72 @@ class FreeLLMClient:
         attempted_any = False
 
         for provider in self._provider_order(preferred_provider):
+            # Try Cerebras (ultra-fast)
+            if provider == "cerebras" and self.cerebras_available and self.key_manager.has_working_keys("cerebras"):
+                attempted_any = True
+                for attempt in range(max_retries + 1):
+                    cerebras_key = self.key_manager.get_working_key("cerebras")
+                    if not cerebras_key:
+                        break
+                    cerebras_key_hash = hashlib.sha256(cerebras_key.encode()).hexdigest()[:16]
+                    try:
+                        with self._counter_lock:
+                            if not self._check_rate_limit("cerebras", self.cerebras_last_call_times):
+                                raise RuntimeError("Cerebras rate limit exceeded")
+                            self.cerebras_last_call_times.append(time.time())
+
+                        response = self._call_cerebras(
+                            json_prompt, temperature, max_tokens, timeout=30, cerebras_key=cerebras_key
+                        )
+                        cleaned_response = self._clean_json_response(response)
+                        result = output_schema.parse_raw(cleaned_response)
+                        
+                        self.key_manager.report_key_success("cerebras", cerebras_key_hash)
+                        self._set_next_preference("cerebras")
+                        return result
+                    except Exception as e:
+                        last_error = e
+                        self.key_manager.report_key_failure("cerebras", cerebras_key_hash, e)
+                        if self._is_rate_limit_error(e):
+                            break 
+                        if attempt < max_retries:
+                            time.sleep(1)
+
+            # Try OpenRouter (diverse models)
+            if provider == "openrouter" and self.openrouter_available and self.key_manager.has_working_keys("openrouter"):
+                attempted_any = True
+                for attempt in range(max_retries + 1):
+                    openrouter_key = self.key_manager.get_working_key("openrouter")
+                    if not openrouter_key:
+                        break
+                    openrouter_key_hash = hashlib.sha256(openrouter_key.encode()).hexdigest()[:16]
+                    try:
+                        with self._counter_lock:
+                            if not self._check_rate_limit("openrouter", self.openrouter_last_call_times):
+                                raise RuntimeError("OpenRouter rate limit exceeded")
+                            self.openrouter_last_call_times.append(time.time())
+
+                        # Use override model if provided, else default
+                        target_model = model if model else "meta-llama/llama-3.1-70b-instruct"
+
+                        response = self._call_openrouter(
+                            json_prompt, temperature, max_tokens, timeout=30, 
+                            openrouter_key=openrouter_key, model=target_model
+                        )
+                        cleaned_response = self._clean_json_response(response)
+                        result = output_schema.parse_raw(cleaned_response)
+                        
+                        self.key_manager.report_key_success("openrouter", openrouter_key_hash)
+                        self._set_next_preference("openrouter")
+                        return result
+                    except Exception as e:
+                        last_error = e
+                        self.key_manager.report_key_failure("openrouter", openrouter_key_hash, e)
+                        if self._is_rate_limit_error(e):
+                            break 
+                        if attempt < max_retries:
+                            time.sleep(1)
+
             if provider == "groq" and self.groq_available and self.key_manager.has_working_keys("groq"):
                 attempted_any = True
                 for attempt in range(max_retries + 1):
@@ -253,7 +384,8 @@ class FreeLLMClient:
                             raise RuntimeError("Gemini legacy client not initialized")
 
                         response = self._call_gemini(
-                            json_prompt, temperature, max_tokens, timeout=30, gemini_key=gemini_key
+                            json_prompt, temperature, max_tokens, timeout=30, gemini_key=gemini_key,
+                            response_mime_type="application/json"
                         )
                         cleaned_response = self._clean_json_response(response)
                         result = output_schema.parse_raw(cleaned_response)
@@ -369,7 +501,7 @@ class FreeLLMClient:
         retry=retry_if_exception_type((Exception,)),
         reraise=True
     )
-    def call(self, prompt: str, temperature: float = 0.7, max_tokens: int = 1000, timeout: int = 30) -> str:
+    def call(self, prompt: str, temperature: float = 0.7, max_tokens: int = 1000, timeout: int = 30, preferred_provider: Optional[str] = None) -> str:
         """
         Send prompt to LLM and get response.
         Tries Groq first, falls back to Gemini if Groq fails.
@@ -405,7 +537,75 @@ class FreeLLMClient:
         last_error: Optional[Exception] = None
         attempted_any = False
 
-        for provider in self._provider_order():
+        for provider in self._provider_order(preferred_provider):
+            # Try Cerebras first (ultra-fast)
+            if provider == "cerebras" and self.cerebras_available and self.key_manager.has_working_keys("cerebras"):
+                cerebras_key = self.key_manager.get_working_key("cerebras")
+                if not cerebras_key:
+                    continue
+                cerebras_key_hash = hashlib.sha256(cerebras_key.encode()).hexdigest()[:16]
+                attempted_any = True
+                try:
+                    with self._counter_lock:
+                        rate_limit_reached = not self._check_rate_limit("cerebras", self.cerebras_last_call_times)
+                        if not rate_limit_reached:
+                            self.cerebras_last_call_times.append(time.time())
+                            
+                    if not rate_limit_reached:
+                        response = self._call_cerebras(prompt, temperature, max_tokens, timeout, cerebras_key)
+                        self._validate_response(response)
+                        with self._counter_lock:
+                            self.cerebras_calls += 1
+                            call_count = self.cerebras_calls
+                        logger.info(f"✅ Cerebras call #{call_count} successful")
+                        self._set_next_preference("cerebras")
+                        self.key_manager.report_key_success("cerebras", cerebras_key_hash)
+                        return response
+                except Exception as e:
+                    if self._is_rate_limit_error(e):
+                        retry_after = self._extract_retry_after(str(e))
+                        self.key_manager.report_key_failure("cerebras", cerebras_key_hash, e)
+                        last_error = RateLimitError("cerebras", str(e), retry_after)
+                        continue
+                    cerebras_error = str(e)
+                    last_error = e
+                    self.key_manager.report_key_failure("cerebras", cerebras_key_hash, e)
+                    logger.warning(f"⚠️ Cerebras failed: {type(e).__name__}")
+
+            # Try OpenRouter (diverse models)
+            if provider == "openrouter" and self.openrouter_available and self.key_manager.has_working_keys("openrouter"):
+                openrouter_key = self.key_manager.get_working_key("openrouter")
+                if not openrouter_key:
+                    continue
+                openrouter_key_hash = hashlib.sha256(openrouter_key.encode()).hexdigest()[:16]
+                attempted_any = True
+                try:
+                    with self._counter_lock:
+                        rate_limit_reached = not self._check_rate_limit("openrouter", self.openrouter_last_call_times)
+                        if not rate_limit_reached:
+                            self.openrouter_last_call_times.append(time.time())
+                            
+                    if not rate_limit_reached:
+                        response = self._call_openrouter(prompt, temperature, max_tokens, timeout, openrouter_key)
+                        self._validate_response(response)
+                        with self._counter_lock:
+                            self.openrouter_calls += 1
+                            call_count = self.openrouter_calls
+                        logger.info(f"✅ OpenRouter call #{call_count} successful")
+                        self._set_next_preference("openrouter")
+                        self.key_manager.report_key_success("openrouter", openrouter_key_hash)
+                        return response
+                except Exception as e:
+                    if self._is_rate_limit_error(e):
+                        retry_after = self._extract_retry_after(str(e))
+                        self.key_manager.report_key_failure("openrouter", openrouter_key_hash, e)
+                        last_error = RateLimitError("openrouter", str(e), retry_after)
+                        continue
+                    openrouter_error = str(e)
+                    last_error = e
+                    self.key_manager.report_key_failure("openrouter", openrouter_key_hash, e)
+                    logger.warning(f"⚠️ OpenRouter failed: {type(e).__name__}")
+
             if provider == "groq" and self.groq_available and self.key_manager.has_working_keys("groq"):
                 groq_key = self.key_manager.get_working_key("groq")
                 if not groq_key:
@@ -564,6 +764,139 @@ class FreeLLMClient:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception(lambda e: "rate limit" in str(e).lower() or "429" in str(e)),
+        reraise=True
+    )
+    def _call_cerebras(
+        self, 
+        prompt: str, 
+        temperature: float,
+        max_tokens: int,
+        timeout: int,
+        cerebras_key: Optional[str] = None
+    ) -> str:
+        '''
+        Call Cerebras API (ultra-fast 2000+ tok/s inference)
+        
+        API Docs: https://inference-docs.cerebras.ai/api-reference/chat-completions
+        '''
+        try:
+            if cerebras_key is None:
+                cerebras_key = self.key_manager.get_working_key("cerebras")
+            if not cerebras_key:
+                raise RuntimeError("No working Cerebras API keys available")
+            if not HAS_REQUESTS:
+                raise RuntimeError("requests library not installed")
+            
+            headers = {
+                "Authorization": f"Bearer {cerebras_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": "llama3.1-8b",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False
+            }
+            
+            response = requests.post(
+                "https://api.cerebras.ai/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=timeout
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data["choices"][0]["message"]["content"] or ""
+            else:
+                error_msg = f"Cerebras API error: {response.status_code}"
+                try:
+                    error_data = response.json()
+                    error_msg += f" - {error_data.get('error', {}).get('message', response.text)}"
+                except:
+                    error_msg += f" - {response.text[:200]}"
+                raise RuntimeError(error_msg)
+                
+        except Exception as e:
+            logger.error(f"Cerebras detailed error: {str(e)}")
+            logger.debug(f"Cerebras API error: {type(e).__name__}")
+            raise
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception(lambda e: "rate limit" in str(e).lower() or "429" in str(e)),
+        reraise=True
+    )
+    def _call_openrouter(
+        self, 
+        prompt: str, 
+        temperature: float,
+        max_tokens: int,
+        timeout: int,
+        openrouter_key: Optional[str] = None,
+        model: str = "meta-llama/llama-3.1-70b-instruct"
+    ) -> str:
+        '''
+        Call OpenRouter API (access to 100+ models)
+        
+        Default model: meta-llama/llama-3.1-70b-instruct (free tier)
+        Alternative: anthropic/claude-3.5-sonnet (for reasoning)
+        
+        API Docs: https://openrouter.ai/docs
+        '''
+        try:
+            if openrouter_key is None:
+                openrouter_key = self.key_manager.get_working_key("openrouter")
+            if not openrouter_key:
+                raise RuntimeError("No working OpenRouter API keys available")
+            if not HAS_REQUESTS:
+                raise RuntimeError("requests library not installed")
+            
+            headers = {
+                "Authorization": f"Bearer {openrouter_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/InsightSwarm",  # Optional
+                "X-Title": "InsightSwarm"  # Optional
+            }
+            
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens
+            }
+            
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=timeout
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data["choices"][0]["message"]["content"] or ""
+            else:
+                error_msg = f"OpenRouter API error: {response.status_code}"
+                try:
+                    error_data = response.json()
+                    error_msg += f" - {error_data.get('error', {}).get('message', response.text)}"
+                except:
+                    error_msg += f" - {response.text[:200]}"
+                raise RuntimeError(error_msg)
+                
+        except Exception as e:
+            logger.error(f"OpenRouter detailed error: {str(e)}")
+            logger.debug(f"OpenRouter API error: {type(e).__name__}")
+            raise
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
         retry=retry_if_exception(lambda e: "rate limit" in str(e).lower() or "429" in str(e) or "exhausted" in str(e).lower()),
         reraise=True
     )
@@ -648,7 +981,9 @@ class FreeLLMClient:
         return {
             "groq_calls": groq_count,
             "gemini_calls": gemini_count,
-            "total_calls": groq_count + gemini_count
+            "cerebras_calls": self.cerebras_calls,
+            "openrouter_calls": self.openrouter_calls,
+            "total_calls": groq_count + gemini_count + self.cerebras_calls + self.openrouter_calls
         }
 
     def _try_offline_fallback(self) -> bool:
