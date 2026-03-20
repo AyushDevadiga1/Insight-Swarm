@@ -42,12 +42,17 @@ def balanced_debate():
 def test_moderator_initialization(moderator):
     assert moderator.role == "MODERATOR"
 
-def test_moderator_generates_verdict(moderator, balanced_debate):
+def test_moderator_generates_verdict(moderator, balanced_debate, mock_client):
+    # Mock openrouter availability to exercise model_override logic
+    mock_client.openrouter_available = True
+    
     result = moderator.generate(balanced_debate)
     assert result.agent == "MODERATOR"
     assert result.verdict == "TRUE"
-    # New math: (0.9*0.4) + (0.8*0.35) + (0.5*0.25) = 0.36 + 0.28 + 0.125 = 0.765
-    assert result.confidence == pytest.approx(0.765)
+    # Current math: (arg_quality * 0.3) + (avg_ver_rate * 0.3) + (avg_trust * 0.2) + (consensus_score * 0.2)
+    # arg_quality=0.9, avg_ver_rate=0.8, avg_trust=0.5, consensus_score=0.5
+    # (0.9 * 0.3) + (0.8 * 0.3) + (0.5 * 0.2) + (0.5 * 0.2) = 0.27 + 0.24 + 0.1 + 0.1 = 0.71
+    assert result.confidence == pytest.approx(0.71)
 
 def test_moderator_fallback_verdict(moderator, balanced_debate):
     fallback = moderator._fallback_verdict(balanced_debate)
