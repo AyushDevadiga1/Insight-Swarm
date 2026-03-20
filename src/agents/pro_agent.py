@@ -1,7 +1,11 @@
 """
 ProAgent - Argues that the claim is TRUE using structured outputs.
 """
+<<<<<<< HEAD
 from datetime import datetime
+=======
+from typing import List, Dict, Any, Optional
+>>>>>>> origin/main
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
 import logging
@@ -10,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProAgent(BaseAgent):
+<<<<<<< HEAD
     """Argues the claim is TRUE using adversarial prompting and structured output."""
 
     def __init__(self, llm_client: FreeLLMClient):
@@ -17,6 +22,18 @@ class ProAgent(BaseAgent):
         self.role               = "PRO"
         self.preferred_provider = "groq"   # ProAgent uses Groq (Llama)
 
+=======
+    """
+    Agent that argues the claim is TRUE.
+    Uses adversarial prompting and Pydantic structured output.
+    """
+    
+    def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
+        super().__init__(llm_client)
+        self.role = "PRO"
+        self.preferred_provider = preferred_provider or "cerebras"  # ProAgent prefers Cerebras (Llama 3.1 8b)
+    
+>>>>>>> origin/main
     def _format_evidence(self, evidence_bundle):
         if not evidence_bundle:
             return "No specific evidence provided yet."

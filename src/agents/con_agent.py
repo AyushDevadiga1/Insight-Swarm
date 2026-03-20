@@ -1,7 +1,11 @@
 """
 ConAgent - Argues that the claim is FALSE using structured outputs.
 """
+<<<<<<< HEAD
 from datetime import datetime
+=======
+from typing import List, Dict, Any, Optional
+>>>>>>> origin/main
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
 import logging
@@ -10,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConAgent(BaseAgent):
+<<<<<<< HEAD
     """Argues the claim is FALSE using adversarial prompting and structured output."""
 
     def __init__(self, llm_client: FreeLLMClient):
@@ -17,6 +22,18 @@ class ConAgent(BaseAgent):
         self.role               = "CON"
         self.preferred_provider = "gemini"   # ConAgent uses Gemini (different training data)
 
+=======
+    """
+    Agent that argues the claim is FALSE.
+    Takes the opposite position from ProAgent and challenges their evidence.
+    """
+    
+    def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
+        super().__init__(llm_client)
+        self.role = "CON"
+        self.preferred_provider = preferred_provider or "openrouter"  # ConAgent prefers OpenRouter (Llama 3.1 70B)
+    
+>>>>>>> origin/main
     def _format_evidence(self, evidence_bundle):
         if not evidence_bundle:
             return "No specific evidence provided yet."

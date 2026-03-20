@@ -40,7 +40,7 @@ Respond in JSON format:
                 prompt=prompt,
                 output_schema=ClaimsOutput,
                 temperature=0.1,
-                preferred_provider="gemini"
+                preferred_provider="cerebras"
             )
             
             # Ensure we have a list of strings

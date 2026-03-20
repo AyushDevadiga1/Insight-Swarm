@@ -70,6 +70,16 @@ class APIKeyManager:
                 "env_vars": ["TAVILY_API_KEY"],
                 "validators": [self._validate_tavily_key],
                 "required": False
+            },
+            "cerebras": {
+                "env_vars": ["CEREBRAS_API_KEY"],
+                "validators": [self._validate_cerebras_key],
+                "required": False
+            },
+            "openrouter": {
+                "env_vars": ["OPENROUTER_API_KEY"],
+                "validators": [self._validate_openrouter_key],
+                "required": False
             }
         }
 
@@ -108,7 +118,7 @@ class APIKeyManager:
             raise RuntimeError(
                 "❌ Critical API keys missing or invalid. Please check your .env file.\n"
                 "Required: GROQ_API_KEY\n"
-                "Optional: GEMINI_API_KEY, TAVILY_API_KEY\n"
+                "Optional: GEMINI_API_KEY, TAVILY_API_KEY, CEREBRAS_API_KEY, OPENROUTER_API_KEY\n"
                 "See README.md for setup instructions."
             )
 
@@ -175,6 +185,14 @@ class APIKeyManager:
     def _validate_tavily_key(self, key: str) -> bool:
         """Validate Tavily API key format"""
         return len(key) >= 20  # Tavily keys are typically long
+
+    def _validate_cerebras_key(self, key: str) -> bool:
+        """Validate Cerebras API key format"""
+        return len(key) >= 30 and key.startswith("csk-")
+
+    def _validate_openrouter_key(self, key: str) -> bool:
+        """Validate OpenRouter API key format"""
+        return len(key) >= 30 and key.startswith("sk-or-")
 
     def get_working_key(self, provider: str) -> Optional[str]:
         """

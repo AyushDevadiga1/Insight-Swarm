@@ -35,10 +35,17 @@ class DebateOrchestrator:
     def __init__(self, llm_client=None, pro_agent=None, con_agent=None,
                  fact_checker=None, moderator=None):
         self.client = llm_client or FreeLLMClient()
-        self.pro_agent = pro_agent or ProAgent(self.client)
-        self.con_agent = con_agent or ConAgent(self.client)
-        self.fact_checker = fact_checker or FactChecker(self.client)
-        self.moderator = moderator or Moderator(self.client)
+        
+        # Heterogeneous Model Pairing for optimal performance
+        # Pro: Cerebras (Llama 3.3 70B) - Ultra-fast, factual
+        # Con: OpenRouter (Llama 3.1 70B) - Diverse perspectives
+        # FactChecker: Groq (Llama 3.1 70B) - Reliable retrieval-based checks
+        # Moderator: OpenRouter (Claude 3.5 Sonnet) - Superior reasoning
+        
+        self.pro_agent = pro_agent or ProAgent(self.client, preferred_provider="cerebras")
+        self.con_agent = con_agent or ConAgent(self.client, preferred_provider="openrouter")
+        self.fact_checker = fact_checker or FactChecker(self.client, preferred_provider="groq")
+        self.moderator = moderator or Moderator(self.client, preferred_provider="openrouter")
         self.summarizer = Summarizer(self.client)
 
         # Persistent SQLite checkpointing — single connection, thread-safe
@@ -106,8 +113,44 @@ class DebateOrchestrator:
         return state
 
     def _consensus_check_node(self, state: DebateState) -> DebateState:
+<<<<<<< HEAD
         """Fast consensus pre-check using Gemini — skips full debate for settled facts."""
         logger.info(f"Consensus pre-check for: {state.claim}")
+=======
+        """NEW: Phase 3 Consensus Pre-Check Node using LLM and settled science."""
+        logger.info(f"Consensus pre-check for claim: {state.claim}")
+        
+        claim_lower = state.claim.lower()
+        
+        # Hardcoded settled science (proven facts, skip expensive LLM call)
+        SETTLED_TRUTHS = {
+            'earth is flat': ('FALSE', 1.0, 'Earth is an oblate spheroid - proven by physics and satellite imagery.'),
+            'earth is round': ('TRUE', 1.0, 'Earth is an oblate spheroid - global scientific consensus.'),
+            'vaccines cause autism': ('FALSE', 0.99, 'Extensively debunked by global medical research (CDC, WHO).'),
+            'smoking causes cancer': ('TRUE', 0.99, 'Established medical consensus over decades of research.'),
+            'climate change is real': ('TRUE', 0.98, 'Scientific consensus from IPCC and major scientific academies.'),
+            'water is h2o': ('TRUE', 1.0, 'Fundamental chemical composition of water.'),
+            'moon landing was faked': ('FALSE', 1.0, 'Extensively documented historical fact with physical evidence.'),
+            'sun revolves around earth': ('FALSE', 1.0, 'Heliocentric model is a fundamental fact of astronomy.')
+        }
+
+        # Check hardcoded first
+        for keyword, (verdict, conf, reasoning) in SETTLED_TRUTHS.items():
+            if keyword in claim_lower:
+                state.verdict = verdict
+                state.confidence = conf
+                state.moderator_reasoning = f"Settled Science: {reasoning}"
+                logger.info(f"✅ Hardcoded consensus: {verdict}")
+                
+                # Still populate metrics for consistency
+                if state.metrics is None: state.metrics = {}
+                state.metrics["consensus"] = {
+                    "verdict": verdict,
+                    "reasoning": reasoning,
+                    "score": conf
+                }
+                return state
+>>>>>>> origin/main
 
         prompt = f"""You are a Consensus Checker. Determine if there is a massive, widely accepted scientific or authoritative consensus on the following claim.
 CLAIM: {state.claim}

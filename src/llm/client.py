@@ -21,6 +21,14 @@ except ImportError:
     def retry_if_exception_type(*args: Any, **kwargs: Any) -> Any: return None
     def retry_if_exception(*args: Any, **kwargs: Any) -> Any: return None
 
+import json
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+    print("WARNING: requests library not installed - Cerebras/OpenRouter disabled")
+
 load_dotenv()
 logger = logging.getLogger(__name__)
 
@@ -59,7 +67,8 @@ class FreeLLMClient:
         self._gemini_legacy  = None
         self._gemini_legacy_lock = threading.Lock()
         self._preferred_provider: Optional[str] = None
-
+        
+        # Initialize providers using API key manager
         self._init_providers()
 
     def _init_providers(self):
@@ -104,9 +113,9 @@ class FreeLLMClient:
                 logger.warning("⚠️ Gemini client not available")
         except Exception as e:
             self.gemini_available = False
-            self.gemini_error     = str(e)
-            logger.warning(f"⚠️ Gemini init failed: {type(e).__name__}")
-
+            self.gemini_error = str(e)
+            logger.warning(f"⚠️ Gemini initialization failed: {type(e).__name__}")
+            
         if not self.groq_available and not self.gemini_available:
             offline = os.getenv("ENABLE_OFFLINE_FALLBACK", "false").lower() in ("true", "1", "yes")
             if offline:
@@ -125,18 +134,23 @@ class FreeLLMClient:
                 or "resource_exhausted" in text or "429" in text)
 
     def _provider_order(self, preferred_provider: Optional[str] = None) -> list:
+        '''Return provider priority order based on preference and availability'''
         if preferred_provider:
-            return ["gemini", "groq"] if preferred_provider == "gemini" else ["groq", "gemini"]
+            if preferred_provider == "gemini":
+                return ["gemini", "groq"]
+            elif preferred_provider == "groq":
+                return ["groq", "gemini"]
         if self._preferred_provider == "gemini":
             return ["gemini", "groq"]
         return ["groq", "gemini"]
 
-    def _mark_provider_failed(self, provider: str) -> None:
-        """Switch preference to the other provider when one fails."""
+    def _set_next_preference(self, provider: str) -> None:
         if provider == "groq" and self.gemini_available:
             self._preferred_provider = "gemini"
         elif provider == "gemini" and self.groq_available:
             self._preferred_provider = "groq"
+        else:
+            self._preferred_provider = provider
 
     def _extract_retry_after(self, message: str) -> Optional[float]:
         for pattern in (
@@ -195,9 +209,9 @@ class FreeLLMClient:
         prompt: str,
         output_schema: Type[BaseModel],
         temperature: float = 0.7,
-        max_tokens: int = 2000,
+        max_tokens: int = 1000,
         max_retries: int = 2,
-        preferred_provider: Optional[str] = None,
+        preferred_provider: Optional[str] = None
     ) -> Any:
         """
         Call LLM and parse the response as a Pydantic model.
@@ -213,7 +227,6 @@ class FreeLLMClient:
         attempted_any = False
 
         for provider in self._provider_order(preferred_provider):
-
             if provider == "groq" and self.groq_available and self.key_manager.has_working_keys("groq"):
                 attempted_any = True
                 for attempt in range(max_retries + 1):
@@ -273,11 +286,12 @@ class FreeLLMClient:
                         if self._gemini_mode == "legacy" and self._gemini_legacy is None:
                             raise RuntimeError("Gemini legacy client not initialised")
 
-                        response = self._call_gemini(json_prompt, temperature, max_tokens,
-                                                     timeout=30, gemini_key=gemini_key)
-                        cleaned  = self._clean_json_response(response)
-                        result   = output_schema.parse_raw(cleaned)
-
+                        response = self._call_gemini(
+                            json_prompt, temperature, max_tokens, timeout=30, gemini_key=gemini_key
+                        )
+                        cleaned_response = self._clean_json_response(response)
+                        result = output_schema.parse_raw(cleaned_response)
+                        
                         self.key_manager.report_key_success("gemini", gemini_key_hash)
                         # ← No _set_next_preference on success
                         return result
@@ -309,8 +323,7 @@ class FreeLLMClient:
         retry=retry_if_exception(lambda e: not isinstance(e, (ValueError, TypeError))),
         reraise=True,
     )
-    def call(self, prompt: str, temperature: float = 0.7,
-             max_tokens: int = 1000, timeout: int = 30) -> str:
+    def call(self, prompt: str, temperature: float = 0.7, max_tokens: int = 1000, timeout: int = 30) -> str:
         """
         Send prompt to LLM.  Groq first, Gemini fallback.
         Provider preference rotates only on failure, never on success.
@@ -331,7 +344,6 @@ class FreeLLMClient:
         attempted_any = False
 
         for provider in self._provider_order():
-
             if provider == "groq" and self.groq_available and self.key_manager.has_working_keys("groq"):
                 groq_key = self.key_manager.get_working_key("groq")
                 if not groq_key:
@@ -448,7 +460,7 @@ class FreeLLMClient:
         except Exception as e:
             logger.debug(f"Groq API error: {type(e).__name__}")
             raise
-
+    
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=30),
@@ -496,9 +508,13 @@ class FreeLLMClient:
 
     def get_stats(self) -> dict:
         with self._counter_lock:
-            return {"groq_calls": self.groq_calls,
-                    "gemini_calls": self.gemini_calls,
-                    "total_calls": self.groq_calls + self.gemini_calls}
+            groq_count = self.groq_calls
+            gemini_count = self.gemini_calls
+        return {
+            "groq_calls": groq_count,
+            "gemini_calls": gemini_count,
+            "total_calls": groq_count + gemini_count
+        }
 
     def _try_offline_fallback(self) -> bool:
         return os.getenv("ENABLE_OFFLINE_FALLBACK", "false").lower() in ("true", "1", "yes")
