@@ -36,7 +36,8 @@ CON ARGUMENTS:
             summary = self.client.call(
                 prompt=prompt,
                 temperature=0.3,
-                max_tokens=300
+                max_tokens=300,
+                preferred_provider="gemini"
             )
             logger.info(f"Generated debate summary for round {state.round}")
             return summary
