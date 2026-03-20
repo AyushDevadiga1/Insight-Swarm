@@ -1,6 +1,7 @@
 """
 Moderator - Analyzes debate quality and produces reasoned verdicts using structured outputs.
 """
+from typing import List, Dict, Any, Optional
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.core.models import ModeratorVerdict
 from src.llm.client import FreeLLMClient, RateLimitError
@@ -15,10 +16,10 @@ class Moderator(BaseAgent):
     Uses analytical prompting and Pydantic structured output.
     """
     
-    def __init__(self, llm_client: FreeLLMClient):
+    def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
         super().__init__(llm_client)
         self.role = "MODERATOR"
-        self.preferred_provider = "groq"
+        self.preferred_provider = preferred_provider or "openrouter"
 
     def generate(self, state: DebateState) -> AgentResponse:
         """Analyze complete debate and produce reasoned verdict."""
@@ -27,11 +28,19 @@ class Moderator(BaseAgent):
         prompt = self._build_prompt(state, state.round)
         
         try:
+            # Force Claude 3.5 Sonnet via OpenRouter for the Moderator
+            # but allow fallback to others if needed
+            model_override = None
+            if self.client.openrouter_available:
+                model_override = "anthropic/claude-3.5-sonnet"
+
             # Use call_structured with the ModeratorVerdict schema
             result = self.client.call_structured(
                 prompt=prompt,
                 output_schema=ModeratorVerdict,
-                temperature=0.2  # Very low temperature for analytical consistency
+                temperature=0.2,  # Very low temperature for analytical consistency
+                preferred_provider="openrouter",
+                model=model_override
             )
             
             self.call_count += 1

@@ -1,6 +1,7 @@
 """
 ProAgent - Argues that the claim is TRUE using structured outputs.
 """
+from typing import List, Dict, Any, Optional
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
 import logging
@@ -13,10 +14,10 @@ class ProAgent(BaseAgent):
     Uses adversarial prompting and Pydantic structured output.
     """
     
-    def __init__(self, llm_client: FreeLLMClient):
+    def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
         super().__init__(llm_client)
         self.role = "PRO"
-        self.preferred_provider = "groq"  # ProAgent prefers Groq (Llama)
+        self.preferred_provider = preferred_provider or "cerebras"  # ProAgent prefers Cerebras (Llama 3.1 8b)
     
     def _format_evidence(self, evidence_bundle):
         if not evidence_bundle:

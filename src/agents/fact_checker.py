@@ -19,9 +19,10 @@ class FactChecker(BaseAgent):
     Agent responsible for verifying sources cited in the debate.
     """
     
-    def __init__(self, llm_client):
+    def __init__(self, llm_client, preferred_provider: Optional[str] = None):
         super().__init__(llm_client)
         self.role = "FACT_CHECKER"
+        self.preferred_provider = preferred_provider or "groq"
         self.url_timeout = 10
         self._fuzz_init_lock = threading.Lock()
         self.fuzz = None
@@ -129,12 +130,39 @@ class FactChecker(BaseAgent):
                 )
 
             # Safe to fetch
+            USER_AGENTS = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0'
+            ]
+            import random
+            headers = {
+                'User-Agent': random.choice(USER_AGENTS),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1'
+            }
+
             resp = requests.get(
                 url,
                 timeout=self.url_timeout,
                 allow_redirects=True,
-                headers={"User-Agent": "InsightSwarm-FactChecker/1.0"}
+                headers=headers
             )
+            
+            # Detect paywalls or access restrictions
+            paywall_indicators = ['subscribe to read', 'paywall', 'premium content', 'login to continue', 'subscription required', 'members only']
+            if any(indicator in resp.text.lower() for indicator in paywall_indicators):
+                 return SourceVerification(
+                    url=url,
+                    status="PAYWALL_RESTRICTED",
+                    agent_source=agent,
+                    error="Content is behind a paywall or requires login"
+                )
+
             if resp.status_code == 200:
                 content = resp.text
                 
