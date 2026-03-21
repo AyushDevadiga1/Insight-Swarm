@@ -175,12 +175,41 @@ class APIKeyManager:
         return key_info
 
     def _validate_groq_key(self, key: str) -> bool:
-        """Validate Groq API key format"""
-        return len(key) >= 30 and key.startswith("gsk_")
+        """Validate Groq API key format and optionally perform liveness probe"""
+        valid_format = len(key) >= 30 and key.startswith("gsk_")
+        if not valid_format:
+            return False
+            
+        if os.getenv("ENABLE_API_LIVENESS_PROBES", "false").lower() == "true":
+            try:
+                import requests
+                r = requests.get(
+                    "https://api.groq.com/openai/v1/models",
+                    headers={"Authorization": f"Bearer {key}"},
+                    timeout=5
+                )
+                return r.status_code == 200
+            except Exception:
+                return False
+        return True
 
     def _validate_gemini_key(self, key: str) -> bool:
-        """Validate Gemini API key format"""
-        return len(key) >= 30 and key.startswith("AIza")
+        """Validate Gemini API key format and optionally perform liveness probe"""
+        valid_format = len(key) >= 30 and key.startswith("AIza")
+        if not valid_format:
+            return False
+            
+        if os.getenv("ENABLE_API_LIVENESS_PROBES", "false").lower() == "true":
+            try:
+                import requests
+                r = requests.get(
+                    f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+                    timeout=5
+                )
+                return r.status_code == 200
+            except Exception:
+                return False
+        return True
 
     def _validate_tavily_key(self, key: str) -> bool:
         """Validate Tavily API key format"""

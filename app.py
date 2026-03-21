@@ -19,14 +19,13 @@ from __future__ import annotations
 import html
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Mapping, Optional, cast
+from typing import Any, Mapping, Optional
 
 import streamlit as st
 
 from src.orchestration.debate import DebateOrchestrator
 from src.orchestration.cache import record_feedback
-from main import validate_claim
+from src.utils.validation import validate_claim
 from src.llm.client import RateLimitError
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -37,11 +36,8 @@ st.set_page_config(
 )
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
-_md = getattr(st, "markdown")
-
-_md("""
+st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500&display=swap');
 
 /* ── Tokens ──────────────────────────────────────────────────────── */
 :root {
@@ -56,8 +52,8 @@ _md("""
     --green:  #22c55e;
     --red:    #ef4444;
     --amber:  #f59e0b;
-    --mono:   'Space Mono', monospace;
-    --sans:   'DM Sans', sans-serif;
+    --mono:   'Space Mono', 'Courier New', monospace;
+    --sans:   'DM Sans', system-ui, sans-serif;
 }
 
 /* ── App background & base font ─────────────────────────────────── */
@@ -436,8 +432,7 @@ def _init() -> None:
         "thread_id":       str(uuid.uuid4()),
         "result":          None,
         "orchestrator":    None,
-        "background_task": None,
-        "executor":        ThreadPoolExecutor(max_workers=1),
+        "is_running":      False,
         "example_claim":   "",
         "feedback_given":  None,
         "debate_error":    None,   # str  – last error message
@@ -467,7 +462,7 @@ def _get_orchestrator() -> DebateOrchestrator:
 
 def sh(content: str) -> None:
     """Render raw HTML."""
-    _md(content, unsafe_allow_html=True)
+    st.markdown(content, unsafe_allow_html=True)
 
 
 def sec(label: str) -> None:
@@ -529,13 +524,8 @@ def render_sidebar() -> None:
            "letter-spacing:4px;text-transform:uppercase;margin:18px 0 10px'>"
            "Example Claims</p>")
 
-        for c in [
-            "Coffee prevents cancer",
-            "Exercise improves mental health",
-            "The Earth is flat",
-            "Vaccines cause autism",
-            "AI will replace all jobs by 2030",
-        ]:
+        from src.config import StreamlitConfig
+        for c in StreamlitConfig.EXAMPLE_CLAIMS:
             if st.button(c, key=f"ex_{c}", use_container_width=True):
                 st.session_state.example_claim = c
                 st.rerun()
@@ -637,9 +627,13 @@ def render_metrics(result: Mapping[str, Any]) -> None:
         return
     sec("Intelligence Metrics")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Evidence Credibility", f"{float(m.get('credibility', 0.0)):.0%}")
-    c2.metric("Fallacy Count",        int(m.get("fallacies", 0)))
-    c3.metric("Rebuttal Balance",     f"{float(m.get('balance', 0.5)):.2f}")
+    credibility = float(m.get("credibility_score", 0.0))
+    fallacies   = m.get("logical_fallacies", [])
+    fallacy_count = len(fallacies) if isinstance(fallacies, list) else int(fallacies)
+    arg_quality = float(m.get("argument_quality", 0.0))
+    c1.metric("Evidence Credibility", f"{credibility:.0%}")
+    c2.metric("Fallacy Count",        fallacy_count)
+    c3.metric("Argument Quality",     f"{arg_quality:.0%}")
 
 
 def render_sources(result: Mapping[str, Any]) -> None:
@@ -748,6 +742,7 @@ def render_footer() -> None:
 
 def main() -> None:
     _init()
+    _cap_memory_history()
     render_header()
     render_sidebar()
 
@@ -854,34 +849,41 @@ def main() -> None:
             except Exception as e:
                 status.update(label=f"❌ Debate failed: {e}", state="error")
                 st.session_state.debate_error = str(e)
-                return e
+                return None
 
     if verify and claim and chars >= 10:
-        task = st.session_state.background_task
-        if task and not task.done():
+        if st.session_state.is_running:
             st.warning("A debate is already running — please wait.")
         else:
+            st.session_state.is_running = True
             st.session_state.debate_error = None
             st.session_state.retry_at = None
             st.session_state.feedback_given = None
             
             result = analyze_claim_with_streaming(claim)
             
-            if isinstance(result, Exception):
+            if result is None:
                 st.session_state.debate_run = False
-                if isinstance(result, RateLimitError):
-                    render_api_exhausted(st.session_state.retry_at)
-                else:
-                    st.error(f"Debate failed: {result}")
-            elif result is not None:
+                err_msg = st.session_state.debate_error
+                if err_msg:
+                    is_rate_limit = (
+                        "rate" in err_msg.lower()
+                        or "429" in err_msg
+                        or "exhausted" in err_msg.lower()
+                        or "resource_exhausted" in err_msg.lower()
+                    )
+                    if is_rate_limit:
+                        render_api_exhausted(st.session_state.retry_at)
+                    else:
+                        st.error(f"Debate failed: {err_msg}")
+            else:
                 st.session_state.result = result
                 st.session_state.debate_run = True
-            else:
-                st.session_state.debate_run = False
+            st.session_state.is_running = False
 
     # ── Show results ───────────────────────────────────────────────────────────
     if st.session_state.debate_run and st.session_state.result:
-        r = cast(Mapping[str, Any], st.session_state.result)
+        r = st.session_state.result
         render_verdict(r)
         render_metrics(r)
         render_sources(r)

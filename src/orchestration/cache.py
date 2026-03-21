@@ -61,16 +61,12 @@ class SemanticCache:
         if self._model_failed:
             raise RuntimeError("Semantic cache model previously failed to load")
         if self._model is None:
-            if not HAS_SENTENCE_TRANSFORMERS:
-                self._model_failed = True
-                raise RuntimeError("sentence-transformers not installed")
-            
-            logger.info("Loading SentenceTransformer model for semantic cache...")
             try:
-                self._model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=self.local_only)
+                from src.utils.embedding import get_embedding_model
+                self._model = get_embedding_model(local_only=self.local_only)
             except Exception as e:
                 self._model_failed = True
-                raise
+                raise RuntimeError(f"Failed to load embedding model: {e}")
         return self._model
 
     def _encode(self, text: str) -> Optional[np.ndarray]:
@@ -214,13 +210,18 @@ class SemanticCache:
         except Exception as e:
             logger.error(f"Feedback record error: {e}")
 
+import threading
+
 # Global singleton or helper functions
 _cache_instance = None
+_cache_lock = threading.Lock()
 
 def get_cache() -> SemanticCache:
     global _cache_instance
     if _cache_instance is None:
-        _cache_instance = SemanticCache()
+        with _cache_lock:
+            if _cache_instance is None:
+                _cache_instance = SemanticCache()
     return _cache_instance
 
 def get_cached_verdict(claim: str) -> Optional[Dict[str, Any]]:
