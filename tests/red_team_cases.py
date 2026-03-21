@@ -37,7 +37,8 @@ def run_red_team():
             print(f"System handled failure: {e}")
             results.append({"claim": claim, "status": "error", "error": str(e)})
 
-    with open("tests/red_team_results.json", "w") as f:
+    OUTPUT = Path(__file__).parent / "red_team_results.json"
+    with open(OUTPUT, "w") as f:
         json.dump(results, f, indent=2)
     print("\n--- Red-Team evaluation complete. ---")
 

@@ -6,10 +6,13 @@ RUN_INTEGRATION_LLM = os.getenv("RUN_INTEGRATION_LLM", "").strip().lower() in ("
 
 
 class DummyClient:
+    openrouter_available = True
+    groq_available = True
+
     def __init__(self, *args, **kwargs):
         pass
 
-    def call_structured(self, prompt, output_schema, temperature=0.7, max_tokens=2000, max_retries=2):
+    def call_structured(self, prompt, output_schema, temperature=0.7, max_tokens=2000, max_retries=2, **kwargs):
         name = getattr(output_schema, "__name__", "")
         if name == "ModeratorVerdict":
             return output_schema(
@@ -18,15 +21,22 @@ class DummyClient:
                 reasoning="Mock moderator reasoning for integration tests. This explanation is intentionally long to satisfy minimum length checks in integration tests.",
                 metrics={"credibility": 0.5, "balance": 0.5}
             )
+        elif name == "ConsensusResponse":
+            return output_schema(
+                verdict="DEBATE",
+                score=0.5,
+                confidence=0.5,
+                reasoning="Mock consensus reasoning."
+            )
         return output_schema(
             agent="PRO",
             round=1,
-            argument="Mock argument for integration tests.",
+            argument="Mock argument for integration tests. " * 10,
             sources=["https://example.com"],
             confidence=0.6
         )
 
-    def call(self, prompt, temperature=0.7, max_tokens=1000, timeout=30):
+    def call(self, prompt, temperature=0.7, max_tokens=1000, timeout=30, **kwargs):
         return "Mock response"
 
 
