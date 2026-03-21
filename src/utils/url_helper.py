@@ -30,7 +30,8 @@ class URLNormalizer:
         # 1. Try to extract an embedded URL (e.g. "Source - https://example.com")
         match = URL_RE.search(original)
         if match:
-            return match.group(1)
+            cleaned = match.group(1).rstrip(".,;:!?)\]}'\"")
+            return cleaned
 
         # 2. Check if it's already a valid http/https URL
         parsed = urlparse(original)
