@@ -5,7 +5,6 @@ import sys
 import logging
 import sqlite3
 from pathlib import Path
-from src.utils.temporal_verifier import TemporalVerifier
 from src.utils.claim_decomposer import ClaimDecomposer
 from src.utils.summarizer import Summarizer
 from typing import TypedDict, List, Dict, Optional, Annotated, Literal, Any
@@ -57,6 +56,7 @@ class DebateOrchestrator:
         self.fact_checker = fact_checker or FactChecker(self.client, preferred_provider="groq")
         self.moderator = moderator or Moderator(self.client, preferred_provider="openrouter")
         self.summarizer = Summarizer(self.client)
+        self.decomposer = ClaimDecomposer(self.client)
         
         # Phase 18: Persistent Sqlite Checkpointing (#18)
         # Using direct connection instead of context manager to maintain persistence in long-lived object
@@ -408,8 +408,7 @@ If it is controversial or requires current events analysis, return DEBATE.
         logger.info(f"Running debate on: {claim}")
         
         # Phase 5: Claim Decomposition (#09)
-        decomposer = ClaimDecomposer(self.client)
-        sub_claims = decomposer.decompose(claim)
+        sub_claims = self.decomposer.decompose(claim)
         target_claim = sub_claims[0] # For now, focus on the primary atomic claim
         if len(sub_claims) > 1:
             logger.info(f"Multi-part claim detected. Processing primary part: '{target_claim}'")
@@ -480,8 +479,7 @@ If it is controversial or requires current events analysis, return DEBATE.
         logger.info(f"Steaming debate on: {claim}")
         
         # Phase 5: Claim Decomposition (#09)
-        decomposer = ClaimDecomposer(self.client)
-        sub_claims = decomposer.decompose(claim)
+        sub_claims = self.decomposer.decompose(claim)
         target_claim = sub_claims[0]
         if len(sub_claims) > 1:
             logger.info(f"Multi-part claim detected in stream. Processing primary part: '{target_claim}'")
@@ -537,6 +535,12 @@ If it is controversial or requires current events analysis, return DEBATE.
             last_state.confidence = 0.0
             last_state.moderator_reasoning = f"System-level error during streaming: {str(e)}"
             yield "error", last_state
+
+    def close(self):
+        """Close SQLite connection for clean teardown."""
+        if hasattr(self, 'conn') and self.conn:
+            self.conn.close()
+            self.conn = None
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

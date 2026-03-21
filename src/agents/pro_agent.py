@@ -4,6 +4,7 @@ ProAgent - Argues that the claim is TRUE using structured outputs.
 from typing import List, Dict, Any, Optional
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
+from src.utils.url_helper import URLNormalizer
 import logging
 
 logger = logging.getLogger(__name__)
@@ -35,17 +36,25 @@ class ProAgent(BaseAgent):
         
         try:
             # Use the new call_structured method which returns an AgentResponse model
+            from src.config import AgentConfig
             response = self.client.call_structured(
                 prompt=prompt,
                 output_schema=AgentResponse,
-                temperature=0.7,
+                temperature=AgentConfig.DEFAULT_TEMPERATURE,
                 preferred_provider=self.preferred_provider
             )
             
             # Ensure the agent field is correct
             response.agent = "PRO"
             response.round = state.round
-            response.sources = self._sanitize_sources(response.sources)
+            
+            sanitized = []
+            if response.sources:
+                for s in response.sources:
+                    res = URLNormalizer.sanitize_url(s)
+                    if res:
+                        sanitized.append(res)
+            response.sources = sanitized
             
             self.call_count += 1
             return response

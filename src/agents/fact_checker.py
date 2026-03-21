@@ -23,7 +23,8 @@ class FactChecker(BaseAgent):
         super().__init__(llm_client)
         self.role = "FACT_CHECKER"
         self.preferred_provider = preferred_provider or "groq"
-        self.url_timeout = 10
+        from src.config import FactCheckerConfig
+        self.url_timeout = FactCheckerConfig.URL_TIMEOUT
         self._fuzz_init_lock = threading.Lock()
         self.fuzz = None
         self._initialize_fuzzy_support()
@@ -34,10 +35,8 @@ class FactChecker(BaseAgent):
 
     def _initialize_semantic_model(self):
         try:
-            from sentence_transformers import SentenceTransformer
-            # Using a lightweight, fast model suitable for CPU-heavy envs like Streamlit
-            self.model = SentenceTransformer('all-MiniLM-L6-v2')
-            logger.info("Semantic verification model (all-MiniLM-L6-v2) initialized.")
+            from src.utils.embedding import get_embedding_model
+            self.model = get_embedding_model()
         except Exception as e:
             logger.warning(f"Failed to initialize sentence-transformers: {e}")
     
