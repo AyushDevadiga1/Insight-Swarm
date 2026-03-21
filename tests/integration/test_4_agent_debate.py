@@ -9,7 +9,9 @@ from src.orchestration.debate import DebateOrchestrator
 @pytest.fixture
 def orchestrator():
     """Fixture: DebateOrchestrator with 4 agents"""
-    return DebateOrchestrator()
+    orchestrator = DebateOrchestrator()
+    yield orchestrator
+    orchestrator.close()
 
 
 @pytest.mark.timeout(180)  # 3 minutes max

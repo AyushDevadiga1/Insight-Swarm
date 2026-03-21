@@ -277,6 +277,8 @@ def main():
     llm_patcher.stop()
     requests_patcher.stop()
     
+    orchestrator.close()
+    
     return 0 if all_met else 1
 
 

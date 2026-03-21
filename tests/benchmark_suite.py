@@ -76,6 +76,9 @@ Respond in JSON:
             print(f"--- Failed: {e}")
             results.append({"claim": claim, "status": "failed", "error": str(e)})
 
+    # Close orchestrator to free resources
+    orchestrator.close()
+
     # Save report
     report_path = Path("tests/benchmark_report.json")
     with open(report_path, "w") as f:

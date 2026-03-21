@@ -142,12 +142,17 @@ class TavilyEvidenceRetriever:
         return [item['url'] for item in evidence if item['url']]
 
 
+import threading
+
 # Global instance
 _tavily_instance = None
+_tavily_lock = threading.Lock()
 
 def get_tavily_retriever() -> TavilyEvidenceRetriever:
     """Get global Tavily retriever instance"""
     global _tavily_instance
     if _tavily_instance is None:
-        _tavily_instance = TavilyEvidenceRetriever()
+        with _tavily_lock:
+            if _tavily_instance is None:
+                _tavily_instance = TavilyEvidenceRetriever()
     return _tavily_instance
