@@ -22,6 +22,9 @@ def get_embedding_model(local_only: bool = False):
             try:
                 from sentence_transformers import SentenceTransformer
                 logger.info(f"Loading SentenceTransformer model (local_only={local_only})...")
+                # Suppress noisy expected architecture warnings from transformers
+                logging.getLogger("transformers").setLevel(logging.ERROR)
+                logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
                 _model_instance = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=local_only)
             except ImportError:
                 logger.warning("sentence-transformers not installed.")

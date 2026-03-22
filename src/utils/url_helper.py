@@ -30,7 +30,7 @@ class URLNormalizer:
         # 1. Try to extract an embedded URL (e.g. "Source - https://example.com")
         match = URL_RE.search(original)
         if match:
-            cleaned = match.group(1).rstrip(".,;:!?)\]}'\"")
+            cleaned = match.group(1).rstrip(".,;:!?)]}'\"")
             return cleaned
 
         # 2. Check if it's already a valid http/https URL
@@ -48,17 +48,18 @@ class URLNormalizer:
     def sanitize_list(cls, list_of_lists: list[list[str]]) -> list[list[str]]:
         """Sanitizes a nested list of sources (per round)."""
         sanitized = []
-        skipped = 0
         for round_sources in list_of_lists:
             new_round = []
             for s in round_sources:
                 result = cls.sanitize_url(s)
                 if result:
                     new_round.append(result)
-                else:
-                    skipped += 1
             sanitized.append(new_round)
             
-        if skipped:
+        original_count = sum(len(r) for r in list_of_lists)
+        sanitized_count = sum(len(r) for r in sanitized)
+        skipped = original_count - sanitized_count
+        
+        if skipped > 0:
             logger.info("URLNormalizer skipped %d non-URL sources", skipped)
         return sanitized
