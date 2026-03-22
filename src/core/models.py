@@ -7,7 +7,7 @@ _MISSING = object()
 class SourceVerification(BaseModel):
     """Result of verifying a single source."""
     url: str
-    status: Literal["VERIFIED", "NOT_FOUND", "INVALID_URL", "TIMEOUT", "CONTENT_MISMATCH", "ERROR"]
+    status: Literal["VERIFIED", "NOT_FOUND", "INVALID_URL", "TIMEOUT", "CONTENT_MISMATCH", "PAYWALL_RESTRICTED", "ERROR"]
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     content_preview: Optional[str] = None
     error: Optional[str] = None
@@ -22,14 +22,14 @@ class SourceVerification(BaseModel):
 
 class AgentResponse(BaseModel):
     """Structured response from a Pro or Con agent."""
-    agent: Literal["PRO", "CON", "MODERATOR", "FACT_CHECKER"]
-    round: int
-    argument: str
-    sources: List[str]
+    agent: Optional[Literal["PRO", "CON", "MODERATOR", "FACT_CHECKER"]] = None
+    round: Optional[int] = 1
+    argument: str = ""
+    sources: List[str] = Field(default_factory=list)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     verdict: Optional[str] = None
     reasoning: Optional[str] = None
-    metrics: Optional[Dict[str, Any]] = None
+    metrics: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __getitem__(self, item):
         return getattr(self, item)
@@ -38,13 +38,46 @@ class AgentResponse(BaseModel):
         val = getattr(self, key, _MISSING)
         return default if val is _MISSING else val
 
+from pydantic import validator
+
 class ModeratorVerdict(BaseModel):
     """Structured verdict from the Moderator agent."""
-    verdict: Literal["TRUE", "FALSE", "PARTIALLY TRUE", "INSUFFICIENT EVIDENCE",
-                     "CONSENSUS_SETTLED", "RATE_LIMITED", "UNKNOWN", "ERROR"]
-    confidence: float = Field(ge=0.0, le=1.0)
-    reasoning: str
-    metrics: Optional[Dict[str, Any]] = None
+    verdict: str = "UNKNOWN"
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    reasoning: str = ""
+    metrics: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+    _VALID_VERDICTS = {
+        "TRUE", "FALSE", "PARTIALLY TRUE", "INSUFFICIENT EVIDENCE",
+        "CONSENSUS_SETTLED", "RATE_LIMITED", "UNKNOWN", "ERROR"
+    }
+
+    @validator("verdict", pre=True, always=True)
+    def normalise_verdict(cls, v):
+        if not v:
+            return "UNKNOWN"
+        v = str(v).strip().upper()
+        # Handle common LLM variants
+        replacements = {
+            "PARTIALLY_TRUE": "PARTIALLY TRUE",
+            "PARTIAL": "PARTIALLY TRUE",
+            "PARTLY TRUE": "PARTIALLY TRUE",
+            "PARTLY_TRUE": "PARTIALLY TRUE",
+            "INSUFFICIENT": "INSUFFICIENT EVIDENCE",
+            "INSUFFICIENT_EVIDENCE": "INSUFFICIENT EVIDENCE",
+            "NOT ENOUGH EVIDENCE": "INSUFFICIENT EVIDENCE",
+            "NOT_ENOUGH_EVIDENCE": "INSUFFICIENT EVIDENCE",
+        }
+        if v in replacements:
+            return replacements[v]
+        if v in ["TRUE", "FALSE", "PARTIALLY TRUE", "INSUFFICIENT EVIDENCE", "CONSENSUS_SETTLED", "RATE_LIMITED", "UNKNOWN", "ERROR"]:
+            return v
+        # Unrecognised — log and fall back safely
+        import logging
+        logging.getLogger(__name__).warning(
+            f"ModeratorVerdict: unexpected verdict string '{v}', defaulting to UNKNOWN"
+        )
+        return "UNKNOWN"
 
 class DebateState(BaseModel):
     """Complete state of the debate workflow."""
@@ -60,7 +93,7 @@ class DebateState(BaseModel):
     pro_verification_rate: Optional[float] = None
     con_verification_rate: Optional[float] = None
     moderator_reasoning: Optional[str] = None
-    metrics: Optional[Dict[str, Any]] = None
+    metrics: Optional[Dict[str, Any]] = Field(default_factory=dict)
     retry_count: int = 0
     is_cached: Optional[bool] = False
     
