@@ -55,13 +55,29 @@ class Moderator(BaseAgent):
             con_rate = state.con_verification_rate or 0.0
             avg_ver_rate = (pro_rate + con_rate) / 2
 
-            # Extract trust scores from state metrics (populated by FactChecker)
-            trust_scores = []
-            if state.metrics and "verification_results" in state.metrics:
-                for res in state.metrics["verification_results"]:
-                    if res.get("status") == "VERIFIED":
-                        trust_scores.append(res.get("trust_score", 0.5))
-            avg_trust = sum(trust_scores) / len(trust_scores) if trust_scores else 0.5
+            # Calculate trust scores across all sources
+            from src.utils.trust_scorer import TrustScorer
+            
+            pro_trust_scores = []
+            con_trust_scores = []
+            
+            # Score Pro sources
+            for round_sources in state.pro_sources:
+                for url in round_sources:
+                    score = TrustScorer.get_score(url)
+                    pro_trust_scores.append(score)
+            
+            # Score Con sources
+            for round_sources in state.con_sources:
+                for url in round_sources:
+                    score = TrustScorer.get_score(url)
+                    con_trust_scores.append(score)
+            
+            pro_avg_trust = sum(pro_trust_scores) / len(pro_trust_scores) if pro_trust_scores else 0.5
+            con_avg_trust = sum(con_trust_scores) / len(con_trust_scores) if con_trust_scores else 0.5
+            avg_trust = (pro_avg_trust + con_avg_trust) / 2
+            
+            logger.info(f"Trust scores - Pro: {pro_avg_trust:.2f}, Con: {con_avg_trust:.2f}")
             
             consensus_score = 0.5
             if state.metrics and "consensus" in state.metrics:
@@ -90,7 +106,11 @@ class Moderator(BaseAgent):
                 }
             })
 
-            # Convert ModeratorVerdict to AgentResponse for state compatibility
+            # Enforce reasoning length cap for token efficiency
+            reasoning = result.reasoning
+            if len(reasoning) > 1500:
+                reasoning = reasoning[:1497] + "..."
+
             return AgentResponse(
                 agent="MODERATOR",
                 round=state.round,
@@ -98,13 +118,13 @@ class Moderator(BaseAgent):
                 sources=[],
                 confidence=float(composite_confidence),
                 verdict=result.verdict,
-                reasoning=result.reasoning,
+                reasoning=reasoning,
                 metrics=final_metrics
             )
             
         except Exception as e:
-            logger.error(f"Moderator failed: {e}")
-            state.moderator_reasoning = str(e)  # <-- ADD THIS LINE so fallback sees it
+            logger.exception(f"Moderator synthesis failed critically: {e}")
+            state.moderator_reasoning = f"CritError: {type(e).__name__} - {str(e)}"
             return self._fallback_verdict(state)
             
     def _fallback_verdict(self, state: DebateState) -> AgentResponse:
@@ -137,6 +157,32 @@ class Moderator(BaseAgent):
         pro_args = "\n\n".join([f"Round {i+1}: {arg}" for i, arg in enumerate(state.pro_arguments)])
         con_args = "\n\n".join([f"Round {i+1}: {arg}" for i, arg in enumerate(state.con_arguments)])
         
+        # Calculate trust for display
+        from src.utils.trust_scorer import TrustScorer
+        pro_trust_scores = [TrustScorer.get_score(url) 
+                            for sources in state.pro_sources 
+                            for url in sources]
+        con_trust_scores = [TrustScorer.get_score(url) 
+                            for sources in state.con_sources 
+                            for url in sources]
+        
+        pro_avg = sum(pro_trust_scores) / len(pro_trust_scores) if pro_trust_scores else 0.5
+        con_avg = sum(con_trust_scores) / len(con_trust_scores) if con_trust_scores else 0.5
+        
+        trust_summary = f"""
+SOURCE CREDIBILITY ANALYSIS:
+- Pro sources average trust: {pro_avg:.2f}/1.0 (higher = more credible)
+  • {len(pro_trust_scores)} sources cited
+  • Trust tier breakdown: {len([s for s in pro_trust_scores if s >= 0.8])} high-trust, {len([s for s in pro_trust_scores if s < 0.5])} low-trust
+- Con sources average trust: {con_avg:.2f}/1.0
+  • {len(con_trust_scores)} sources cited
+  • Trust tier breakdown: {len([s for s in con_trust_scores if s >= 0.8])} high-trust, {len([s for s in con_trust_scores if s < 0.5])} low-trust
+
+IMPORTANT: Weight arguments by source credibility. Arguments backed by 
+high-trust sources (.gov, .edu, peer-reviewed) should carry MORE weight
+than those from low-trust sources (.xyz, blogs, unknown domains).
+"""
+
         verification_summary = ""
         if state.pro_verification_rate is not None:
             pro_rate = state.pro_verification_rate
@@ -155,6 +201,8 @@ PRO ARGUMENTS (Supporting Claim):
 
 CON ARGUMENTS (Opposing Claim):
 {con_args}
+
+{trust_summary}
 
 {verification_summary}
 
