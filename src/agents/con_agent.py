@@ -86,35 +86,18 @@ class ConAgent(BaseAgent):
         pro_argument = state.pro_arguments[-1] if state.pro_arguments else "No Pro argument yet"
         
         if round_num == 1:
-            return f"""You are ConAgent in a formal debate. Your role is to argue that the claim is FALSE.
+            return f"""You are ConAgent. Argue that the claim is FALSE.
 CLAIM: {state.claim}
+PRO SAID: {pro_argument}
+EVIDENCE: {formatted_evidence}
 
-PRO ARGUMENT TO CHALLENGE:
-{pro_argument}
-
-EVIDENCE TO CITE:
-{formatted_evidence}
-
-YOUR TASK:
-Build the strongest possible case AGAINST this claim using the PROVIDED REBUTTAL EVIDENCE. 
-You MUST cite the source URLs. Focus on identifying flaws in the Pro argument and presenting counter-evidence from these specific sources."""
+TASK: Rebut the Pro argument using these sources. Cite URLs. Identify flaws. Be concise."""
         else:
-            # Identify the new rebuttal to challenge
-            latest_pro = state.pro_arguments[-1] if state.pro_arguments else "No Pro argument yet"
-            
-            feedback_section = ""
-            if state.verification_feedback:
-                feedback_section = f"\n\nVERIFICATION FEEDBACK:\n{state.verification_feedback}\n"
+            latest_pro = state.pro_arguments[-1] if state.pro_arguments else ""
+            feedback = f"\n\nFEEDBACK: {state.verification_feedback}\n" if state.verification_feedback else ""
                 
-            return f"""You are ConAgent. You must maintain that the following claim is FALSE: {state.claim}
+            return f"""You are ConAgent. CLAIM: {state.claim} is FALSE.
+PRO LATEST: {latest_pro}{feedback}
+OUR PREVIOUS: {state.con_arguments[-1] if state.con_arguments else ""}
 
-YOUR PREVIOUS ARGUMENT:
-{state.con_arguments[-1] if state.con_arguments else "Establishing initial case."}
-
-THE OPPOSING AGENT'S LATEST REBUTTAL:
-{latest_pro}{feedback_section}
-
-YOUR TASK:
-Directly address their latest points while reinforcing your own previous case. 
-Use NEW evidence if available or cite existing sources to debunk their claims:
-{formatted_evidence}"""
+TASK: Debunk the Pro rebuttal and reinforce your case using: {formatted_evidence}. Be brief."""
