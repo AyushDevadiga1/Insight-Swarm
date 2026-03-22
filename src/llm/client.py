@@ -32,7 +32,12 @@ except ImportError:
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+
 from src.utils.api_key_manager import get_api_key_manager
+from src.resilience.circuit_breaker import CircuitBreaker
+from src.resilience.fallback_handler import FallbackHandler
+from src.resilience.retry_handler import with_retry
+
 
 class RateLimitError(RuntimeError):
     def __init__(self, provider: str, message: str, retry_after: Optional[float] = None):
@@ -53,8 +58,6 @@ class FreeLLMClient:
         
         self.groq_client = None
         self.genai_client = None
-        self.groq_available = False
-        self.gemini_available = False
         self.groq_calls = 0
         self.gemini_calls = 0
         self.groq_last_call_times = []
@@ -70,109 +73,79 @@ class FreeLLMClient:
         
         self.cerebras_client = None
         self.openrouter_client = None
-        self.cerebras_available = False
-        self.openrouter_available = False
         self.cerebras_calls = 0
         self.openrouter_calls = 0
         self.cerebras_last_call_times = []
         self.openrouter_last_call_times = []
+
         self.cerebras_error: Optional[str] = None
         self.openrouter_error: Optional[str] = None
-        
-        # Initialize providers using API key manager
-        self._init_providers()
     
-    def _init_providers(self):
-        """Initialize LLM providers using API key manager"""
-        try:
-            # Initialize Groq
-            groq_key = self.key_manager.get_working_key("groq")
-            if groq_key:
-                from groq import Groq
-                self.groq_client = Groq(api_key=groq_key)
-                self.groq_available = True
-                logger.info("✅ Groq client initialized")
-            else:
-                self.groq_available = False
-                self.groq_error = "No working Groq API keys available"
-                logger.warning("⚠️ Groq client not available")
-                
-        except Exception as e: # Catching general Exception for initialization issues
-            self.groq_available = False
-            self.groq_error = str(e)
-            logger.warning(f"⚠️ Groq initialization failed: {type(e).__name__}")
-            
-        try:
-            # Initialize Gemini
-            gemini_key = self.key_manager.get_working_key("gemini")
-            if gemini_key:
-                try:
-                    from google import genai
-                    from google.genai import types as genai_types
-                    self._genai_types = genai_types
-                    self.genai_client = genai.Client(api_key=gemini_key)
-                    self.gemini_available = True
-                    self._gemini_mode = "genai"
-                    logger.info("✅ Gemini client initialized (google.genai)")
-                except (ImportError, AttributeError):
-                    import google.generativeai as genai
-                    self._gemini_legacy = genai
-                    genai.configure(api_key=gemini_key)
-                    self.genai_client = genai.GenerativeModel(self.GEMINI_MODEL)
-                    self.gemini_available = True
-                    self._gemini_mode = "legacy"
-                    logger.warning("⚠️ Using legacy Gemini client")
-            else:
-                self.gemini_available = False
-                self.gemini_error = "No working Gemini API keys available"
-                logger.warning("⚠️ Gemini client not available")
-                
-        except Exception as e: # Catching general Exception for initialization issues
-            self.gemini_available = False
-            self.gemini_error = str(e)
-            logger.warning(f"⚠️ Gemini initialization failed: {type(e).__name__}")
-            
-        try:
-            # Initialize Cerebras
-            cerebras_key = self.key_manager.get_working_key("cerebras")
-            if cerebras_key and HAS_REQUESTS:
-                self.cerebras_available = True
-                logger.info("✅ Cerebras client initialized")
-            else:
-                self.cerebras_available = False
-                self.cerebras_error = "No working Cerebras API keys available"
-                logger.warning("⚠️ Cerebras client not available")
-                
-        except Exception as e:
-            self.cerebras_available = False
-            self.cerebras_error = str(e)
-            logger.warning(f"⚠️ Cerebras initialization failed: {type(e).__name__}")
+        # Resilience components
+        self.circuit_breakers = {
+            "cerebras": CircuitBreaker("cerebras", failure_threshold=3, recovery_timeout=60.0),
+            "openrouter": CircuitBreaker("openrouter", failure_threshold=3, recovery_timeout=60.0),
+            "groq": CircuitBreaker("groq", failure_threshold=3, recovery_timeout=60.0),
+            "gemini": CircuitBreaker("gemini", failure_threshold=3, recovery_timeout=60.0),
+        }
 
-        try:
-            # Initialize OpenRouter
-            openrouter_key = self.key_manager.get_working_key("openrouter")
-            if openrouter_key and HAS_REQUESTS:
-                self.openrouter_available = True
-                logger.info("✅ OpenRouter client initialized")
-            else:
-                self.openrouter_available = False
-                self.openrouter_error = "No working OpenRouter API keys available"
-                logger.warning("⚠️ OpenRouter client not available")
-                
-        except Exception as e:
-            self.openrouter_available = False
-            self.openrouter_error = str(e)
-            logger.warning(f"⚠️ OpenRouter initialization failed: {type(e).__name__}")
+    
+        # We no longer initialize providers upfront.
+        # They are initialized on first use via properties.
+        pass
+
+    @property
+    def groq_available(self) -> bool:
+        return self.key_manager.has_working_keys("groq")
+
+    @property
+    def gemini_available(self) -> bool:
+        return self.key_manager.has_working_keys("gemini")
+
+    @property
+    def cerebras_available(self) -> bool:
+        return HAS_REQUESTS and self.key_manager.has_working_keys("cerebras")
+
+    @property
+    def openrouter_available(self) -> bool:
+        return HAS_REQUESTS and self.key_manager.has_working_keys("openrouter")
+
+    def _get_groq_client(self, api_key: str):
+        if not self.groq_client:
+            from groq import Groq
+            self.groq_client = Groq(api_key=api_key)
+            logger.debug("✅ Groq client lazily initialized")
+        else:
+            self.groq_client.api_key = api_key
+        return self.groq_client
+
+    def _get_gemini_client(self, api_key: str):
+        if self.genai_client:
+            return self.genai_client
             
-        if not self.groq_available and not self.gemini_available and not self.cerebras_available and not self.openrouter_available:
-            offline = os.getenv("ENABLE_OFFLINE_FALLBACK", "false").lower() in ("true", "1", "yes")
-            if offline:
-                logger.warning("⚠️ No LLM providers available — running in offline fallback mode.")
-            else:
-                raise RuntimeError(
-                    "No LLM providers available. Check GROQ_API_KEY / GEMINI_API_KEY in .env file.\n"
-                    "Set ENABLE_OFFLINE_FALLBACK=1 to start without API keys."
-                )
+        # Try modern SDK first
+        try:
+            from google import genai
+            from google.genai import types as genai_types
+            self._genai_types = genai_types
+            self.genai_client = genai.Client(api_key=api_key)
+            self._gemini_mode = "genai"
+            logger.debug("✅ Gemini client initialized (google.genai)")
+            return self.genai_client
+        except (ImportError, Exception) as e:
+            logger.warning(f"Modern google.genai SDK failed, trying legacy fallback: {e}")
+            
+        # Fallback to legacy SDK
+        try:
+            import google.generativeai as genai_legacy
+            self._gemini_legacy = genai_legacy
+            self._gemini_mode = "legacy"
+            logger.debug("✅ Gemini client initialized (google.generativeai legacy)")
+            # we don't return a 'client' object here as legacy is module-level
+            return genai_legacy
+        except ImportError:
+            logger.error("No Gemini SDKs found (tried genai and generativeai)")
+            raise RuntimeError("Gemini SDK not installed")
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         text = str(error).lower()
@@ -228,6 +201,130 @@ class FreeLLMClient:
                 return None
         return None
 
+    def _check_rate_limit(self, provider: str, last_call_times: list) -> bool:
+        """Helper to enforce rate limits per provider."""
+        now = time.time()
+        # Clean up timestamps older than 60s
+        last_call_times[:] = [t for t in last_call_times if now - t < 60]
+        return len(last_call_times) < self.MAX_CALLS_PER_MINUTE
+
+    def _validate_prompt(self, prompt: str) -> None:
+        """Basic prompt safety/integrity check."""
+        if not prompt or len(prompt.strip()) < 5:
+            raise ValueError("Prompt too short or empty")
+        if len(prompt) > 50000: # Safety cap
+            raise ValueError("Prompt exceeds maximum allowed length (50k chars)")
+
+    def _validate_response(self, response: str) -> None:
+        """Basic response integrity check."""
+        if not response or len(response.strip()) < 2:
+            raise ValueError("Empty or trivial response received from provider")
+
+    def _clean_json_response(self, raw_text: str) -> str:
+        """Strip markdown code blocks and garbage from LLM JSON responses."""
+        if not raw_text:
+            return "{}"
+        # Remove triple backticks
+        cleaned = re.sub(r'```json\s*', '', raw_text)
+        cleaned = re.sub(r'```\s*', '', cleaned)
+        # Find first { and last }
+        first = cleaned.find('{')
+        last = cleaned.rfind('}')
+        if first != -1 and last != -1:
+            return cleaned[first:last+1]
+        return cleaned.strip()
+
+    def _execute_provider(
+        self,
+        provider: str,
+        prompt: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: int,
+        is_structured: bool = False,
+        output_schema: Optional[Type[BaseModel]] = None,
+        model: Optional[str] = None
+    ) -> Any:
+        cb = self.circuit_breakers[provider]
+        if not cb.is_allowed():
+            raise RuntimeError(f"Circuit Breaker for {provider} is OPEN")
+
+        if not getattr(self, f"{provider}_available"):
+            raise RuntimeError(f"Provider {provider} is not available")
+
+        api_key = self.key_manager.get_working_key(provider)
+        if not api_key:
+            raise RuntimeError(f"No working key for {provider}")
+
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
+
+        try:
+            with self._counter_lock:
+                last_times = getattr(self, f"{provider}_last_call_times")
+                if not self._check_rate_limit(provider, last_times):
+                    # Fail gracefully so fallback catches it
+                    raise RateLimitError(provider, f"{provider} rate limit hit")
+                last_times.append(time.time())
+
+            if is_structured:
+                if provider == "cerebras":
+                    response = self._call_cerebras(prompt, temperature, max_tokens, timeout=30, cerebras_key=api_key)
+                elif provider == "openrouter":
+                    target_model = model if model else "meta-llama/llama-3.1-70b-instruct"
+                    response = self._call_openrouter(prompt, temperature, max_tokens, timeout=30, openrouter_key=api_key, model=target_model)
+                elif provider == "groq":
+                    client = self._get_groq_client(api_key)
+                    response = self._call_groq(prompt, temperature, max_tokens, timeout=30, groq_client=client)
+                elif provider == "gemini":
+                    self._get_gemini_client(api_key)
+                    response = self._call_gemini(prompt, temperature, max_tokens, timeout=30, gemini_key=api_key, response_mime_type="application/json")
+                else:
+                    raise ValueError("Unknown provider")
+                
+                cleaned = self._clean_json_response(response)
+                result = output_schema.parse_raw(cleaned)
+            else:
+                if provider == "cerebras":
+                    response = self._call_cerebras(prompt, temperature, max_tokens, timeout, cerebras_key=api_key)
+                elif provider == "openrouter":
+                    response = self._call_openrouter(prompt, temperature, max_tokens, timeout, openrouter_key=api_key)
+                elif provider == "groq":
+                    client = self._get_groq_client(api_key)
+                    response = self._call_groq(prompt, temperature, max_tokens, timeout, groq_client=client)
+                elif provider == "gemini":
+                    self._get_gemini_client(api_key)
+                    response = self._call_gemini(prompt, temperature, max_tokens, timeout, gemini_key=api_key)
+                else:
+                    raise ValueError("Unknown provider")
+                    
+                self._validate_response(response)
+                result = response
+
+            with self._counter_lock:
+                calls_attr = f"{provider}_calls"
+                setattr(self, calls_attr, getattr(self, calls_attr) + 1)
+                
+            self.key_manager.report_key_success(provider, key_hash)
+            self._set_next_preference(provider)
+            cb.record_success()
+            return result
+
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "402" in err_msg or "payment" in err_msg or "credits" in err_msg:
+                logger.error(f"❌ Provider {provider} failed with 402 Payment Required. Disabling for this session.")
+                setattr(self, f"{provider}_available", False)
+                self.key_manager.report_key_failure(provider, key_hash, e)
+            
+            if self._is_rate_limit_error(e):
+                self.key_manager.report_key_failure(provider, key_hash, e)
+                raise RateLimitError(provider, str(e), self._extract_retry_after(str(e)))
+                
+            self.key_manager.report_key_failure(provider, key_hash, e)
+            logger.warning(f"⚠️ {provider.title()} failed execution: {type(e).__name__} - {e}")
+            cb.record_failure()
+            raise
+
     def call_structured(
         self,
         prompt: str,
@@ -239,287 +336,17 @@ class FreeLLMClient:
         model: Optional[str] = None,
         timeout: int = 60
     ) -> Any:
-        """
-        Calls LLM with mandatory JSON output.
-        ENFORCES rate limits and respects preferred provider order.
-        """
         json_prompt = f"{prompt}\n\nIMPORTANT: You MUST return a valid JSON object matching this schema:\n{output_schema.schema_json(indent=2)}"
         
-        last_error = None
-        attempted_any = False
-
+        operations = []
         for provider in self._provider_order(preferred_provider):
-            # Try Cerebras (ultra-fast)
-            if provider == "cerebras" and self.cerebras_available and self.key_manager.has_working_keys("cerebras"):
-                attempted_any = True
-                for attempt in range(max_retries + 1):
-                    cerebras_key = self.key_manager.get_working_key("cerebras")
-                    if not cerebras_key:
-                        break
-                    cerebras_key_hash = hashlib.sha256(cerebras_key.encode()).hexdigest()[:16]
-                    try:
-                        with self._counter_lock:
-                            if not self._check_rate_limit("cerebras", self.cerebras_last_call_times):
-                                raise RuntimeError("Cerebras rate limit exceeded")
-                            self.cerebras_last_call_times.append(time.time())
-
-                        response = self._call_cerebras(
-                            json_prompt, temperature, max_tokens, timeout=30, cerebras_key=cerebras_key
-                        )
-                        cleaned_response = self._clean_json_response(response)
-                        result = output_schema.parse_raw(cleaned_response)
-                        
-                        self.key_manager.report_key_success("cerebras", cerebras_key_hash)
-                        self._set_next_preference("cerebras")
-                        return result
-                    except Exception as e:
-                        last_error = e
-                        self.key_manager.report_key_failure("cerebras", cerebras_key_hash, e)
-                        if self._is_rate_limit_error(e):
-                            break 
-                        if attempt < max_retries:
-                            time.sleep(1)
-
-            # Try OpenRouter (diverse models)
-            if provider == "openrouter" and self.openrouter_available and self.key_manager.has_working_keys("openrouter"):
-                attempted_any = True
-                for attempt in range(max_retries + 1):
-                    openrouter_key = self.key_manager.get_working_key("openrouter")
-                    if not openrouter_key:
-                        break
-                    openrouter_key_hash = hashlib.sha256(openrouter_key.encode()).hexdigest()[:16]
-                    try:
-                        with self._counter_lock:
-                            if not self._check_rate_limit("openrouter", self.openrouter_last_call_times):
-                                raise RuntimeError("OpenRouter rate limit exceeded")
-                            self.openrouter_last_call_times.append(time.time())
-
-                        # Use override model if provided, else default
-                        target_model = model if model else "meta-llama/llama-3.1-70b-instruct"
-
-                        response = self._call_openrouter(
-                            json_prompt, temperature, max_tokens, timeout=30, 
-                            openrouter_key=openrouter_key, model=target_model
-                        )
-                        cleaned_response = self._clean_json_response(response)
-                        result = output_schema.parse_raw(cleaned_response)
-                        
-                        self.key_manager.report_key_success("openrouter", openrouter_key_hash)
-                        self._set_next_preference("openrouter")
-                        return result
-                    except Exception as e:
-                        last_error = e
-                        self.key_manager.report_key_failure("openrouter", openrouter_key_hash, e)
-                        if self._is_rate_limit_error(e):
-                            break 
-                        if attempt < max_retries:
-                            time.sleep(1)
-
-            if provider == "groq" and self.groq_available and self.key_manager.has_working_keys("groq"):
-                attempted_any = True
-                for attempt in range(max_retries + 1):
-                    groq_key = self.key_manager.get_working_key("groq")
-                    if not groq_key:
-                        break
-                    groq_key_hash = hashlib.sha256(groq_key.encode()).hexdigest()[:16]
-                    
-                    try:
-                        with self._counter_lock:
-                            if not self._check_rate_limit("groq", self.groq_last_call_times):
-                                raise RuntimeError("Groq rate limit exceeded")
-                            # #4: Atomic timestamp append before the call
-                            self.groq_last_call_times.append(time.time())
-
-                        # #15: Guard fast fail if Groq client not initialised
-                        if self.groq_client is None:
-                            raise RuntimeError("Groq client not initialized")
-
-                        # Update client with current working key
-                        from groq import Groq
-                        current_client = Groq(api_key=groq_key)
-
-                        response = self._call_groq(
-                            json_prompt, temperature, max_tokens, timeout=30, groq_client=current_client
-                        )
-                        cleaned_response = self._clean_json_response(response)
-                        result = output_schema.parse_raw(cleaned_response)
-                        
-                        self.key_manager.report_key_success("groq", groq_key_hash)
-                        self._set_next_preference("groq")
-                        return result
-
-                    except Exception as e:
-                        last_error = e
-                        self.key_manager.report_key_failure("groq", groq_key_hash, e)
-                        
-                        err_str = str(e).lower()
-                        if any(kw in err_str for kw in ["429", "rate limit", "quota", "exceeded",
-                                                         "limit reached", "model_decommissioned"]):
-                            logger.warning(f"Groq quota/limit error in structured call: {e}")
-                            break # Try next provider
-                        
-                        logger.warning(f"Groq structured attempt {attempt+1} failed: {e}")
-                        if attempt < max_retries:
-                            time.sleep(1)
-                
-            if provider == "gemini" and self.gemini_available and self.key_manager.has_working_keys("gemini"):
-                attempted_any = True
-                for attempt in range(max_retries + 1):
-                    gemini_key = self.key_manager.get_working_key("gemini")
-                    if not gemini_key:
-                        break
-                    gemini_key_hash = hashlib.sha256(gemini_key.encode()).hexdigest()[:16]
-
-                    try:
-                        with self._counter_lock:
-                            if not self._check_rate_limit("gemini", self.gemini_last_call_times):
-                                raise RuntimeError("Gemini rate limit exceeded")
-                            # #4: Atomic timestamp append before the call
-                            self.gemini_last_call_times.append(time.time())
-
-                        # #15: Guard fast fail if Gemini client not initialised
-                        if self._gemini_mode == "genai" and self.genai_client is None:
-                            raise RuntimeError("Gemini GenAI client not initialized")
-                        if self._gemini_mode == "legacy" and self._gemini_legacy is None:
-                            raise RuntimeError("Gemini legacy client not initialized")
-
-                        response = self._call_gemini(
-                            json_prompt, temperature, max_tokens, timeout=30, gemini_key=gemini_key,
-                            response_mime_type="application/json"
-                        )
-                        cleaned_response = self._clean_json_response(response)
-                        result = output_schema.parse_raw(cleaned_response)
-                        
-                        self.key_manager.report_key_success("gemini", gemini_key_hash)
-                        self._set_next_preference("gemini")
-                        return result
-
-                    except Exception as e:
-                        last_error = e
-                        self.key_manager.report_key_failure("gemini", gemini_key_hash, e)
-                        
-                        err_str = str(e).lower()
-                        if any(kw in err_str for kw in ["429", "rate limit", "quota", "exceeded", "limit reached"]):
-                            logger.warning(f"Gemini quota/limit error in structured call: {e}")
-                            break # Try next provider
-                            
-                        logger.warning(f"Gemini structured attempt {attempt+1} failed: {e}")
-                        if attempt < max_retries:
-                            time.sleep(1)
-
-        if not attempted_any:
-            raise RuntimeError("No LLM providers available for structured call.")
+            operations.append(
+                lambda p=provider: self._execute_provider(p, json_prompt, temperature, max_tokens, timeout, is_structured=True, output_schema=output_schema, model=model)
+            )
             
-        logger.error(f"All LLM structured calls failed. Last error: {last_error}")
-        raise RuntimeError(f"Failed to get structured output from LLM: {last_error}")
-    
-    def _check_rate_limit(self, provider: str, call_times: list) -> bool:
-        """
-        Check if rate limit exceeded for provider
-        
-        Args:
-            provider: "groq" or "gemini"
-            call_times: List of recent call timestamps
-            
-        Returns:
-            True if within rate limit, False otherwise
-        """
-        now = time.time()
-        one_minute_ago = now - 60
-        
-        # Filter and update list to keep only recent calls (thread-safe replacement)
-        recent = [t for t in call_times if t > one_minute_ago]
-        call_times.clear()
-        call_times.extend(recent)
-        
-        recent_calls = len(call_times)
-        
-        if recent_calls >= self.MAX_CALLS_PER_MINUTE:
-            logger.warning(f"⚠️  Rate limit approaching for {provider}: {recent_calls} calls in last minute")
-            return False
-        
-        return True
-    
-    def _validate_prompt(self, prompt: str) -> None:
-        """
-        Validate prompt before sending to LLM
-        
-        Args:
-            prompt: User prompt
-            
-        Raises:
-            ValueError: If prompt is invalid
-        """
-        if not prompt or not isinstance(prompt, str):
-            raise ValueError("Prompt must be a non-empty string")
-        
-        if len(prompt.strip()) == 0:
-            raise ValueError("Prompt cannot be empty or whitespace-only")
-        
-        if len(prompt) > 100000:
-            raise ValueError("Prompt exceeds maximum length of 100,000 characters")
-    
-    def _validate_response(self, response: str) -> None:
-        """
-        Validate LLM response
-        
-        Args:
-            response: Response text from LLM
-            
-        Raises:
-            ValueError: If response is invalid
-        """
-        if response is None:
-            raise ValueError("LLM returned None response")
-        
-        if not isinstance(response, str):
-            raise ValueError(f"LLM response must be string, got {type(response).__name__}")
-        
-        if len(response.strip()) == 0:
-            raise ValueError("LLM returned empty response")
-    
-    def _clean_json_response(self, response: str) -> str:
-        """Extract JSON from markdown code blocks if present."""
-        if not response:
-            return response
-            
-        # Clean up common LLM garbage
-        response = response.strip()
-        
-        # Remove markdown code blocks
-        if "```" in response:
-            # Handle ```json ... ``` or just ``` ... ```
-            match = re.search(r"```(?:json)?\s*(.*?)\s*```", response, re.DOTALL)
-            if match:
-                return match.group(1).strip()
-        
-        return response
-    
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((Exception,)),
-        reraise=True
-    )
+        return FallbackHandler.execute(operations)
+
     def call(self, prompt: str, temperature: float = 0.7, max_tokens: int = 1000, timeout: int = 30, preferred_provider: Optional[str] = None) -> str:
-        """
-        Send prompt to LLM and get response.
-        Tries Groq first, falls back to Gemini if Groq fails.
-        
-        Args:
-            prompt: The prompt to send to the LLM
-            temperature: Creativity level (0.0-2.0, default 0.7)
-            max_tokens: Maximum length of response (1-4000, default 1000)
-            timeout: Request timeout in seconds (1-300, default 30)
-            
-        Returns:
-            Response text from the LLM
-            
-        Raises:
-            ValueError: If inputs are invalid
-            RuntimeError: If all LLM providers fail
-        """
-        # Validate inputs
         try:
             self._validate_prompt(prompt)
             if not 0.0 <= temperature <= 2.0:
@@ -531,196 +358,25 @@ class FreeLLMClient:
         except ValueError as e:
             logger.error(f"❌ Input validation failed: {e}")
             raise
-        
-        groq_error = None
-        gemini_error = None
-        last_error: Optional[Exception] = None
-        attempted_any = False
-
+            
+        operations = []
         for provider in self._provider_order(preferred_provider):
-            # Try Cerebras first (ultra-fast)
-            if provider == "cerebras" and self.cerebras_available and self.key_manager.has_working_keys("cerebras"):
-                cerebras_key = self.key_manager.get_working_key("cerebras")
-                if not cerebras_key:
-                    continue
-                cerebras_key_hash = hashlib.sha256(cerebras_key.encode()).hexdigest()[:16]
-                attempted_any = True
-                try:
-                    with self._counter_lock:
-                        rate_limit_reached = not self._check_rate_limit("cerebras", self.cerebras_last_call_times)
-                        if not rate_limit_reached:
-                            self.cerebras_last_call_times.append(time.time())
-                            
-                    if not rate_limit_reached:
-                        response = self._call_cerebras(prompt, temperature, max_tokens, timeout, cerebras_key)
-                        self._validate_response(response)
-                        with self._counter_lock:
-                            self.cerebras_calls += 1
-                            call_count = self.cerebras_calls
-                        logger.info(f"✅ Cerebras call #{call_count} successful")
-                        self._set_next_preference("cerebras")
-                        self.key_manager.report_key_success("cerebras", cerebras_key_hash)
-                        return response
-                except Exception as e:
-                    if self._is_rate_limit_error(e):
-                        retry_after = self._extract_retry_after(str(e))
-                        self.key_manager.report_key_failure("cerebras", cerebras_key_hash, e)
-                        last_error = RateLimitError("cerebras", str(e), retry_after)
-                        continue
-                    cerebras_error = str(e)
-                    last_error = e
-                    self.key_manager.report_key_failure("cerebras", cerebras_key_hash, e)
-                    logger.warning(f"⚠️ Cerebras failed: {type(e).__name__}")
-
-            # Try OpenRouter (diverse models)
-            if provider == "openrouter" and self.openrouter_available and self.key_manager.has_working_keys("openrouter"):
-                openrouter_key = self.key_manager.get_working_key("openrouter")
-                if not openrouter_key:
-                    continue
-                openrouter_key_hash = hashlib.sha256(openrouter_key.encode()).hexdigest()[:16]
-                attempted_any = True
-                try:
-                    with self._counter_lock:
-                        rate_limit_reached = not self._check_rate_limit("openrouter", self.openrouter_last_call_times)
-                        if not rate_limit_reached:
-                            self.openrouter_last_call_times.append(time.time())
-                            
-                    if not rate_limit_reached:
-                        response = self._call_openrouter(prompt, temperature, max_tokens, timeout, openrouter_key)
-                        self._validate_response(response)
-                        with self._counter_lock:
-                            self.openrouter_calls += 1
-                            call_count = self.openrouter_calls
-                        logger.info(f"✅ OpenRouter call #{call_count} successful")
-                        self._set_next_preference("openrouter")
-                        self.key_manager.report_key_success("openrouter", openrouter_key_hash)
-                        return response
-                except Exception as e:
-                    if self._is_rate_limit_error(e):
-                        retry_after = self._extract_retry_after(str(e))
-                        self.key_manager.report_key_failure("openrouter", openrouter_key_hash, e)
-                        last_error = RateLimitError("openrouter", str(e), retry_after)
-                        continue
-                    openrouter_error = str(e)
-                    last_error = e
-                    self.key_manager.report_key_failure("openrouter", openrouter_key_hash, e)
-                    logger.warning(f"⚠️ OpenRouter failed: {type(e).__name__}")
-
-            if provider == "groq" and self.groq_available and self.key_manager.has_working_keys("groq"):
-                groq_key = self.key_manager.get_working_key("groq")
-                if not groq_key:
-                    continue
-                groq_key_hash = hashlib.sha256(groq_key.encode()).hexdigest()[:16]
-                attempted_any = True
-                try:
-                    with self._counter_lock:
-                        rate_limit_reached = not self._check_rate_limit("groq", self.groq_last_call_times)
-                        if not rate_limit_reached:
-                            # #4: Atomic timestamp append before the call
-                            self.groq_last_call_times.append(time.time())
-                            
-                    if rate_limit_reached:
-                        logger.info("   Groq rate limit reached, trying Gemini fallback...")
-                    else:
-                        if self.groq_client is None:
-                            raise RuntimeError("Groq client not initialized")
-                        response = self._call_groq(prompt, temperature, max_tokens, timeout)
-                        self._validate_response(response)
-                        with self._counter_lock:
-                            self.groq_calls += 1
-                            call_count = self.groq_calls
-                        logger.info(f"✅ Groq call #{call_count} successful")
-                        self._set_next_preference("groq")
-                        self.key_manager.report_key_success("groq", groq_key_hash)
-                        return response
-                except Exception as e: # Catching general Exception for API call issues
-                    if self._is_rate_limit_error(e):
-                        retry_after = self._extract_retry_after(str(e))
-                        self.key_manager.report_key_failure("groq", groq_key_hash, e)
-                        last_error = RateLimitError("groq", str(e), retry_after)
-                        continue
-                    groq_error = str(e)
-                    last_error = e
-                    self.key_manager.report_key_failure("groq", groq_key_hash, e)
-                    logger.warning(f"⚠️  Groq failed: {type(e).__name__}")
-                    logger.debug(f"   Error details: {groq_error[:100]}")
-                    logger.info("   Attempting Gemini fallback...")
-
-            if provider == "gemini" and self.gemini_available and self.key_manager.has_working_keys("gemini"):
-                gemini_key = self.key_manager.get_working_key("gemini")
-                if not gemini_key:
-                    continue
-                gemini_key_hash = hashlib.sha256(gemini_key.encode()).hexdigest()[:16]
-                attempted_any = True
-                try:
-                    with self._counter_lock:
-                        rate_limit_reached = not self._check_rate_limit("gemini", self.gemini_last_call_times)
-                        if not rate_limit_reached:
-                            # #4: Atomic timestamp append before the call
-                            self.gemini_last_call_times.append(time.time())
-                            
-                    if rate_limit_reached:
-                        logger.warning("❌ Gemini rate limit also reached")
-                    else:
-                        # #15: Guard fast fail if Gemini client not initialised
-                        if self._gemini_mode == "genai" and self.genai_client is None:
-                            raise RuntimeError("Gemini GenAI client not initialized")
-                        if self._gemini_mode == "legacy" and self._gemini_legacy is None:
-                            raise RuntimeError("Gemini legacy client not initialized")
-                            
-                        response = self._call_gemini(
-                            prompt,
-                            temperature,
-                            max_tokens,
-                            timeout,
-                            gemini_key=gemini_key
-                        )
-                        self._validate_response(response)
-                        with self._counter_lock:
-                            self.gemini_calls += 1
-                            call_count = self.gemini_calls
-                        logger.info(f"✅ Gemini call #{call_count} successful")
-                        self._set_next_preference("gemini")
-                        self.key_manager.report_key_success("gemini", gemini_key_hash)
-                        return response
-                except Exception as e: # Catching general Exception for API call issues
-                    if self._is_rate_limit_error(e):
-                        retry_after = self._extract_retry_after(str(e))
-                        self.key_manager.report_key_failure("gemini", gemini_key_hash, e)
-                        last_error = RateLimitError("gemini", str(e), retry_after)
-                        continue
-                    gemini_error = str(e)
-                    last_error = e
-                    self.key_manager.report_key_failure("gemini", gemini_key_hash, e)
-                    logger.error(f"❌ Gemini also failed: {type(e).__name__}")
-                    logger.debug(f"   Error details: {gemini_error[:100]}")
-
-        if not attempted_any:
-            raise RateLimitError("all", "No available API keys (all providers rate limited).")
-        if isinstance(last_error, RateLimitError):
-            raise last_error
-        
-        # Both providers failed - try offline fallback
-        if self._try_offline_fallback():
-            logger.warning("🔄 Using offline fallback mode")
-            return self._get_offline_fallback_text(prompt)
-        
-        # Both providers failed
-        error_msg = "All LLM providers failed. Check your API keys and network connection."
-        logger.error(error_msg)
-        raise RuntimeError(error_msg)
+            operations.append(
+                lambda p=provider: self._execute_provider(p, prompt, temperature, max_tokens, timeout, is_structured=False)
+            )
+            
+        def offline_fb():
+            if self._try_offline_fallback():
+                logger.warning("🔄 Using offline fallback mode")
+                return self._get_offline_fallback_text(prompt)
+            raise RuntimeError("All LLM providers failed. Check your API keys and network connection.")
+            
+        return FallbackHandler.execute(operations, graceful_fallback=offline_fb)
     def _is_rate_limit_exception(self, e: Exception) -> bool:
         return self._is_rate_limit_error(e)
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
-        # Using lambda since we don't have self in the decorator scope easily, wait, 
-        # tenacity retry_if_exception needs a boolean returning callable.
-        # It's better to just catch the RateLimitError bubbled up or check string:
-        retry=retry_if_exception(lambda e: "rate limit" in str(e).lower() or "429" in str(e) or "exhausted" in str(e).lower()),
-        reraise=True
-    )
+    @with_retry(max_retries=2, base_delay=1.0, exceptions=(Exception,))
+    
     def _call_groq(
         self, 
         prompt: str, 
@@ -761,12 +417,8 @@ class FreeLLMClient:
             logger.debug(f"Groq API error: {type(e).__name__}")
             raise
     
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
-        retry=retry_if_exception(lambda e: "rate limit" in str(e).lower() or "429" in str(e)),
-        reraise=True
-    )
+    @with_retry(max_retries=2, base_delay=1.0, exceptions=(Exception,))
+    
     def _call_cerebras(
         self, 
         prompt: str, 
@@ -825,12 +477,8 @@ class FreeLLMClient:
             logger.debug(f"Cerebras API error: {type(e).__name__}")
             raise
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
-        retry=retry_if_exception(lambda e: "rate limit" in str(e).lower() or "429" in str(e)),
-        reraise=True
-    )
+    @with_retry(max_retries=2, base_delay=1.0, exceptions=(Exception,))
+    
     def _call_openrouter(
         self, 
         prompt: str, 
@@ -894,12 +542,8 @@ class FreeLLMClient:
             logger.debug(f"OpenRouter API error: {type(e).__name__}")
             raise
     
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
-        retry=retry_if_exception(lambda e: "rate limit" in str(e).lower() or "429" in str(e) or "exhausted" in str(e).lower()),
-        reraise=True
-    )
+    @with_retry(max_retries=2, base_delay=1.0, exceptions=(Exception,))
+    
     def _call_gemini(
         self, 
         prompt: str, 
