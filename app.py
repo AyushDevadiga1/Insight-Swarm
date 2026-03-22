@@ -27,6 +27,17 @@ from src.orchestration.debate import DebateOrchestrator
 from src.orchestration.cache import record_feedback
 from src.utils.validation import validate_claim
 from src.llm.client import RateLimitError
+from src.async_tasks.task_queue import get_task_queue
+from src.ui.progress_tracker import ProgressTracker, Stage
+
+# Observable UI components (Phase 1)
+try:
+    from src.ui.streamlit_observable import render_progress_panel, render_log_panel, render_resource_monitor
+    _OBSERVABLE_AVAILABLE = True
+except ImportError:
+    _OBSERVABLE_AVAILABLE = False
+    def render_progress_panel(*a, **kw): pass  # type: ignore
+    def render_log_panel(*a, **kw): pass        # type: ignore
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -439,6 +450,8 @@ def _init() -> None:
         "retry_at":        None,   # float – epoch when retry is safe
         "history":         [],     # list of previous dicts
         "history_summary": "",     # text summary of older items
+        "task_id":         None,
+        "progress_tracker": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -537,6 +550,12 @@ def render_sidebar() -> None:
           POWERED BY<br>
           <span style='color:var(--text)'>GROQ + GEMINI</span>
         </div>""")
+
+        if _OBSERVABLE_AVAILABLE:
+            render_resource_monitor()
+        
+        st.markdown("---")
+        st.session_state.use_simulation = st.toggle("Simulation Mode (Offline Demo)", value=False, help="Use mock responses for testing the UI flow.")
 
 
 def render_progress(active: int) -> None:
@@ -687,15 +706,25 @@ def render_debate(result: Mapping[str, Any]) -> None:
         with tab:
             lc, rc = st.columns(2)
             with lc:
-                sh(f"""<div class='dblock dpro'>
-                  <div class='dlbl'>Pro — Supporting</div>
-                  {html.escape(pros[idx]).replace(chr(10),'<br>')}
-                </div>""")
+                pro_text = str(pros[idx]) if idx < len(pros) else ""
+                if not pro_text or "technical error" in pro_text.lower():
+                    sh(f"<div class='dblock dpro' style='border-color:#ef444455'><div class='dlbl'>Pro — Supporting</div>"
+                       f"<span style='color:#ef4444;font-size:11px'>⚠️ Agent interaction failed. Check logs.</span></div>")
+                else:
+                    sh(f"""<div class='dblock dpro'>
+                      <div class='dlbl'>Pro — Supporting</div>
+                      {html.escape(pro_text).replace(chr(10),'<br>')}
+                    </div>""")
             with rc:
-                sh(f"""<div class='dblock dcon'>
-                  <div class='dlbl'>Con — Rebuttal</div>
-                  {html.escape(cons[idx]).replace(chr(10),'<br>')}
-                </div>""")
+                con_text = str(cons[idx]) if idx < len(cons) else ""
+                if not con_text or "technical error" in con_text.lower():
+                    sh(f"<div class='dblock dcon' style='border-color:#ef444455'><div class='dlbl'>Con — Rebuttal</div>"
+                       f"<span style='color:#ef4444;font-size:11px'>⚠️ Agent interaction failed. Check logs.</span></div>")
+                else:
+                    sh(f"""<div class='dblock dcon'>
+                      <div class='dlbl'>Con — Rebuttal</div>
+                      {html.escape(con_text).replace(chr(10),'<br>')}
+                    </div>""")
 
 
 def render_feedback(result: Mapping[str, Any]) -> None:
@@ -791,65 +820,71 @@ def main() -> None:
             st.error(f"Last run failed: {err}")
 
     # ── Run debate ─────────────────────────────────────────────────────────────
-    def analyze_claim_with_streaming(claim_text: str):
+    def analyze_claim_async(claim_text: str):
         valid, validation_err = validate_claim(claim_text)
         if not valid:
             st.error(f"Invalid claim: {validation_err}")
             return None
 
+        # Prepare for background execution
+        task_queue = get_task_queue()
+        task_id = f"debate_{st.session_state.thread_id}"
+        st.session_state.task_id = task_id
+        
+        if not st.session_state.progress_tracker:
+            st.session_state.progress_tracker = ProgressTracker()
+        tracker = st.session_state.progress_tracker
+
+        use_sim = st.session_state.get("use_simulation", False)
+
         try:
-            st.session_state.orchestrator = _get_orchestrator()
+            # Create orchestrator with this specific tracker
+            if use_sim:
+                from tests.sandbox.api_simulator import MockChaosClient, ChaosConfig
+                config = ChaosConfig(failure_rate=0.0, rate_limit_rate=0.0) # Clean demo
+                client = MockChaosClient(config)
+                orchestrator = DebateOrchestrator(llm_client=client, tracker=tracker)
+            else:
+                orchestrator = DebateOrchestrator(tracker=tracker)
         except Exception as e:
-            st.error(f"Orchestrator init failed: {e}")
+            st.session_state.debate_error = f"Orchestrator init failed: {e}"
+            st.session_state.is_running = False
             return None
 
-        # Always use a fresh UUID so each submission gets a clean LangGraph state.
-        # Deduplication of identical claims is handled by the semantic cache in
-        # debate.run(), not here.
-        st.session_state.thread_id = str(uuid.uuid4())
-        
-        with st.status(f"Verifying: {claim_text[:30]}...", expanded=True) as status:
-            st.write("Initializing argument verification agents...")
-            
-            try:
-                # Use the new stream method for real-time updates
-                orchestrator = _get_orchestrator()
-                stream = orchestrator.stream(claim_text, str(uuid.uuid4()))
-                
-                start_time = time.time()
-                last_node = ""
-                
-                for event_type, state in stream:
-                    if event_type == "cache_hit":
-                        status.update(label="✅ Found in semantic cache", state="complete")
-                        return state
-                    
-                    # Update status based on state changes
-                    if state.verdict and event_type == "complete":
-                        status.update(label=f"✅ Verification complete in {time.time()-start_time:.0f}s", state="complete")
-                        return state
-                    
-                    if event_type == "error":
-                        status.update(label="❌ System error", state="error")
-                        return state
+        # Fix 3-E: Reset keys on session start to clear transient cooldowns
+        if not use_sim:
+            orchestrator.client.key_manager.reset_all_keys()
 
-                    # Deduce stage from state metrics or round
-                    current_round = state.round
-                    if not state.pro_arguments:
-                        msg = "Searching for evidence..."
-                    elif len(state.pro_arguments) > len(state.con_arguments):
-                        msg = f"ConAgent rebutting Round {current_round}..."
-                    elif len(state.pro_arguments) == len(state.con_arguments):
-                        msg = f"ProAgent arguing Round {current_round}..."
-                    else:
-                        msg = "Running verification protocols..."
-                        
-                    status.update(label=f"⏳ {msg} ({time.time()-start_time:.0f}s)", state="running")
-                    
-            except Exception as e:
-                status.update(label=f"❌ Debate failed: {e}", state="error")
-                st.session_state.debate_error = str(e)
-                return None
+        # Submit to background
+        task_queue.submit(task_id, orchestrator.run, claim_text, st.session_state.thread_id)
+        return task_id
+
+    # ── Handle running task ───────────────────────────────────────────────────
+    if st.session_state.is_running and st.session_state.task_id:
+        task_queue = get_task_queue()
+        status_code, result, error = task_queue.get_status(st.session_state.task_id)
+        
+        if status_code == "COMPLETED":
+            st.session_state.result = result
+            st.session_state.debate_run = True
+            st.session_state.is_running = False
+            task_queue.clear_task(st.session_state.task_id)
+            st.rerun()
+        elif status_code == "FAILED":
+            st.session_state.debate_error = str(error)
+            st.session_state.is_running = False
+            task_queue.clear_task(st.session_state.task_id)
+            st.rerun()
+        else:
+            # Still running — render progress UI
+            with st.status("🔍 Analysis in progress...", expanded=True):
+                if st.session_state.progress_tracker:
+                    render_progress_panel(st.session_state.progress_tracker)
+                render_log_panel(max_entries=30, expanded=True)
+            
+            # Polling delay + rerun to update UI
+            time.sleep(1.0)
+            st.rerun()
 
     if verify and claim and chars >= 10:
         if st.session_state.is_running:
@@ -859,27 +894,11 @@ def main() -> None:
             st.session_state.debate_error = None
             st.session_state.retry_at = None
             st.session_state.feedback_given = None
+            st.session_state.thread_id = str(uuid.uuid4())
+            st.session_state.progress_tracker = ProgressTracker()
             
-            result = analyze_claim_with_streaming(claim)
-            
-            if result is None:
-                st.session_state.debate_run = False
-                err_msg = st.session_state.debate_error
-                if err_msg:
-                    is_rate_limit = (
-                        "rate" in err_msg.lower()
-                        or "429" in err_msg
-                        or "exhausted" in err_msg.lower()
-                        or "resource_exhausted" in err_msg.lower()
-                    )
-                    if is_rate_limit:
-                        render_api_exhausted(st.session_state.retry_at)
-                    else:
-                        st.error(f"Debate failed: {err_msg}")
-            else:
-                st.session_state.result = result
-                st.session_state.debate_run = True
-            st.session_state.is_running = False
+            analyze_claim_async(claim)
+            st.rerun()
 
     # ── Show results ───────────────────────────────────────────────────────────
     if st.session_state.debate_run and st.session_state.result:
