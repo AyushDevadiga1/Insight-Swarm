@@ -83,28 +83,16 @@ class ProAgent(BaseAgent):
         formatted_evidence = self._format_evidence(evidence_bundle)
         
         if round_num == 1:
-            return f"""You are ProAgent in a formal debate. Your role is to argue that the claim is TRUE.
+            return f"""You are ProAgent. Argue that the claim is TRUE.
 CLAIM: {state.claim}
+EVIDENCE: {formatted_evidence}
 
-EVIDENCE TO CITE:
-{formatted_evidence}
-
-YOUR TASK:
-Build the strongest possible case FOR this claim using ONLY the provided evidence. 
-You MUST cite the source URLs provided. Focus on being persuasive but factual."""
+TASK: Build a strong case using ONLY these sources. Cite URL accurately. Be concise and persuasive."""
         else:
-            con_argument = state.con_arguments[-1] if state.con_arguments else "No counter-argument yet"
-            
-            feedback_section = ""
-            if state.verification_feedback:
-                feedback_section = f"\n\n{state.verification_feedback}\n"
+            con_argument = state.con_arguments[-1] if state.con_arguments else ""
+            feedback = f"\n\n{state.verification_feedback}" if state.verification_feedback else ""
                 
-            return f"""You are ProAgent. You must maintain that the following claim is TRUE: {state.claim}
+            return f"""You are ProAgent. CLAIM: {state.claim} is TRUE.
+OPPONENT SAID: {con_argument}{feedback}
 
-The opposing agent argued:
-{con_argument}{feedback_section}
-
-YOUR TASK:
-Directly address their rebuttal and strengthen your original case. 
-Use NEW evidence if available in your previous research:
-{formatted_evidence}"""
+TASK: Refute their points and strengthen your case using: {formatted_evidence}. Be brief."""
