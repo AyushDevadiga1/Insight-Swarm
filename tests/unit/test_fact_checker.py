@@ -35,7 +35,7 @@ def test_fact_checker_verifies_urls(mock_get, fact_checker, sample_state):
     # Mock successful response
     mock_response = Mock()
     mock_response.status_code = 200
-    mock_response.text = "Sample content for verification"
+    mock_response.iter_content = Mock(return_value=[b"Sample content for verification"])
     mock_get.return_value = mock_response
     
     response = fact_checker.generate(sample_state)
@@ -54,7 +54,7 @@ def test_fact_checker_handles_errors(mock_get, fact_checker, sample_state):
     # Mock failed response
     mock_response = Mock()
     mock_response.status_code = 404
-    mock_response.text = "Error"
+    mock_response.iter_content = Mock(return_value=[b"Error"])
     mock_get.return_value = mock_response
     
     response = fact_checker.generate(sample_state)
