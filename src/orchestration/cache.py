@@ -52,6 +52,20 @@ class SemanticCache:
         # Lazy loading of model to avoid overhead if cache is hit directly by text match (optional optimization)
         self._model = None
         self._model_failed = False
+        self._model_fail_count = 0
+        
+        self._l1_cache = None
+        if self.enabled:
+            try:
+                from src.orchestration.bounded_cache import BoundedCache
+                self._l1_cache = BoundedCache(maxsize=100)
+            except ImportError:
+                pass
+
+        self._embedding_index = None   # numpy matrix shape (N, embedding_dim)
+        self._index_data = []          # list of verdict dicts, aligned with matrix rows
+        self._index_dirty = True       # True = rebuild needed on next lookup
+
         self._init_db()
 
     @property
@@ -65,7 +79,9 @@ class SemanticCache:
                 from src.utils.embedding import get_embedding_model
                 self._model = get_embedding_model(local_only=self.local_only)
             except Exception as e:
-                self._model_failed = True
+                self._model_fail_count = getattr(self, '_model_fail_count', 0) + 1
+                if self._model_fail_count >= 3:
+                    self._model_failed = True   # Only permanently fail after 3 consecutive failures
                 raise RuntimeError(f"Failed to load embedding model: {e}")
         return self._model
 
@@ -73,9 +89,49 @@ class SemanticCache:
         try:
             return self.model.encode([text])[0]
         except Exception as e:
-            logger.warning(f"Semantic cache disabled (model load failed): {e}")
-            self.enabled = False
+            # Return None for this call only — do NOT permanently disable the cache
+            # The next call will try again; transient errors should not kill caching
+            logger.warning(f"Embedding encode failed (cache miss for this call only): {e}")
             return None
+
+    def _rebuild_index(self):
+        """Load all live embeddings into a numpy matrix for fast vectorised similarity."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+                now = datetime.now().isoformat()
+                c.execute(
+                    'SELECT id, claim_embedding, verdict_data, created_at '
+                    'FROM claim_cache WHERE expires_at > ?',
+                    (now,)
+                )
+                rows = c.fetchall()
+
+            if not rows:
+                self._embedding_index = None
+                self._index_data = []
+                self._index_dirty = False
+                return
+
+            embeddings, data = [], []
+            for _, emb_bytes, verdict_json, created_at in rows:
+                emb = np.frombuffer(emb_bytes, dtype=np.float32).copy()
+                embeddings.append(emb)
+                d = json.loads(verdict_json)
+                d['cached_at'] = created_at
+                data.append(d)
+
+            matrix = np.stack(embeddings)                                # (N, D)
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            self._embedding_index = matrix / norms                       # pre-normalised
+            self._index_data = data
+            self._index_dirty = False
+            logger.debug(f"Rebuilt embedding index: {len(rows)} entries")
+
+        except Exception as e:
+            logger.error(f"Index rebuild failed: {e}")
+            self._embedding_index = None
 
     def _has_live_rows(self) -> bool:
         try:
@@ -126,6 +182,12 @@ class SemanticCache:
 
     def get_verdict(self, claim: str, similarity_threshold: float = 0.92) -> Optional[Dict[str, Any]]:
         """Retrieves a cached verdict using semantic similarity"""
+        if self._l1_cache:
+            hit = self._l1_cache.get(claim)
+            if hit:
+                logger.info(f"🧠 L1 MEMORY CACHE HIT for: '{claim}'")
+                return hit
+                
         try:
             if not self.enabled:
                 return None
@@ -135,38 +197,30 @@ class SemanticCache:
             if query_embedding is None:
                 return None
             
-            with sqlite3.connect(self.db_path) as conn:
-                c = conn.cursor()
-                now = datetime.now().isoformat()
-                c.execute('''
-                    SELECT claim_text, claim_embedding, verdict_data, created_at 
-                    FROM claim_cache 
-                    WHERE expires_at > ?
-                ''', (now,))
-                rows = c.fetchall()
+            if self._index_dirty or self._embedding_index is None:
+                self._rebuild_index()
+
+            if self._embedding_index is None or len(self._index_data) == 0:
+                return None
+
+            # Vectorised cosine similarity — O(N) numpy vs O(N) Python loop, 10-50x faster
+            q_norm = np.linalg.norm(query_embedding)
+            if q_norm == 0:
+                return None
+            q = query_embedding / q_norm
+            similarities = self._embedding_index @ q              # dot product, shape (N,)
+            best_idx = int(np.argmax(similarities))
+            best_similarity = float(similarities[best_idx])
             
             best_match = None
-            best_similarity = 0.0
-            
-            for row in rows:
-                cached_claim, embedding_bytes, verdict_json, created_at = row
-                cached_embedding = np.frombuffer(embedding_bytes, dtype=np.float32)
-                
-                # Cosine similarity
-                denom = np.linalg.norm(query_embedding) * np.linalg.norm(cached_embedding)
-                if denom == 0:
-                    continue
-                similarity = np.dot(query_embedding, cached_embedding) / denom
-                
-                if similarity > best_similarity and similarity >= similarity_threshold:
-                    best_similarity = similarity
-                    data = json.loads(verdict_json)
-                    data['is_cached'] = True
-                    data['cache_similarity'] = float(similarity)
-                    data['cached_at'] = created_at
-                    best_match = data
+            if best_similarity >= similarity_threshold:
+                best_match = dict(self._index_data[best_idx])
+                best_match['is_cached'] = True
+                best_match['cache_similarity'] = best_similarity
                     
             if best_match:
+                if self._l1_cache:
+                    self._l1_cache.put(claim, best_match)
                 logger.info(f"💾 SEMANTIC CACHE HIT (sim: {best_similarity:.2f}) for: '{claim}'")
             return best_match
             
@@ -176,6 +230,9 @@ class SemanticCache:
 
     def set_verdict(self, claim: str, verdict_data: Dict[str, Any]):
         """Saves a verdict with its embedding to the cache"""
+        if self._l1_cache:
+            self._l1_cache.put(claim, verdict_data)
+            
         try:
             if not self.enabled:
                 return
@@ -194,6 +251,7 @@ class SemanticCache:
                     VALUES (?, ?, ?, ?, ?)
                 ''', (claim, embedding_bytes, json.dumps(verdict_data), created_at.isoformat(), expires_at.isoformat()))
                 conn.commit()
+                self._index_dirty = True
         except Exception as e:
             logger.error(f"Cache write error: {e}")
 
