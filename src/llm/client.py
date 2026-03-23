@@ -174,7 +174,8 @@ class FreeLLMClient:
         elif self._preferred_provider == "openrouter":
             return ["openrouter", "cerebras", "groq", "gemini"]
         
-        return ["cerebras", "openrouter", "groq", "gemini"]
+        # Cerebras has DNS issues, OpenRouter has no credits — put working providers first
+        return ["groq", "gemini", "cerebras", "openrouter"]
 
     def _set_next_preference(self, provider: str) -> None:
         # Round robin / priority shift
@@ -312,8 +313,14 @@ class FreeLLMClient:
         except Exception as e:
             err_msg = str(e).lower()
             if "402" in err_msg or "payment" in err_msg or "credits" in err_msg:
-                logger.error(f"❌ Provider {provider} failed with 402 Payment Required. Disabling for this session.")
-                setattr(self, f"{provider}_available", False)
+                logger.error(f"❌ Provider {provider} failed with 402 (no credits). Marking key as invalid.")
+                # Cannot set @property directly — mark key permanently invalid via key_manager instead
+                # has_working_keys() will then return False, making the property return False naturally
+                for ki in self.key_manager.keys.get(provider, []):
+                    if ki.key_hash == key_hash:
+                        from src.utils.api_key_manager import APIKeyStatus
+                        ki.status = APIKeyStatus.INVALID
+                        break
                 self.key_manager.report_key_failure(provider, key_hash, e)
             
             if self._is_rate_limit_error(e):
@@ -588,7 +595,11 @@ class FreeLLMClient:
                 )
             else:
                 if self._gemini_legacy is None:
-                    raise RuntimeError("Legacy Gemini client not initialized")
+                    try:
+                        import google.generativeai as genai_legacy
+                        self._gemini_legacy = genai_legacy
+                    except ImportError:
+                        raise RuntimeError("No Gemini SDK found. Run: pip install google-generativeai")
                 with self._gemini_legacy_lock:
                     self._gemini_legacy.configure(api_key=gemini_key)
                     model = self._gemini_legacy.GenerativeModel(self.GEMINI_MODEL)
