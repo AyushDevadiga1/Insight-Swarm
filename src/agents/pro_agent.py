@@ -18,7 +18,7 @@ class ProAgent(BaseAgent):
     def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
         super().__init__(llm_client)
         self.role = "PRO"
-        self.preferred_provider = preferred_provider or "cerebras"  # ProAgent prefers Cerebras (Llama 3.1 8b)
+        self.preferred_provider = preferred_provider or "groq"  # ProAgent prefers Groq (Llama 3.3 70b)
     
     def _format_evidence(self, evidence_bundle):
         if not evidence_bundle:
