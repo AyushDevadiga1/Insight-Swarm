@@ -457,6 +457,15 @@ def _init() -> None:
         if k not in st.session_state:
             st.session_state[k] = v
 
+    # Reset rate-limited keys once per browser session
+    if not st.session_state.get("_api_keys_reset"):
+        try:
+            from src.utils.api_key_manager import get_api_key_manager
+            get_api_key_manager().reset_all_keys()
+        except Exception:
+            pass
+        st.session_state._api_keys_reset = True
+
 def _cap_memory_history():
     """Chat history capper keeping latest 10 messages, summarizing older interactions to prevent memory leaks."""
     if len(st.session_state.history) > 10:
@@ -464,9 +473,7 @@ def _cap_memory_history():
         st.session_state.history_summary = "Older verification requests have been archived and summarized to save memory."
 
 
-@st.cache_resource(show_spinner=False)
-def _get_orchestrator() -> DebateOrchestrator:
-    return DebateOrchestrator()
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -850,10 +857,6 @@ def main() -> None:
             st.session_state.debate_error = f"Orchestrator init failed: {e}"
             st.session_state.is_running = False
             return None
-
-        # Fix 3-E: Reset keys on session start to clear transient cooldowns
-        if not use_sim:
-            orchestrator.client.key_manager.reset_all_keys()
 
         # Submit to background
         task_queue.submit(task_id, orchestrator.run, claim_text, st.session_state.thread_id)
