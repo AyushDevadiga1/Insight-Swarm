@@ -7,7 +7,7 @@ import threading
 import atexit as _atexit
 from typing import List, Dict, Optional, Tuple, Any
 from src.agents.base import BaseAgent, AgentResponse, DebateState
-from src.core.models import SourceVerification, AgentResponse
+from src.core.models import SourceVerification
 import concurrent.futures
 import re
 from src.utils.temporal_verifier import TemporalVerifier
