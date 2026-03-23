@@ -18,7 +18,7 @@ class ConAgent(BaseAgent):
     def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
         super().__init__(llm_client)
         self.role = "CON"
-        self.preferred_provider = preferred_provider or "openrouter"  # ConAgent prefers OpenRouter (Llama 3.1 70B)
+        self.preferred_provider = preferred_provider or "groq"  # ConAgent prefers Groq (Llama 3.3 70B)
     
     def _format_evidence(self, evidence_bundle):
         if not evidence_bundle:
