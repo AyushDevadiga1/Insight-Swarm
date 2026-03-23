@@ -28,19 +28,14 @@ class Moderator(BaseAgent):
         prompt = self._build_prompt(state, state.round)
         
         try:
-            # Force Claude 3.5 Sonnet via OpenRouter for the Moderator
-            # but allow fallback to others if needed
-            model_override = None
-            if self.client.openrouter_available:
-                model_override = "anthropic/claude-3.5-sonnet"
-
-            # Use call_structured with the ModeratorVerdict schema
+            # Use the provider configured by the orchestrator (default: gemini)
+            # Do not override with OpenRouter/Claude-3.5-Sonnet — that model costs money
+            # and OpenRouter is currently non-functional for this project
             result = self.client.call_structured(
                 prompt=prompt,
                 output_schema=ModeratorVerdict,
                 temperature=0.2,  # Very low temperature for analytical consistency
-                preferred_provider="openrouter",
-                model=model_override
+                preferred_provider=self.preferred_provider
             )
             
             self.call_count += 1
