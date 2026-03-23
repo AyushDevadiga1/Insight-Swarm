@@ -3,7 +3,6 @@ DebateOrchestrator - Coordinates multi-round debate using LangGraph and Pydantic
 """
 import sys
 import logging
-import sqlite3
 from pathlib import Path
 from src.utils.claim_decomposer import ClaimDecomposer
 from src.utils.summarizer import Summarizer
@@ -78,6 +77,21 @@ class DebateOrchestrator:
         self.decomposer = ClaimDecomposer(self.client)
         
         self.resource_manager = get_resource_manager()
+        
+        # Register cache evictors so memory is actually reclaimed under pressure
+        def _evict_caches():
+            try:
+                cache = get_cache()
+                if cache._l1_cache:
+                    cache._l1_cache.clear()
+                cache._embedding_index = None
+                cache._index_dirty = True
+                logger.info("Memory evictor: cleared L1 cache and embedding index")
+            except Exception as ex:
+                logger.warning(f"Cache eviction failed: {ex}")
+        
+        self.resource_manager.register_evictor(_evict_caches)
+        
         self.checkpointer = MemorySaver()
         self.graph = self._build_graph()
         _olog("INFO", "✅ DebateOrchestrator ready")
@@ -131,26 +145,20 @@ class DebateOrchestrator:
         
         return workflow.compile(checkpointer=self.checkpointer)
 
-    def _switch_all_to_gemini(self) -> None:
-        """Force all agents to prefer Gemini and stop attempting Groq."""
-        logger.warning("Switching all agents to Gemini fallback mode due to consistent errors.")
-        self.client.groq_available = False
-        self.client._preferred_provider = "gemini"
-
     def _summarize_node(self, state: DebateState) -> DebateState:
         """NEW: Phase 5 Context Management (#20, #29)."""
         self.tracker.update(Stage.INITIALIZING, "Summarizing context for current round...")
-        if state.round > 2:
+        if state['round'] > 2:
             logger.info("Debate round > 2, generating summary of history.")
-            state.summary = self.summarizer.summarize_history(state)
+            state['summary'] = self.summarizer.summarize_history(state)
         
         # Phase 5: History Capping (Optimized to 2 rounds to save tokens)
-        if len(state.pro_arguments) > 2:
+        if len(state['pro_arguments']) > 2:
             logger.info("History exceeds 2 rounds, capping to save tokens.")
-            state.pro_arguments = state.pro_arguments[-2:]
-            state.con_arguments = state.con_arguments[-2:]
-            state.pro_sources = state.pro_sources[-2:]
-            state.con_sources = state.con_sources[-2:]
+            state['pro_arguments'] = state['pro_arguments'][-2:]
+            state['con_arguments'] = state['con_arguments'][-2:]
+            state['pro_sources'] = state['pro_sources'][-2:]
+            state['con_sources'] = state['con_sources'][-2:]
             
         # Phase 3: Resource Management
         self.resource_manager.check_and_reclaim()
@@ -159,10 +167,16 @@ class DebateOrchestrator:
 
     def _consensus_check_node(self, state: DebateState) -> DebateState:
         """NEW: Phase 3 Consensus Pre-Check Node using LLM and settled science."""
-        self.tracker.update(Stage.SEARCHING, f"Consensus pre-check for claim: {state.claim[:30]}...")
-        logger.info(f"Consensus pre-check for claim: {state.claim}")
+        self.tracker.update(Stage.SEARCHING, f"Consensus pre-check for claim: {state['claim'][:30]}...")
+        logger.info(f"Consensus pre-check for claim: {state['claim']}")
         
-        claim_lower = state.claim.lower()
+        # Initialize verification rates to prevent TypeError in Moderator if debate is skipped
+        if state['pro_verification_rate'] is None:
+            state['pro_verification_rate'] = 0.0
+        if state['con_verification_rate'] is None:
+            state['con_verification_rate'] = 0.0
+        
+        claim_lower = state['claim'].lower()
         
         # Hardcoded settled science (proven facts, skip expensive LLM call)
         SETTLED_TRUTHS = {
@@ -179,18 +193,30 @@ class DebateOrchestrator:
         # Check hardcoded first
         for keyword, (verdict, conf, reasoning) in SETTLED_TRUTHS.items():
             if keyword in claim_lower:
-                state.verdict = verdict
-                state.confidence = conf
-                state.moderator_reasoning = f"Settled Science: {reasoning}"
+                state['verdict'] = verdict
+                state['confidence'] = conf
+                state['moderator_reasoning'] = f"Settled Science: {reasoning}"
                 logger.info(f"✅ Hardcoded consensus: {verdict}")
                 
                 # Still populate metrics for consistency
-                if state.metrics is None: state.metrics = {}
-                state.metrics["consensus"] = {
+                if state['metrics'] is None: state['metrics'] = {}
+                state['metrics']["consensus"] = {
                     "verdict": verdict,
                     "reasoning": reasoning,
                     "score": conf
                 }
+                # Populate synthetic entries so the Moderator has context
+                # and the UI debate tab is not blank
+                if not state['pro_arguments']:
+                    state['pro_arguments'] = [f"[Settled science] {reasoning}"]
+                if not state['con_arguments']:
+                    state['con_arguments'] = [
+                        f"[Consensus verdict: {verdict} with {conf:.0%} confidence — no debate required]"
+                    ]
+                if not state['pro_sources']:
+                    state['pro_sources'] = [[]]
+                if not state['con_sources']:
+                    state['con_sources'] = [[]]
                 return state
 
         prompt = f"""You are a Consensus Checker. Determine if there is a massive, widely accepted scientific or authoritative consensus on the following claim.
@@ -218,14 +244,24 @@ If it is controversial or requires current events analysis, return DEBATE.
             
             # response is now a ConsensusResponse object
             if response.verdict != "DEBATE" and response.confidence > 0.9:
-                state.verdict = response.verdict
-                state.confidence = response.confidence
-                state.moderator_reasoning = f"Consensus Pre-Check: {response.reasoning}"
-                logger.info(f"Consensus found: {state.verdict}")
+                state['verdict'] = response.verdict
+                state['confidence'] = response.confidence
+                state['moderator_reasoning'] = f"Consensus Pre-Check: {response.reasoning}"
+                logger.info(f"Consensus found: {state['verdict']}")
+                
+                # POPULATE SYNTHETIC ARGUMENTS HERE (NODE PERSISTS STATE)
+                if not state['pro_arguments']:
+                    state['pro_arguments'] = [f"[Consensus found] {response.reasoning}"]
+                if not state['con_arguments']:
+                    state['con_arguments'] = [f"[Consensus skip: {response.verdict}]"]
+                if not state['pro_sources']:
+                    state['pro_sources'] = [[]]
+                if not state['con_sources']:
+                    state['con_sources'] = [[]]
             
             # Save raw consensus data for Moderator's composite score
-            if state.metrics is None: state.metrics = {}
-            state.metrics["consensus"] = {
+            if state['metrics'] is None: state['metrics'] = {}
+            state['metrics']["consensus"] = {
                 "verdict": response.verdict,
                 "reasoning": response.reasoning,
                 "score": response.confidence
@@ -237,13 +273,8 @@ If it is controversial or requires current events analysis, return DEBATE.
         return state
 
     def _should_debate(self, state: DebateState) -> Literal["skip", "debate"]:
-        if state.verdict in ("TRUE", "FALSE", "NEUTRAL") and state.confidence > 0.9:
-            # FIX 4-C: Ensure state.pro_arguments / con_arguments are populated
-            # so the UI doesn't look empty when consensus is found early.
-            if not state.pro_arguments:
-                state.pro_arguments = ["Scientific/public consensus found - skipping debate."]
-            if not state.con_arguments:
-                state.con_arguments = ["No credible counter-arguments for settled facts."]
+        # Logic: If consensus was already reached and confidence is high, skip the debate round.
+        if state['verdict'] in ("TRUE", "FALSE", "NEUTRAL") and state['confidence'] > 0.9:
             return "skip"
         return "debate"
 
@@ -261,118 +292,63 @@ If it is controversial or requires current events analysis, return DEBATE.
         )
     
     def _pro_agent_node(self, state: DebateState) -> DebateState:
-        stage = getattr(Stage, f"ROUND_{state.round}_PRO", Stage.ROUND_1_PRO)
-        self.tracker.update(stage, f"ProAgent arguing — Round {state.round}")
-        logger.info(f"ProAgent turn - Round {state.round}")
-        _olog("INFO", f"💬 ProAgent arguing — Round {state.round}")
+        stage = getattr(Stage, f"ROUND_{state['round']}_PRO", Stage.ROUND_1_PRO)
+        self.tracker.update(stage, f"ProAgent arguing — Round {state['round']}")
+        logger.info(f"ProAgent turn - Round {state['round']}")
+        _olog("INFO", f"💬 ProAgent arguing — Round {state['round']}")
         response = self.pro_agent.generate(state)   # No try/except needed anymore
-        state.pro_arguments.append(response.argument)
-        state.pro_sources.append(response.sources)
-        _olog("DEBUG", f"ProAgent response received", round=state.round,
+        state['pro_arguments'].append(response.argument)
+        state['pro_sources'].append(response.sources)
+        _olog("DEBUG", f"ProAgent response received", round=state['round'],
               sources=len(response.sources or []))
         return state
 
     def _con_agent_node(self, state: DebateState) -> DebateState:
-        stage = getattr(Stage, f"ROUND_{state.round}_CON", Stage.ROUND_1_CON)
-        self.tracker.update(stage, f"ConAgent rebutting — Round {state.round}")
-        logger.info(f"ConAgent turn - Round {state.round}")
-        _olog("INFO", f"🔴 ConAgent rebutting — Round {state.round}")
+        stage = getattr(Stage, f"ROUND_{state['round']}_CON", Stage.ROUND_1_CON)
+        self.tracker.update(stage, f"ConAgent rebutting — Round {state['round']}")
+        logger.info(f"ConAgent turn - Round {state['round']}")
+        _olog("INFO", f"🔴 ConAgent rebutting — Round {state['round']}")
         response = self.con_agent.generate(state)
-        state.con_arguments.append(response.argument)
-        state.con_sources.append(response.sources)
-        state.round += 1
-        _olog("DEBUG", f"ConAgent response received", round=state.round - 1,
+        state['con_arguments'].append(response.argument)
+        state['con_sources'].append(response.sources)
+        state['round'] += 1
+        _olog("DEBUG", f"ConAgent response received", round=state['round'] - 1,
               sources=len(response.sources or []))
         return state
     
     def _should_continue(self, state: DebateState) -> Literal["continue", "end"]:
-        if isinstance(state, dict):
-            round_num = state.get("round", 1)
-            num_rounds = state.get("num_rounds", 3)
-            return "end" if round_num > num_rounds else "continue"
-        if state.round > state.num_rounds:
-            return "end"
-        return "continue"
+        # Logic: If round < num_rounds AND we don't have a high confidence verdict yet
+        if state['round'] <= state['num_rounds']:
+            return "continue"
+        return "end"
 
     def _should_retry(self, state: DebateState) -> Literal["retry", "proceed"]:
-        last_pro = state.pro_arguments[-1] if state.pro_arguments else ""
-        last_con = state.con_arguments[-1] if state.con_arguments else ""
-        
-        if any(phrase in last_pro or phrase in last_con for phrase in ["QUOTA EXHAUSTED", "API ERROR FALLBACK", "LLM call failed"]):
-            logger.warning("API failure detected in debate. Skipping revision loop.")
-            return "proceed"
-        
-        # existing rate checks...
-        pro_rate = state.pro_verification_rate if state.pro_verification_rate is not None else 0.0
-        con_rate = state.con_verification_rate if state.con_verification_rate is not None else 0.0
-        if (pro_rate < 0.3 or con_rate < 0.3) and state.retry_count < 1:
+        pro_rate = state['pro_verification_rate'] if state['pro_verification_rate'] is not None else 0.0
+        con_rate = state['con_verification_rate'] if state['con_verification_rate'] is not None else 0.0
+        if (pro_rate < 0.3 or con_rate < 0.3) and state['retry_count'] < 1:
             return "retry"
         return "proceed"
 
-    def _verification_gate_node(self, state: DebateState) -> DebateState:
-        # round_idx is 0-based index of the round just completed.
-        # len(state.pro_sources) equals the number of completed rounds.
-        round_idx = len(state.pro_sources) - 1
-
-        # Do not run on the very first entry (no sources yet) or on the
-        # final round (verification feedback would never be used by any agent).
-        if round_idx < 0 or round_idx >= state.num_rounds - 1:
-            return state
-
-        logger.info("Running mid-debate verification gate for round %d...", round_idx + 1)
-
-        sources_to_check = []
-        if len(state.pro_sources) > round_idx:
-            argument = state.pro_arguments[round_idx] if len(state.pro_arguments) > round_idx else ""
-            for url in state.pro_sources[round_idx]:
-                sources_to_check.append((url, "PRO", argument))
-        if len(state.con_sources) > round_idx:
-            argument = state.con_arguments[round_idx] if len(state.con_arguments) > round_idx else ""
-            for url in state.con_sources[round_idx]:
-                sources_to_check.append((url, "CON", argument))
-
-        failed_sources = []
-        sources_to_check = (state.pro_sources[-1] if state.pro_sources else []) + (state.con_sources[-1] if state.con_sources else [])
-        
-        for url, agent, argument in sources_to_check:
-            try:
-                verification = self.fact_checker._verify_url(url, agent, argument)
-                if verification.status != "VERIFIED":
-                    failed_sources.append(url)
-            except Exception as e:
-                logger.warning(f"Verification gate failed for {url}: {e}")
-                failed_sources.append(url)
-
-        if failed_sources:
-            state.verification_feedback = (
-                "WARNING: The following sources failed verification:\n" +
-                "\n".join(f"- {url}" for url in failed_sources) +
-                "\n\nYou must revise your argument without these sources."
-            )
-            logger.info(f"Verification gate caught {len(failed_sources)} failed sources.")
-
-        return state
-
     def _retry_revision_node(self, state: DebateState) -> DebateState:
         logger.info("Revision loop triggered")
-        state.retry_count += 1
+        state['retry_count'] += 1
 
         # Temporarily set round to the last real debate round so agents build
         # prompts for the correct context (not round 4 which does not exist).
-        saved_round = state.round
-        state.round = state.num_rounds  # = 3
+        saved_round = state['round']
+        state['round'] = state['num_rounds']  # = 3
 
         pro_resp = self.pro_agent.generate(state)
-        if state.pro_arguments:
-            state.pro_arguments[-1] = pro_resp.argument
-        if state.pro_sources:
-            state.pro_sources[-1] = pro_resp.sources
+        if state['pro_arguments']:
+            state['pro_arguments'][-1] = pro_resp.argument
+        if state['pro_sources']:
+            state['pro_sources'][-1] = pro_resp.sources
 
         con_resp = self.con_agent.generate(state)
-        if state.con_arguments:
-            state.con_arguments[-1] = con_resp.argument
-        if state.con_sources:
-            state.con_sources[-1] = con_resp.sources
+        if state['con_arguments']:
+            state['con_arguments'][-1] = con_resp.argument
+        if state['con_sources']:
+            state['con_sources'][-1] = con_resp.sources
 
         # Restore the post-increment round value so the rest of the graph
         # sees the correct state.
@@ -380,7 +356,7 @@ If it is controversial or requires current events analysis, return DEBATE.
         return state
     
     def _fact_checker_node(self, state: DebateState) -> DebateState:
-        self.tracker.update(Stage.FACT_CHECK_PREP if hasattr(Stage, "FACT_CHECK_PREP") else Stage.FACT_CHECKING, "FactChecker verifying sources...")
+        self.tracker.update(Stage.FACT_CHECKING, "FactChecker verifying sources...")
         logger.info("FactChecker verifying sources...")
         _olog("INFO", "✅ FactChecker verifying sources...")
         try:
@@ -434,27 +410,28 @@ If it is controversial or requires current events analysis, return DEBATE.
         _olog("INFO", "⚖️ Moderator synthesizing verdict...")
         try:
             response = self.moderator.generate(state)
-            state.verdict = response.verdict
-            state.confidence = response.confidence
-            state.moderator_reasoning = response.reasoning
-            state.metrics = response.metrics
+            state['verdict'] = response.verdict
+            state['confidence'] = response.confidence
+            state['moderator_reasoning'] = response.reasoning
+            state['metrics'] = response.metrics
+            
+            _olog("INFO", f"🏁 Debate Complete", verdict=state['verdict'])
             return state
         except RateLimitError as e:
-            # Only reachable if generate() re-raises instead of falling back.
-            logger.error("Moderator rate limited; aborting debate run.")
-            state.verdict = "RATE_LIMITED"
-            state.confidence = 0.0
-            if not state.moderator_reasoning:
+            logger.warning(f"Moderator node: Rate limit hit: {e}")
+            state['verdict'] = "RATE_LIMITED"
+            state['confidence'] = 0.0
+            if state['moderator_reasoning'] is None:
                 retry_hint = f" Retry after ~{e.retry_after:.0f}s." if e.retry_after else ""
-                state.moderator_reasoning = f"Rate limit exceeded.{retry_hint}"
-            state.metrics = {}
+                state['moderator_reasoning'] = f"Rate limit exceeded.{retry_hint}"
+            state['metrics'] = {}
             return state
 
     def _verdict_node(self, state: DebateState) -> DebateState:
-        self.tracker.update(Stage.COMPLETE, f"Final Verdict: {state.verdict}")
-        logger.info(f"Final Verdict: {state.verdict} (Confidence: {state.confidence})")
-        _olog("INFO", f"🎯 Verdict: {state.verdict}",
-              confidence=state.confidence, verdict=state.verdict)
+        self.tracker.update(Stage.COMPLETE, f"Final Verdict: {state['verdict']}")
+        logger.info(f"Final Verdict: {state['verdict']} (Confidence: {state['confidence']})")
+        _olog("INFO", f"🎯 Verdict: {state['verdict']}",
+              confidence=state['confidence'], verdict=state['verdict'])
         return state
     
     def run(self, claim: str, thread_id: str = "default") -> DebateState:
