@@ -15,7 +15,9 @@ from src.orchestration.debate import DebateOrchestrator
 @pytest.fixture
 def orchestrator():
     """Current 4-agent orchestrator"""
-    return DebateOrchestrator()
+    orchestrator = DebateOrchestrator()
+    yield orchestrator
+    orchestrator.close()
 
 
 def test_current_system_complete_flow(orchestrator):

@@ -32,3 +32,5 @@ def test_orchestrator_sanitizes_bare_domains_and_skips_titles(monkeypatch):
 
     # Titles should be skipped (not coerced into http://...)
     assert not any("Stanton et al." in item for round_sources in new_state.pro_sources for item in round_sources)
+
+    orchestrator.close()

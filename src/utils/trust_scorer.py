@@ -23,7 +23,7 @@ class TrustScorer:
     # Regex patterns for domains
     PATTERNS = {
         "AUTHORITATIVE": [
-            r"\.gov$", r"\.edu$", r"\.org$",  # General gov/edu/org (caution with .org)
+            r"\.gov$", r"\.edu$",  # General gov/edu
             r"who\.int$", r"cdc\.gov$", r"nasa\.gov$", r"nih\.gov$",
             r"nature\.com$", r"science\.org$", r"thelancet\.com$"
         ],

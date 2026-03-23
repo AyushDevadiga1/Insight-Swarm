@@ -70,13 +70,15 @@ def check_init_files():
 def check_packages():
     """Check if required packages are installed"""
     required_packages = [
-        "langchain",
         "langgraph",
         "groq",
-        "google.generativeai",
-        "dotenv",
         "pydantic",
-        "pytest",
+        "streamlit",
+        "sentence_transformers",
+        "rapidfuzz",
+        "requests",
+        "tenacity",
+        "numpy",
     ]
     
     all_installed = True

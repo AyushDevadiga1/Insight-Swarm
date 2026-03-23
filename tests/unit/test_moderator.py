@@ -13,7 +13,7 @@ from src.llm.client import FreeLLMClient
 
 @pytest.fixture
 def mock_client():
-    client = Mock(spec=FreeLLMClient)
+    client = Mock()
     client.call_structured.return_value = ModeratorVerdict(
         verdict="TRUE",
         confidence=0.9,
