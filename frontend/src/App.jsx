@@ -1,131 +1,124 @@
-import React, { useState, useEffect } from 'react';
-import Sidebar from './components/Sidebar';
-import HeroHeader from './components/HeroHeader';
-import ClaimInput from './components/ClaimInput';
-import PipelineProgress from './components/PipelineProgress';
-import EmptyState from './components/EmptyState';
-import VerdictCard from './components/VerdictCard';
-import DebateLog from './components/DebateLog';
-import SourceTable from './components/SourceTable';
-import MetricsBar from './components/MetricsBar';
-import FeedbackPanel from './components/FeedbackPanel';
-import ApiError from './components/ApiError';
-import BotBubble from './components/BotBubble';
-import { verifyClaim } from './api';
+/**
+ * App.jsx — Root component, fully revamped
+ * 
+ * What changed from old App.jsx:
+ * - All state removed (lives in Zustand stores)
+ * - setInterval fake timer GONE
+ * - SSE hook drives real progress
+ * - API health polling starts on mount
+ * - Components import what they need from stores directly
+ */
 
-function App() {
-  const [claim, setClaim] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [activeStage, setActiveStage] = useState(0);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
-  const [history, setHistory] = useState([]);
+import React, { useState } from 'react';
+import { useApiHealth } from './hooks/useApiHealth';
+import { useSSE } from './hooks/useSSE';
+import { useDebateStore } from './store/useDebateStore';
 
-  useEffect(() => {
-    let timer;
-    if (loading && activeStage < 4) {
-      timer = setInterval(() => {
-        setActiveStage(prev => prev + 1);
-      }, 4000);
-    }
-    return () => clearInterval(timer);
-  }, [loading, activeStage]);
+// Layout
+import Sidebar from './components/layout/Sidebar';
 
-  const handleVerify = async () => {
-    setLoading(true);
-    setResult(null);
-    setError(null);
-    setActiveStage(1);
+// Input
+import ClaimInput from './components/input/ClaimInput';
 
-    try {
-      const data = await verifyClaim(claim);
-      setResult(data);
-      setHistory(prev => [{ claim: data.claim, verdict: data.verdict }, ...prev].slice(0, 10));
-      setActiveStage(5);
-    } catch (err) {
-      setError(err);
-      setActiveStage(0);
-    } finally {
-      setLoading(false);
-    }
+// Pipeline
+import LiveTimeline from './components/pipeline/LiveTimeline';
+
+// Common
+import ErrorBanner from './components/common/ErrorBanner';
+import EmptyState from './components/common/EmptyState';
+
+// Results
+import VerdictCard from './components/results/VerdictCard';
+import ReasoningPanel from './components/results/ReasoningPanel';
+import MetricsGrid from './components/results/MetricsGrid';
+import SourceTable from './components/results/SourceTable';
+import FeedbackPanel from './components/results/FeedbackPanel';
+
+// Debate
+import DebateArena from './components/debate/DebateArena';
+
+export default function App() {
+  const { claim, isRunning, result, error, sourceResults, setClaim, reset } = useDebateStore();
+
+  // Start the /api/status polling on mount
+  useApiHealth();
+
+  // SSE trigger state — when this is true, useSSE opens the connection
+  const [sseEnabled, setSseEnabled] = useState(false);
+  const [sseClaim, setSseClaim] = useState('');
+
+  // Wire up SSE (hook manages connection lifecycle)
+  useSSE(sseClaim, sseEnabled);
+
+  const handleVerify = () => {
+    if (!claim.trim() || isRunning) return;
+    setSseClaim(claim);
+    setSseEnabled(true);
+    // After SSE hook picks up the new claim+enabled, we reset sseEnabled
+    // so it doesn't reconnect on re-renders. The hook's useEffect deps
+    // [enabled, claim] mean it only reconnects when these values change.
+    requestAnimationFrame(() => setSseEnabled(false));
   };
 
-  const reset = () => {
-    setClaim('');
-    setResult(null);
-    setError(null);
-    setLoading(false);
-    setActiveStage(0);
-  };
-
-  const handleExample = (ex) => {
-    setClaim(ex);
-  };
+  // Sources to show: live during streaming, from result after completion
+  const displaySources = result?.verification_results ?? sourceResults;
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar onExampleClick={handleExample} history={history} />
-      
-      <main className="flex-1 overflow-y-auto bg-bg p-12 flex flex-col items-center">
-        <div className="w-full max-w-4xl flex flex-col items-center">
-          <div className="w-full text-left">
-            <HeroHeader />
+    <div className="app-shell">
+      <Sidebar
+        onExampleClick={(ex) => setClaim(ex)}
+        history={useDebateStore(s => s.history)}
+      />
+
+      <main className="main-content">
+        <div className="main-inner">
+
+          {/* Hero */}
+          <div className="hero">
+            <h1 className="hero-title">InsightSwarm</h1>
+            <p className="hero-subtitle">Multi-Agent Truth Verification Protocol</p>
           </div>
-          
-          <ClaimInput 
-            value={claim} 
-            onChange={setClaim} 
-            onVerify={handleVerify} 
-            onReset={reset}
-            loading={loading}
-          />
 
-          <PipelineProgress active={activeStage} />
+          {/* Input */}
+          <ClaimInput onVerify={handleVerify} />
 
-          {error && <ApiError error={error} />}
+          {/* Live pipeline timeline — shows during AND after run */}
+          <LiveTimeline />
 
-          {!loading && !result && !error && (
-            <EmptyState />
+          {/* Error */}
+          <ErrorBanner />
+
+          {/* Empty state — only when nothing is happening */}
+          {!isRunning && !result && !error && <EmptyState />}
+
+          {/* Live debate — visible during streaming */}
+          {(isRunning || result) && (
+            <DebateArena result={result} />
           )}
 
+          {/* Final results — only after completion */}
           {result && (
-            <div className="w-full animate-fade-in flex flex-col items-center">
-              <VerdictCard 
-                verdict={result.verdict} 
-                confidence={result.confidence} 
-                claim={result.claim} 
-              />
-              
-              <MetricsBar metrics={result.metrics} />
-
-              <SourceTable verificationResults={result.verification_results} />
-
-              <div className="mt-12 w-full">
-                <div className="mono text-[9px] uppercase tracking-[3px] text-[#666] mb-8">Moderator Analysis</div>
-                <BotBubble agent="Moderator" color="var(--mod)">
-                  {result.moderator_reasoning}
-                </BotBubble>
-              </div>
-
-              <DebateLog 
-                proArguments={result.pro_arguments} 
-                conArguments={result.con_arguments} 
-                proSources={result.pro_sources} 
-                conSources={result.con_sources}
-              />
-
-              <FeedbackPanel claim={result.claim} verdict={result.verdict} />
-              
-              <footer className="mt-24 pt-8 border-t flex justify-between mono text-[9px] text-[#555] uppercase tracking-widest w-full">
-                <span>InsightSwarm</span>
-                <span>V1.0.0-React</span>
-              </footer>
+            <div className="results-view">
+              <VerdictCard result={result} />
+              <ReasoningPanel result={result} />
+              <MetricsGrid metrics={result.metrics} />
+              <SourceTable sources={displaySources} />
+              <FeedbackPanel result={result} />
             </div>
           )}
+
+          {/* Live sources during verification */}
+          {isRunning && sourceResults.length > 0 && !result && (
+            <SourceTable sources={sourceResults} />
+          )}
+
+          <footer className="app-footer">
+            <span>InsightSwarm</span>
+            <span>Groq + Gemini</span>
+          </footer>
+
         </div>
       </main>
     </div>
   );
 }
-
-export default App;
