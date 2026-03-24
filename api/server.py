@@ -19,8 +19,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException
+import json
+import time
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 # ── Path setup so imports from root work ─────────────────────────────────────
@@ -125,6 +128,50 @@ def _normalise(raw: Dict[str, Any]) -> Dict[str, Any]:
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/status")
+def api_status() -> Dict[str, Any]:
+    """Return live health status for all configured LLM providers."""
+    from src.monitoring.api_status import get_health_monitor
+    monitor = get_health_monitor()
+    return monitor.get_status() if monitor else {}
+
+
+@app.get("/stream")
+async def stream_debate(claim: str, request: Request):
+    """SSE endpoint for real-time debate progress."""
+    from main import validate_claim
+    valid, err_msg = validate_claim(claim.strip())
+    if not valid:
+        async def error_gen():
+            yield f"event: error\ndata: {json.dumps({'message': err_msg})}\n\n"
+        return StreamingResponse(error_gen(), media_type="text/event-stream")
+
+    async def event_generator():
+        from src.orchestration.debate import get_orchestrator
+        orchestrator = get_orchestrator()
+        
+        try:
+            async for event in orchestrator.stream(claim.strip(), str(uuid.uuid4())):
+                if await request.is_disconnected():
+                    break
+                yield f"event: {event['type']}\ndata: {json.dumps(event['data'])}\n\n"
+        except Exception as e:
+            logger.exception("Stream failed")
+            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+        
+        yield "event: done\ndata: {\"message\": \"stream complete\"}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
 
 
 @app.post("/verify")
