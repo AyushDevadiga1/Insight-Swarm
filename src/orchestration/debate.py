@@ -113,12 +113,8 @@ class DebateOrchestrator:
         return state
 
     def _consensus_check_node(self, state: DebateState) -> DebateState:
-<<<<<<< HEAD
         """Fast consensus pre-check using Gemini — skips full debate for settled facts."""
         logger.info(f"Consensus pre-check for: {state.claim}")
-=======
-        """NEW: Phase 3 Consensus Pre-Check Node using LLM and settled science."""
-        logger.info(f"Consensus pre-check for claim: {state.claim}")
         
         claim_lower = state.claim.lower()
         
@@ -150,7 +146,6 @@ class DebateOrchestrator:
                     "score": conf
                 }
                 return state
->>>>>>> origin/main
 
         prompt = f"""You are a Consensus Checker. Determine if there is a massive, widely accepted scientific or authoritative consensus on the following claim.
 CLAIM: {state.claim}
