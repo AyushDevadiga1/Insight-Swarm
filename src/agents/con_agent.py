@@ -1,15 +1,28 @@
 """
 ConAgent - Argues that the claim is FALSE using structured outputs.
 """
+<<<<<<< HEAD
+from datetime import datetime
+=======
 from typing import List, Dict, Any, Optional
+>>>>>>> origin/main
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
-from src.utils.url_helper import URLNormalizer
 import logging
 
 logger = logging.getLogger(__name__)
 
+
 class ConAgent(BaseAgent):
+<<<<<<< HEAD
+    """Argues the claim is FALSE using adversarial prompting and structured output."""
+
+    def __init__(self, llm_client: FreeLLMClient):
+        super().__init__(llm_client)
+        self.role               = "CON"
+        self.preferred_provider = "gemini"   # ConAgent uses Gemini (different training data)
+
+=======
     """
     Agent that argues the claim is FALSE.
     Takes the opposite position from ProAgent and challenges their evidence.
@@ -18,86 +31,86 @@ class ConAgent(BaseAgent):
     def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
         super().__init__(llm_client)
         self.role = "CON"
-        self.preferred_provider = preferred_provider or "groq"  # ConAgent prefers Groq (Llama 3.3 70B)
+        self.preferred_provider = preferred_provider or "openrouter"  # ConAgent prefers OpenRouter (Llama 3.1 70B)
     
+>>>>>>> origin/main
     def _format_evidence(self, evidence_bundle):
         if not evidence_bundle:
             return "No specific evidence provided yet."
-        return "\n".join([
-            f"- {item.get('title', 'Source')} ({item.get('url', 'URL')}): {item.get('content', '')[:200]}..."
+        return "\n".join(
+            f"- {item.get('title', 'Source')} ({item.get('url', 'URL')}): "
+            f"{item.get('content', '')[:200]}..."
             for item in evidence_bundle
-        ])
+        )
 
     def generate(self, state: DebateState) -> AgentResponse:
-        """Generate argument AGAINST the claim using structured JSON output."""
-        logger.info(f"ConAgent generating argument for Round {state.round}")
-        
+        """Generate argument AGAINST the claim."""
+        logger.info(f"ConAgent generating — Round {state.round}")
+
         prompt = self._build_prompt(state, state.round)
-        
+
         try:
-            # Use the new call_structured method which returns an AgentResponse model
-            from src.config import AgentConfig
             response = self.client.call_structured(
                 prompt=prompt,
                 output_schema=AgentResponse,
-                temperature=AgentConfig.DEFAULT_TEMPERATURE,
-                preferred_provider=self.preferred_provider
+                temperature=0.7,
+                preferred_provider=self.preferred_provider,
             )
-            
-            # Ensure the agent field is correct
-            response.agent = "CON"
-            response.round = state.round
-            
-            sanitized = []
-            if response.sources:
-                for s in response.sources:
-                    res = URLNormalizer.sanitize_url(s)
-                    if res:
-                        sanitized.append(res)
-            response.sources = sanitized
-            
+            response.agent     = "CON"
+            response.round     = state.round
+            response.sources   = self._sanitize_sources(response.sources)
+            response.timestamp = datetime.now().strftime("%H:%M:%S")
             self.call_count += 1
             return response
-            
+
         except Exception as e:
-            logger.error(f"{self.role}Agent failed to generate structured response: {e}")
+            logger.error(f"ConAgent failed: {e}")
             error_msg = str(e)
             if "QUOTA_EXHAUSTED" in error_msg:
-                argument = f"[API QUOTA EXHAUSTED] Cannot generate new argument. Please update your API keys in .env or wait for quota reset."
+                argument   = "[API_FAILURE] Quota exhausted — update API keys or wait for reset."
                 confidence = 0.0
             else:
-                argument = f"I maintain my position that the claim '{state.claim}' is {self.role.lower()}. (LLM call failed due to technical issue)"
+                argument   = (f"I maintain that the claim '{state.claim}' is unsupported. "
+                              f"(LLM error: technical issue)")
                 confidence = 0.5
-            
             return AgentResponse(
-                agent=self.role,
-                round=state.round,
-                argument=argument,
-                sources=[],
-                confidence=confidence
+                agent="CON", round=state.round,
+                argument=argument, sources=[], confidence=confidence,
+                timestamp=datetime.now().strftime("%H:%M:%S"),
             )
-    
+
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
-        # RAAD: Prioritize global evidence_sources for strict grounding
-        evidence_bundle = state.evidence_sources or state.con_evidence or []
+        evidence_bundle    = state.evidence_sources or state.con_evidence or []
         formatted_evidence = self._format_evidence(evidence_bundle)
-        
-        # ConAgent always challenges the latest ProAgent argument
-        pro_argument = state.pro_arguments[-1] if state.pro_arguments else "No Pro argument yet"
-        
+        pro_argument       = state.pro_arguments[-1] if state.pro_arguments else "No Pro argument yet."
+
         if round_num == 1:
-            return f"""You are ConAgent. Argue that the claim is FALSE.
+            return f"""You are ConAgent in a formal debate. Your role is to argue that the claim is FALSE.
 CLAIM: {state.claim}
-PRO SAID: {pro_argument}
-EVIDENCE: {formatted_evidence}
 
-TASK: Rebut the Pro argument using these sources. Cite URLs. Identify flaws. Be concise."""
+PRO ARGUMENT TO CHALLENGE:
+{pro_argument}
+
+EVIDENCE TO CITE:
+{formatted_evidence}
+
+YOUR TASK:
+Build the strongest possible case AGAINST this claim using the provided evidence.
+You MUST cite source URLs. Identify flaws in the Pro argument and present counter-evidence."""
         else:
-            latest_pro = state.pro_arguments[-1] if state.pro_arguments else ""
-            feedback = f"\n\nFEEDBACK: {state.verification_feedback}\n" if state.verification_feedback else ""
-                
-            return f"""You are ConAgent. CLAIM: {state.claim} is FALSE.
-PRO LATEST: {latest_pro}{feedback}
-OUR PREVIOUS: {state.con_arguments[-1] if state.con_arguments else ""}
+            feedback_section = (
+                f"\n\nVERIFICATION FEEDBACK:\n{state.verification_feedback}\n"
+                if state.verification_feedback else ""
+            )
+            return f"""You are ConAgent. Maintain that the following claim is FALSE: {state.claim}
 
-TASK: Debunk the Pro rebuttal and reinforce your case using: {formatted_evidence}. Be brief."""
+YOUR PREVIOUS ARGUMENT:
+{state.con_arguments[-1] if state.con_arguments else "Establishing initial case."}
+
+LATEST PRO REBUTTAL:
+{pro_argument}{feedback_section}
+
+YOUR TASK:
+Address their latest points while reinforcing your own case.
+Use counter-evidence from these sources:
+{formatted_evidence}"""
