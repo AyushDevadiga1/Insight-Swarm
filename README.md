@@ -22,7 +22,8 @@ InsightSwarm leverages **Retrieval-Augmented Adversarial Debate (RAAD)** to veri
 - ✅ **Mid-Debate Verification Gates** - Blocks hallucinated sources in real-time
 - ✅ **Composite Trust Scoring** - Domain authority + verification rate + consensus
 - ✅ **LangGraph State Machine** - Resumable debates with SQLite checkpointing
-- ✅ **Streaming Updates** - Real-time UI progress with Streamlit
+- ✅ **Real-Time Streaming** - Low-latency SSE debate progress
+- ✅ **React + FastAPI Stack** - High-performance glassmorphism UI
 - ✅ **Heterogeneous Models** - Different providers for genuine adversarial stance
 
 ### **🔬 Advanced Intelligence**
@@ -53,8 +54,8 @@ InsightSwarm leverages **Retrieval-Augmented Adversarial Debate (RAAD)** to veri
 ```mermaid
 graph TB
     subgraph "🎨 User Interface"
-        UI[Streamlit Web App]
-        CLI[Command Line Interface]
+        UI[React/Vite Frontend]
+        API[FastAPI Backend]
     end
     
     subgraph "🧠 Orchestration Layer"
@@ -152,8 +153,8 @@ sequenceDiagram
 ```mermaid
 graph TB
     subgraph "User Interface Layer"
-        UI[Streamlit Web App]
-        CLI[Command Line Interface]
+        UI[React/Vite Glassmorphism]
+        API[FastAPI REST Wrapper]
     end
     
     subgraph "Orchestration Layer"
@@ -541,8 +542,13 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your API keys
 
-# 5. Run the app
-streamlit run app.py
+# 5. Run the Backend
+python -m uvicorn api.server:app --host 127.0.0.1 --port 8000
+
+# 6. Run the Frontend (New tab)
+cd frontend
+npm install
+npm run dev
 ```
 
 ---
@@ -602,20 +608,23 @@ LANGCHAIN_API_KEY=lsv2_pt_your_key_here
 
 ## 💻 Usage
 
-### **Web Interface (Recommended)**
+### **Modern Web Interface (FastAPI + React)**
 
-```bash
-streamlit run app.py
-```
+1. **Start Backend**:
+   ```bash
+   python -m uvicorn api.server:app --host 127.0.0.1 --port 8000
+   ```
+2. **Start Frontend**:
+   ```bash
+   cd frontend && npm run dev
+   ```
 
-Open your browser to `http://localhost:8501`
+Open your browser to `http://localhost:5173` (Frontend)
 
-**Features:**
-- Real-time debate progress visualization
-- Interactive verdict display with confidence breakdown
-- Source verification results
-- User feedback (thumbs up/down)
-- Debate history with cache indicators
+**Intelligence Dashboard Features:**
+- **Live Health Monitoring**: `/api/status` shows latency for all 4 LLM providers.
+- **SSE Streaming**: Sub-second updates for agent reasoning.
+- **Unified Progress Bar**: Multi-stage tracking (Decomposition -> Search -> Debate -> Verdict).
 
 ### **Command Line Interface**
 
@@ -681,6 +690,15 @@ flowchart LR
     
     style VERIFIED fill:#4CAF50,color:#fff
 ```
+
+### **Monitoring & Health APIs**
+The system provides granular observability into provider health:
+
+| Endpoint | Method | Result |
+|----------|--------|--------|
+| `/health` | `GET` | Simple liveness check |
+| `/api/status` | `GET` | **Live Latency Pings** + Quota checks for all LLMs |
+| `/stream` | `GET` | SSE Debate stream |
 
 **Layer Details:**
 
@@ -954,7 +972,7 @@ python -c "from src.utils.api_key_manager import get_api_key_manager; print(get_
 
 ```bash
 # Use different port
-streamlit run app.py --server.port 8502
+python -m uvicorn api.server:app --port 8001
 ```
 
 #### **4. Semantic Cache Not Working**
