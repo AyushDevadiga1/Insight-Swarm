@@ -131,47 +131,55 @@ def health() -> Dict[str, str]:
 
 
 @app.get("/api/status")
-def api_status() -> Dict[str, Any]:
+async def api_status() -> Dict[str, Any]:
     """Return live health status for all configured LLM providers."""
     from src.monitoring.api_status import get_health_monitor
     monitor = get_health_monitor()
-    return monitor.get_status() if monitor else {}
+    return await monitor.get_status() if monitor else {}
 
 
 @app.get("/stream")
 async def stream_debate(claim: str, request: Request):
     """SSE endpoint for real-time debate progress."""
-    from main import validate_claim
+    import asyncio, threading, queue as _queue
+
     valid, err_msg = validate_claim(claim.strip())
     if not valid:
-        async def error_gen():
-            yield f"event: error\ndata: {json.dumps({'message': err_msg})}\n\n"
-        return StreamingResponse(error_gen(), media_type="text/event-stream")
+        async def err():
+            yield f"event: error\ndata: {json.dumps({'type':'VALIDATION','message':err_msg})}\n\n"
+        return StreamingResponse(err(), media_type="text/event-stream")
 
-    async def event_generator():
-        from src.orchestration.debate import get_orchestrator
-        orchestrator = get_orchestrator()
-        
-        try:
-            async for event in orchestrator.stream(claim.strip(), str(uuid.uuid4())):
-                if await request.is_disconnected():
+    async def generate():
+        q = _queue.Queue()
+        def run():
+            try:
+                orch = get_orchestrator()
+                for event_type, state in orch.stream(claim.strip(), str(uuid.uuid4())):
+                    raw = _state_to_dict(state)
+                    q.put({"type": event_type, "data": _normalise(raw)})
+            except Exception as e:
+                logger.exception("Stream thread failed")
+                q.put({"type": "error", "data": {"message": str(e)}})
+            finally:
+                q.put(None)  # sentinel
+
+        threading.Thread(target=run, daemon=True).start()
+
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                # Use a timeout so we can check for is_disconnected
+                item = await asyncio.get_event_loop().run_in_executor(None, q.get, True, 1.0)
+                if item is None:
+                    yield f"event: done\ndata: {{\"message\":\"complete\"}}\n\n"
                     break
-                yield f"event: {event['type']}\ndata: {json.dumps(event['data'])}\n\n"
-        except Exception as e:
-            logger.exception("Stream failed")
-            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
-        
-        yield "event: done\ndata: {\"message\": \"stream complete\"}\n\n"
+                yield f"event: {item['type']}\ndata: {json.dumps(item['data'])}\n\n"
+            except _queue.Empty:
+                continue
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        }
-    )
+    return StreamingResponse(generate(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/verify")
