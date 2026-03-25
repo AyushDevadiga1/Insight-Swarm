@@ -129,7 +129,7 @@ export function useSSE(claim, enabled) {
     });
 
     // ── error event — backend-emitted error ─────────────────────────────────
-    es.addEventListener('error_event', (e) => {
+    es.addEventListener('error', (e) => {
       try {
         stopFlushTimer();
         setError(JSON.parse(e.data));
