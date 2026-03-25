@@ -1,7 +1,9 @@
 """
 Moderator - Analyzes debate quality and produces reasoned verdicts using structured outputs.
+Merge conflicts resolved: HEAD version kept. OpenRouter/Claude override removed.
+Uses self.preferred_provider (default: gemini) — set by orchestrator.
 """
-from typing import List, Dict, Any, Optional
+from typing import Optional
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.core.models import ModeratorVerdict
 from src.llm.client import FreeLLMClient, RateLimitError
@@ -9,27 +11,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Maximum characters per argument block when the full transcript is used.
-# When a debate summary is available the Moderator only sees the final round
-# verbatim so this cap mainly protects the no-summary path.
-_MAX_ARG_CHARS = 600
+# Cap argument length in prompt to prevent context overflow
+_MAX_ARG_CHARS = 800
 
 
 class Moderator(BaseAgent):
     """
-    Agent that analyses the debate and produces a verdict.
-    Uses analytical prompting and Pydantic structured output.
+    Analyses the debate and produces a structured verdict.
+    Uses low temperature (0.2) for analytical consistency.
     """
-<<<<<<< HEAD
 
-    def __init__(self, llm_client: FreeLLMClient):
-=======
-    
     def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
->>>>>>> origin/main
         super().__init__(llm_client)
-        self.role = "MODERATOR"
-        self.preferred_provider = preferred_provider or "openrouter"
+        self.role               = "MODERATOR"
+        # Default to gemini for reasoning quality; orchestrator can override
+        self.preferred_provider = preferred_provider or "gemini"
 
     def generate(self, state: DebateState) -> AgentResponse:
         """Analyse complete debate and produce reasoned verdict."""
@@ -38,85 +34,82 @@ class Moderator(BaseAgent):
         prompt = self._build_prompt(state, state.round)
 
         try:
-<<<<<<< HEAD
+            # Use the provider configured by the orchestrator — no hardcoded override
             result = self.client.call_structured(
                 prompt=prompt,
                 output_schema=ModeratorVerdict,
                 temperature=0.2,
-=======
-            # Force Claude 3.5 Sonnet via OpenRouter for the Moderator
-            # but allow fallback to others if needed
-            model_override = None
-            if self.client.openrouter_available:
-                model_override = "anthropic/claude-3.5-sonnet"
-
-            # Use call_structured with the ModeratorVerdict schema
-            result = self.client.call_structured(
-                prompt=prompt,
-                output_schema=ModeratorVerdict,
-                temperature=0.2,  # Very low temperature for analytical consistency
-                preferred_provider="openrouter",
-                model=model_override
->>>>>>> origin/main
+                preferred_provider=self.preferred_provider,
             )
             self.call_count += 1
 
-            # ── Composite confidence formula ───────────────────────────────
-            # (arg_quality * 0.3) + (avg_ver_rate * 0.3) + (avg_trust * 0.2) + (consensus * 0.2)
+            # ── Composite confidence formula ──────────────────────────────────
+            # Weights: argument quality 30%, source verification 30%,
+            #          source trust 20%, consensus pre-check 20%
 
             arg_quality = 0.5
             if result.metrics and "argument_quality" in result.metrics:
-                raw = result.metrics["argument_quality"]
-                arg_quality = raw / 100.0 if raw > 1 else raw
+                raw         = result.metrics["argument_quality"]
+                arg_quality = raw / 100.0 if raw > 1 else float(raw)
 
             pro_rate     = state.pro_verification_rate or 0.0
             con_rate     = state.con_verification_rate or 0.0
             avg_ver_rate = (pro_rate + con_rate) / 2
 
-            # Trust scores surfaced by FactChecker
+            # Trust scores from FactChecker results
             trust_scores = []
-            if state.metrics and "verification_results" in state.metrics:
-                for r in state.metrics["verification_results"]:
-                    if r.get("status") == "VERIFIED":
-                        trust_scores.append(r.get("trust_score", 0.5))
+            ver_results  = state.verification_results or []
+            for r in ver_results:
+                if isinstance(r, dict) and r.get("status") == "VERIFIED":
+                    trust_scores.append(float(r.get("trust_score", 0.5)))
             avg_trust = sum(trust_scores) / len(trust_scores) if trust_scores else 0.5
 
             consensus_score = 0.5
             if state.metrics and "consensus" in state.metrics:
                 cd = state.metrics["consensus"]
                 if cd.get("verdict") == result.verdict:
-                    consensus_score = cd.get("score", 0.8)
+                    consensus_score = float(cd.get("score", 0.8))
                 elif cd.get("verdict") == "DEBATE":
                     consensus_score = 0.5
                 else:
                     consensus_score = 0.2
 
             composite = (
-                arg_quality      * 0.3 +
-                avg_ver_rate     * 0.3 +
-                avg_trust        * 0.2 +
-                consensus_score  * 0.2
+                arg_quality     * 0.3 +
+                avg_ver_rate    * 0.3 +
+                avg_trust       * 0.2 +
+                consensus_score * 0.2
             )
+            # Clamp to [0, 1]
+            composite = max(0.0, min(1.0, composite))
 
             final_metrics = result.metrics or {}
             final_metrics["confidence_breakdown"] = {
-                "argument_quality_weight": 0.3, "argument_quality_score": arg_quality,
-                "verification_weight": 0.3,     "verification_score": avg_ver_rate,
-                "trust_weight": 0.2,            "trust_score": avg_trust,
-                "consensus_weight": 0.2,        "consensus_score": consensus_score,
+                "argument_quality_weight": 0.3,  "argument_quality_score": arg_quality,
+                "verification_weight":     0.3,  "verification_score":     avg_ver_rate,
+                "trust_weight":            0.2,  "trust_score":            avg_trust,
+                "consensus_weight":        0.2,  "consensus_score":        consensus_score,
             }
+
+            reasoning = result.reasoning or ""
+            if len(reasoning) > 1500:
+                reasoning = reasoning[:1497] + "..."
 
             return AgentResponse(
                 agent="MODERATOR",
                 round=state.round,
-                argument=result.reasoning[:500] + "..." if len(result.reasoning) > 500 else result.reasoning,
+                argument=reasoning[:500] + "..." if len(reasoning) > 500 else reasoning,
                 sources=[],
                 confidence=float(composite),
                 verdict=result.verdict,
-                reasoning=result.reasoning,
+                reasoning=reasoning,
                 metrics=final_metrics,
             )
 
+        except RateLimitError as e:
+            logger.error(f"Moderator rate limited: {e}")
+            state.moderator_reasoning = str(e)
+            return self._fallback_verdict(state)
         except Exception as e:
             logger.error(f"Moderator failed: {e}")
             state.moderator_reasoning = str(e)
@@ -125,87 +118,106 @@ class Moderator(BaseAgent):
     def _fallback_verdict(self, state: DebateState) -> AgentResponse:
         logger.warning("Moderator fallback triggered.")
         reason = state.moderator_reasoning or "Unknown error"
-        if any(kw in reason.upper() for kw in ("QUOTA_EXHAUSTED", "429", "RATE LIMIT")):
-            verdict  = "RATE_LIMITED"
-            argument = "All LLM quotas exhausted — verification cannot proceed."
+        if any(kw in reason.upper() for kw in ("QUOTA_EXHAUSTED", "429", "RATE LIMIT", "RATE_LIMIT")):
+            verdict    = "RATE_LIMITED"
+            argument   = "All LLM quotas exhausted — verification cannot proceed."
             confidence = 0.0
         else:
-            verdict  = "SYSTEM_ERROR"
-            argument = "A technical interruption occurred in the moderation protocol."
+            verdict    = "SYSTEM_ERROR"
+            argument   = "A technical interruption occurred in the moderation protocol."
             confidence = 0.0
 
         return AgentResponse(
-            agent="MODERATOR", round=state.round,
-            argument=argument, sources=[],
-            confidence=confidence, verdict=verdict,
-            reasoning=f"System fallback: {reason}",
+            agent="MODERATOR",
+            round=state.round,
+            argument=argument,
+            sources=[],
+            confidence=confidence,
+            verdict=verdict,
+            reasoning=f"System fallback triggered: {reason}",
             metrics={"credibility": 0.5, "balance": 0.5},
         )
 
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
-        # ── Context compression (fixes R-34 / NEW-04) ─────────────────────
-        # When a summary is available (generated by the Summarizer node after
-        # round 2), use it to represent earlier rounds and only show the final
-        # round verbatim.  This prevents the Moderator prompt from exceeding
-        # Groq's processing window on long debates.
+        has_sources = bool(
+            (state.pro_sources and any(s for s in state.pro_sources)) or
+            (state.con_sources and any(s for s in state.con_sources))
+        )
+        pro_ver_rate = state.pro_verification_rate or 0.0
+        con_ver_rate = state.con_verification_rate or 0.0
+        no_sources   = not has_sources or (pro_ver_rate == 0.0 and con_ver_rate == 0.0)
+
+        # Context compression: use summary for long debates, full transcript for short ones
         if state.summary:
-            pro_final = state.pro_arguments[-1][:_MAX_ARG_CHARS] if state.pro_arguments else "No argument."
-            con_final = state.con_arguments[-1][:_MAX_ARG_CHARS] if state.con_arguments else "No argument."
-            pro_args = (
-                f"[DEBATE SUMMARY — earlier rounds]\n{state.summary}\n\n"
+            pro_final = (state.pro_arguments[-1] if state.pro_arguments else "No argument.")[:_MAX_ARG_CHARS]
+            con_final = (state.con_arguments[-1] if state.con_arguments else "No argument.")[:_MAX_ARG_CHARS]
+            pro_args  = (
+                f"[EARLIER ROUNDS SUMMARY]\n{state.summary}\n\n"
                 f"[FINAL PRO ARGUMENT — Round {len(state.pro_arguments)}]\n{pro_final}"
             )
-            con_args = (
+            con_args  = (
                 f"[See summary above for earlier rounds]\n\n"
                 f"[FINAL CON ARGUMENT — Round {len(state.con_arguments)}]\n{con_final}"
             )
         else:
-            # Full transcript for short debates (rounds 1-2)
             pro_args = "\n\n".join(
                 f"Round {i+1}: {arg[:_MAX_ARG_CHARS]}"
                 for i, arg in enumerate(state.pro_arguments)
-            )
+            ) or "No Pro arguments recorded."
             con_args = "\n\n".join(
                 f"Round {i+1}: {arg[:_MAX_ARG_CHARS]}"
                 for i, arg in enumerate(state.con_arguments)
+            ) or "No Con arguments recorded."
+
+        verification_section = ""
+        if state.pro_verification_rate is not None:
+            verification_section = (
+                f"\nSOURCE VERIFICATION SUMMARY:\n"
+                f"- ProAgent source verification rate: {pro_ver_rate:.1%}\n"
+                f"- ConAgent source verification rate: {con_ver_rate:.1%}\n"
             )
 
-        verification_summary = ""
-        if state.pro_verification_rate is not None:
-            pro_rate = state.pro_verification_rate
-            con_rate = state.con_verification_rate or 0.0
-            verification_summary = (
-                f"\nSOURCE VERIFICATION SUMMARY:\n"
-                f"- ProAgent verification rate: {pro_rate:.1%}\n"
-                f"- ConAgent verification rate: {con_rate:.1%}\n"
-            )
+        zero_source_guidance = ""
+        if no_sources:
+            zero_source_guidance = """
+IMPORTANT — NO VERIFIED SOURCES:
+Neither agent provided verifiable URLs, or all sources failed verification.
+This may mean: (a) agents used general knowledge without citing URLs, 
+(b) all cited URLs were hallucinated or inaccessible, or (c) a network issue occurred.
+In this case:
+- Do NOT automatically return INSUFFICIENT EVIDENCE.
+- Evaluate the QUALITY of the arguments themselves.
+- If the arguments are logically strong and consistent with well-known facts,
+  return TRUE/FALSE/PARTIALLY TRUE with moderate confidence (0.3-0.6).
+- Only return INSUFFICIENT EVIDENCE if the claim is genuinely ambiguous 
+  AND the arguments provide no meaningful signal.
+"""
 
         return f"""You are the impartial Moderator in a formal fact-checking debate.
+
 CLAIM: {state.claim}
 
-PRO ARGUMENTS (Supporting Claim):
+PRO ARGUMENTS (Arguing the claim is TRUE):
 {pro_args}
 
-CON ARGUMENTS (Opposing Claim):
+CON ARGUMENTS (Arguing the claim is FALSE):
 {con_args}
-{verification_summary}
+{verification_section}{zero_source_guidance}
 YOUR TASK:
-Analyse debate quality, assess source credibility, identify logical fallacies, and determine a final verdict.
-Be rigorous, objective, and neutral.
+Analyse debate quality, assess argument strength, identify logical fallacies, and determine a final verdict.
+Be rigorous, objective, and neutral. Make a DEFINITIVE call — avoid vague hedging.
 
-GUIDELINES FOR VERDICT:
-- Prefer 'TRUE' or 'FALSE' if a clear preponderance of verifiable evidence exists.
-- Use 'PARTIALLY TRUE' for multi-faceted claims with mixed evidence.
-- ONLY use 'INSUFFICIENT EVIDENCE' if NO verifiable sources are found or providers totally failed.
-- Avoid wait-and-see hesitation; make a definitive call based on available data.
+VERDICT GUIDELINES:
+- Use 'TRUE' or 'FALSE' if one side clearly has stronger, more credible arguments.
+- Use 'PARTIALLY TRUE' for claims that are true in some contexts but false in others.
+- Use 'INSUFFICIENT EVIDENCE' ONLY if both sides provide no meaningful signal whatsoever.
+- NEVER use 'INSUFFICIENT EVIDENCE' just because no URLs were verified — evaluate argument quality.
 
-HEALTH & SAFETY: If the claim involves medical treatments, cures, or health practices that could
-cause harm if followed, prefix your reasoning with exactly:
-"SAFETY NOTE: Consult a medical professional before acting on health-related claims."
+SAFETY NOTE: If the claim involves medical treatments or health practices, prefix your 
+reasoning with: "SAFETY NOTE: Consult a medical professional before acting on health-related claims."
 
-STRUCTURED OUTPUT REQUIREMENTS:
-Include in your metrics dictionary:
-- "argument_quality": float 0.0-1.0 — logical strength of arguments
-- "logical_fallacies": list of any fallacies detected
-- "credibility_score": float 0.0-1.0 — overall evidence credibility
+STRUCTURED OUTPUT — include in your metrics dictionary:
+- "argument_quality": float 0.0-1.0 (logical strength of arguments overall)
+- "logical_fallacies": list of any fallacies detected (empty list if none)
+- "credibility_score": float 0.0-1.0 (evidence credibility)
 """

@@ -49,6 +49,7 @@ class SemanticCache:
             self.enabled = False
         self._model        = None
         self._model_failed = False
+        self._model_fail_count = 0
         self._init_db()
 
     # ── Model lazy-load ───────────────────────────────────────────────────────
@@ -67,8 +68,12 @@ class SemanticCache:
             try:
                 self._model = SentenceTransformer("all-MiniLM-L6-v2",
                                                   local_files_only=self.local_only)
+                self._model_fail_count = 0
             except Exception:
-                self._model_failed = True
+                self._model_fail_count += 1
+                if self._model_fail_count >= 3:
+                    self._model_failed = True
+                    logger.error("Semantic cache model failed 3 times — disabling permanently")
                 raise
         return self._model
 
