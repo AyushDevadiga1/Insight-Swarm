@@ -1,195 +1,180 @@
 """
-API Key Manager - Centralized API key validation, rotation, and security.
+FIX FILE 5 — src/utils/api_key_manager.py  (full replacement)
+Fixes:
+  P1-2  degraded=True blocked ALL providers — removed; degraded is now informational only
+  P1-3  _collect_keys only split plural env var names — now always tries comma-split
+  P3-1  get_api_key_manager() singleton TOCTOU race — fixed with module-level lock
+  P3-6  Keys with surrounding quotes rejected — now strips quotes
 
-Handles all API key operations with proper validation, fallbacks, and security.
+Drop-in replacement for src/utils/api_key_manager.py.
 """
 
 import os
 import logging
 import time
 import hashlib
-from typing import Dict, List, Optional, Tuple, Any, Callable
-from dataclasses import dataclass
+import threading
+from typing import Dict, List, Optional, Any, Callable
+from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+
 class APIKeyStatus(Enum):
-    VALID = "valid"
-    INVALID = "invalid"
-    MISSING = "missing"
+    VALID        = "valid"
+    INVALID      = "invalid"
+    MISSING      = "missing"
     RATE_LIMITED = "rate_limited"
-    EXPIRED = "expired"
+    EXPIRED      = "expired"
+
 
 @dataclass
 class APIKeyInfo:
-    """Information about an API key"""
-    key_hash: str  # SHA256 hash for logging (never store actual key)
-    provider: str
-    status: APIKeyStatus
-    last_used: float
+    key_hash:             str
+    provider:             str
+    status:               APIKeyStatus
+    last_used:            float
     consecutive_failures: int
-    cooldown_until: float
+    cooldown_until:       float
+
 
 class APIKeyManager:
     """
     Centralized API key management with validation, rotation, and security.
-
-    Features:
-    - API key validation on startup
-    - Automatic key rotation on failures
-    - Rate limit handling
-    - Security (never logs actual keys)
-    - Health monitoring
+    P1-2 fix: degraded flag is purely informational; get_working_key() always
+              tries per-provider instead of returning None for everything.
+    P3-1 fix: singleton creation protected by module-level lock in get_api_key_manager().
     """
 
     def __init__(self):
-        self.degraded = False
+        self.degraded        = False
         self.degraded_reason = ""
         self.keys: Dict[str, List[APIKeyInfo]] = {}
-        self._reverse_lookup: Dict[str, str] = {}  # key_hash -> actual_key (O(1) lookup #17)
+        self._reverse_lookup: Dict[str, str]   = {}
         self._load_and_validate_keys()
-        self._health_check_interval = 300  # 5 minutes
-        self._last_health_check = 0
 
     def _load_and_validate_keys(self):
-        """Load and validate all API keys on startup"""
-        logger.info("🔐 Initializing API Key Manager...")
+        logger.info("Initializing API Key Manager...")
 
-        # Define all supported API keys
         key_configs = {
             "groq": {
-                "env_vars": ["GROQ_API_KEYS", "GROQ_API_KEY"],
+                "env_vars":   ["GROQ_API_KEYS", "GROQ_API_KEY"],
                 "validators": [self._validate_groq_key],
-                "required": True
+                "required":   True,
             },
             "gemini": {
-                "env_vars": ["GEMINI_API_KEYS", "GEMINI_API_KEY"],
+                "env_vars":   ["GEMINI_API_KEYS", "GEMINI_API_KEY"],
                 "validators": [self._validate_gemini_key],
-                "required": False   # Gemini is a fallback provider, not mandatory
+                "required":   False,
             },
             "tavily": {
-                "env_vars": ["TAVILY_API_KEY"],
+                "env_vars":   ["TAVILY_API_KEY"],
                 "validators": [self._validate_tavily_key],
-                "required": False
+                "required":   False,
             },
             "cerebras": {
-                "env_vars": ["CEREBRAS_API_KEY"],
+                "env_vars":   ["CEREBRAS_API_KEY"],
                 "validators": [self._validate_cerebras_key],
-                "required": False
+                "required":   False,
             },
             "openrouter": {
-                "env_vars": ["OPENROUTER_API_KEY"],
+                "env_vars":   ["OPENROUTER_API_KEY"],
                 "validators": [self._validate_openrouter_key],
-                "required": False
-            }
+                "required":   False,
+            },
         }
 
-        all_keys_loaded = True
+        missing_required = []
 
         for provider, config in key_configs.items():
-            keys = self._collect_keys(provider, config["env_vars"])
-            if not keys:
+            raw_keys = self._collect_keys(provider, config["env_vars"])
+            if not raw_keys:
                 if config["required"]:
-                    logger.error(f"❌ Required API keys missing for {provider}")
-                    all_keys_loaded = False
+                    logger.error("Required API keys missing for %s", provider)
+                    missing_required.append(provider)
                 else:
-                    logger.warning(f"⚠️ Optional API keys missing for {provider}")
+                    logger.warning("Optional API keys missing for %s", provider)
+                self.keys[provider] = []
                 continue
 
-            # Validate each key
             valid_keys = []
-            for key in keys:
+            for key in raw_keys:
                 key_info = self._validate_key(provider, key, config["validators"])
                 if key_info.status == APIKeyStatus.VALID:
                     valid_keys.append(key_info)
-                    logger.info(f"✅ {provider} API key validated")
+                    logger.info("%s API key validated", provider)
                 else:
-                    logger.warning(f"⚠️ {provider} API key invalid: {key_info.status.value}")
+                    logger.warning("%s API key invalid: %s", provider, key_info.status.value)
 
             self.keys[provider] = valid_keys
 
-            if not valid_keys:
-                if config["required"]:
-                    logger.error(f"❌ No valid API keys for required provider {provider}")
-                    all_keys_loaded = False
-                else:
-                    logger.warning(f"⚠️ No valid API keys for optional provider {provider}")
+            if not valid_keys and config["required"]:
+                logger.error("No valid API keys for required provider %s", provider)
+                missing_required.append(provider)
 
-        if not all_keys_loaded:
-            self.degraded = True
+        if missing_required:
+            # P1-2 fix: mark degraded for logging, but do NOT block providers that are available
+            self.degraded        = True
             self.degraded_reason = (
-                "Required API keys missing or invalid. "
-                "Check GROQ_API_KEY in .env file. "
-                "See README.md for setup instructions."
+                f"Required providers missing or invalid: {missing_required}. "
+                "Check .env file. See README for setup."
             )
-            logger.error(f"⚠️ APIKeyManager degraded: {self.degraded_reason}")
+            logger.warning("APIKeyManager degraded (informational): %s", self.degraded_reason)
         else:
-            logger.info("✅ API Key Manager initialized successfully")
+            logger.info("API Key Manager initialized successfully")
 
     def _collect_keys(self, provider: str, env_vars: List[str]) -> List[str]:
-        """Collect API keys from environment variables"""
+        """
+        P1-3 fix: always attempt comma-split regardless of env var name.
+        P3-6 fix: strip surrounding quotes that Windows sometimes adds.
+        """
         keys = []
-
         for env_var in env_vars:
             value = os.getenv(env_var)
-            if value:
-                # Handle comma-separated lists
-                if env_var.endswith("S"):  # Plural form
-                    keys.extend([k.strip() for k in value.split(",") if k.strip()])
-                else:
-                    keys.append(value.strip())
-
-        # Remove duplicates while preserving order
-        seen = set()
-        ordered = []
-        for key in keys:
-            if key in seen:
+            if not value:
                 continue
-            seen.add(key)
-            ordered.append(key)
-        return ordered
+            # Always try comma-split (handles both GROQ_API_KEY and GROQ_API_KEYS)
+            parts = [p.strip().strip("\"'") for p in value.split(",")]   # P3-6 fix
+            keys.extend(p for p in parts if p)
+
+        # Deduplicate, preserve order
+        seen: set = set()
+        unique = []
+        for k in keys:
+            if k not in seen:
+                seen.add(k)
+                unique.append(k)
+        return unique
 
     def _validate_key(self, provider: str, key: str, validators: List[Callable]) -> APIKeyInfo:
-        """Validate a single API key"""
-        key_hash = hashlib.sha256(key.encode()).hexdigest()[:16]  # Short hash for logging
-
+        key_hash = hashlib.sha256(key.encode()).hexdigest()[:16]
         key_info = APIKeyInfo(
-            key_hash=key_hash,
-            provider=provider,
-            status=APIKeyStatus.INVALID,
-            last_used=0,
-            consecutive_failures=0,
-            cooldown_until=0
+            key_hash=key_hash, provider=provider, status=APIKeyStatus.INVALID,
+            last_used=0, consecutive_failures=0, cooldown_until=0,
         )
-
-        # Run all validators
         for validator in validators:
             try:
                 if validator(key):
                     key_info.status = APIKeyStatus.VALID
-                    # Store in reverse lookup for O(1) retrieval (#17)
                     self._reverse_lookup[key_hash] = key
                     break
             except Exception as e:
-                logger.debug(f"Key validation failed for {provider}: {e}")
-                continue
-
+                logger.debug("Key validation failed for %s: %s", provider, e)
         return key_info
 
+    # ── Validators ────────────────────────────────────────────────────────────
+
     def _validate_groq_key(self, key: str) -> bool:
-        """Validate Groq API key format and optionally perform liveness probe"""
         valid_format = len(key) >= 30 and key.startswith("gsk_")
         if not valid_format:
             return False
-            
         if os.getenv("ENABLE_API_LIVENESS_PROBES", "false").lower() == "true":
             try:
                 import requests
                 r = requests.get(
                     "https://api.groq.com/openai/v1/models",
-                    headers={"Authorization": f"Bearer {key}"},
-                    timeout=5
+                    headers={"Authorization": f"Bearer {key}"}, timeout=5,
                 )
                 return r.status_code == 200
             except Exception:
@@ -197,17 +182,15 @@ class APIKeyManager:
         return True
 
     def _validate_gemini_key(self, key: str) -> bool:
-        """Validate Gemini API key format and optionally perform liveness probe"""
         valid_format = len(key) >= 30 and key.startswith("AIza")
         if not valid_format:
             return False
-            
         if os.getenv("ENABLE_API_LIVENESS_PROBES", "false").lower() == "true":
             try:
                 import requests
                 r = requests.get(
                     f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
-                    timeout=5
+                    timeout=5,
                 )
                 return r.status_code == 200
             except Exception:
@@ -215,165 +198,135 @@ class APIKeyManager:
         return True
 
     def _validate_tavily_key(self, key: str) -> bool:
-        """Validate Tavily API key format"""
-        return len(key) >= 20  # Tavily keys are typically long
+        return len(key) >= 20
 
     def _validate_cerebras_key(self, key: str) -> bool:
-        """Validate Cerebras API key format"""
         return len(key) >= 30 and key.startswith("csk-")
 
     def _validate_openrouter_key(self, key: str) -> bool:
-        """Validate OpenRouter API key format"""
         return len(key) >= 30 and key.startswith("sk-or-")
+
+    # ── Key retrieval ─────────────────────────────────────────────────────────
 
     def get_working_key(self, provider: str) -> Optional[str]:
         """
-        Get a working API key for the provider, with automatic rotation.
-
-        Returns the actual key string for use, or None if no working keys available.
+        P1-2 fix: no longer returns None just because self.degraded is True.
+        Each provider is evaluated independently.
         """
-        if getattr(self, 'degraded', False):
-            logger.warning(f"APIKeyManager is degraded: {self.degraded_reason}")
-            return None
-            
         if provider not in self.keys:
             return None
 
         now = time.time()
-        
-        # ADD auto-recovery block here:
+
+        # Auto-recover rate-limited keys whose cooldown has expired
         for ki in self.keys[provider]:
             if ki.status == APIKeyStatus.RATE_LIMITED and now >= ki.cooldown_until:
                 ki.status = APIKeyStatus.VALID
                 ki.consecutive_failures = max(0, ki.consecutive_failures - 1)
-                logger.info(f"Auto-recovered {provider} key from cooldown")
+                logger.info("Auto-recovered %s key from cooldown", provider)
 
-        available_keys = []
+        available = [
+            ki for ki in self.keys[provider]
+            if ki.status == APIKeyStatus.VALID and now >= ki.cooldown_until
+        ]
 
-        for key_info in self.keys[provider]:
-            if key_info.status == APIKeyStatus.VALID and now >= key_info.cooldown_until:
-                available_keys.append(key_info)
-
-        if not available_keys:
-            logger.warning(f"⚠️ No available API keys for {provider}")
+        if not available:
+            logger.warning("No available API keys for %s", provider)
             return None
 
-        # Rotate keys by least-recently-used to spread load
-        key_info = sorted(available_keys, key=lambda k: k.last_used)[0]
+        # Least-recently-used rotation
+        key_info          = sorted(available, key=lambda k: k.last_used)[0]
         key_info.last_used = now
-
-        # Get the actual key from environment (we only store hash)
         return self._get_actual_key(provider, key_info.key_hash)
 
     def _get_actual_key(self, provider: str, key_hash: str) -> Optional[str]:
-        """Retrieve actual key by hash (reverse lookup - O(1) #17)"""
         return self._reverse_lookup.get(key_hash)
 
     def report_key_failure(self, provider: str, key_hash: str, error: Exception):
-        """Report that an API key failed"""
         if provider not in self.keys:
             return
-
         for key_info in self.keys[provider]:
-            if key_info.key_hash == key_hash:
-                key_info.consecutive_failures += 1
-                key_info.last_used = time.time()
+            if key_info.key_hash != key_hash:
+                continue
+            key_info.consecutive_failures += 1
+            key_info.last_used = time.time()
 
-                # Implement exponential backoff
-                error_text = str(error).lower()
-                
-                # Check for permanent "0 quota" errors which indicate account/config issues
-                is_rate_limit = "rate limit" in error_text or "resource_exhausted" in error_text or "429" in error_text
-                
-                if is_rate_limit:
-                    key_info.status = APIKeyStatus.RATE_LIMITED
-                    backoff_time = min(30 * (2 ** key_info.consecutive_failures), 300)  # Max 5 minutes
-                    key_info.cooldown_until = time.time() + backoff_time
-                    logger.warning(f"🚦 {provider} key rate limited, cooling down for {backoff_time}s")
-                elif "limit: 0" in error_text or "quota: 0" in error_text:
-                    # This is a permanent quota issue (account config), not transient
-                    key_info.status = APIKeyStatus.INVALID
-                    logger.error(f"❌ {provider} key has zero quota (account config issue)")
-                elif key_info.consecutive_failures >= 5:
-                    # After 5 consecutive transient failures, apply a long cooldown instead of permanent ban
-                    # This allows recovery when services become available again
-                    cooldown = 600  # 10 minute cooldown before retry
-                    key_info.status = APIKeyStatus.RATE_LIMITED
-                    key_info.cooldown_until = time.time() + cooldown
-                    logger.warning(f"⚠️ {provider} key cooling down for {cooldown}s after repeated failures (will retry)")
-                else:
-                    logger.warning(f"⚠️ {provider} key failed ({key_info.consecutive_failures}/5)")
+            error_text     = str(error).lower()
+            is_rate_limit  = any(kw in error_text for kw in
+                                 ("rate limit", "resource_exhausted", "429", "quota"))
+            is_zero_quota  = "limit: 0" in error_text or "quota: 0" in error_text
 
-                break
+            if is_zero_quota:
+                key_info.status = APIKeyStatus.INVALID
+                logger.error("%s key has zero quota (account config issue)", provider)
+            elif is_rate_limit:
+                key_info.status         = APIKeyStatus.RATE_LIMITED
+                backoff                 = min(30 * (2 ** key_info.consecutive_failures), 300)
+                key_info.cooldown_until = time.time() + backoff
+                logger.warning("%s key rate limited, cooling down for %ds", provider, backoff)
+            elif key_info.consecutive_failures >= 5:
+                key_info.status         = APIKeyStatus.RATE_LIMITED
+                key_info.cooldown_until = time.time() + 600
+                logger.warning("%s key cooling down 600s after repeated failures", provider)
+            else:
+                logger.warning("%s key failed (%d/5)", provider, key_info.consecutive_failures)
+            break
 
     def report_key_success(self, provider: str, key_hash: str):
-        """Report that an API key worked successfully"""
         if provider not in self.keys:
             return
-
         for key_info in self.keys[provider]:
             if key_info.key_hash == key_hash:
                 key_info.consecutive_failures = 0
-                key_info.status = APIKeyStatus.VALID
+                key_info.status               = APIKeyStatus.VALID
                 break
 
-    def reset_all_keys(self) -> None:
-        """Reset all keys to VALID state - call when you want to retry all providers (e.g. after a long pause)."""
-        now = time.time()
-        for provider, keys in self.keys.items():
-            for key_info in keys:
-                if key_info.status == APIKeyStatus.RATE_LIMITED:
-                    key_info.status = APIKeyStatus.VALID
-                    key_info.cooldown_until = 0
-                    key_info.consecutive_failures = 0
-        logger.info("🔄 All rate-limited keys have been reset - retrying all providers")
-
-    def get_health_status(self) -> Dict[str, Any]:
-        """Get comprehensive health status of all API keys"""
-        now = time.time()
-        status = {}
-
-        for provider, keys in self.keys.items():
-            provider_status = {
-                "total_keys": len(keys),
-                "valid_keys": 0,
-                "rate_limited_keys": 0,
-                "invalid_keys": 0,
-                "cooldown_keys": 0
-            }
-
-            for key_info in keys:
-                if key_info.status == APIKeyStatus.VALID and now >= key_info.cooldown_until:
-                    provider_status["valid_keys"] += 1
-                elif key_info.status == APIKeyStatus.RATE_LIMITED:
-                    provider_status["rate_limited_keys"] += 1
-                elif key_info.status == APIKeyStatus.INVALID:
-                    provider_status["invalid_keys"] += 1
-                elif now < key_info.cooldown_until:
-                    provider_status["cooldown_keys"] += 1
-
-            status[provider] = provider_status
-
-        return status
-
     def has_working_keys(self, provider: str) -> bool:
-        """Check if provider has any working keys available"""
         if provider not in self.keys:
             return False
-
         now = time.time()
         return any(
-            key_info.status == APIKeyStatus.VALID and now >= key_info.cooldown_until
-            for key_info in self.keys[provider]
+            ki.status == APIKeyStatus.VALID and now >= ki.cooldown_until
+            for ki in self.keys[provider]
         )
 
+    def reset_all_keys(self) -> None:
+        for keys in self.keys.values():
+            for ki in keys:
+                if ki.status == APIKeyStatus.RATE_LIMITED:
+                    ki.status               = APIKeyStatus.VALID
+                    ki.cooldown_until       = 0
+                    ki.consecutive_failures = 0
+        logger.info("All rate-limited keys reset")
 
-# Global instance
-_key_manager = None
+    def get_health_status(self) -> Dict[str, Any]:
+        now    = time.time()
+        status = {}
+        for provider, keys in self.keys.items():
+            ps = {"total_keys": len(keys), "valid_keys": 0,
+                  "rate_limited_keys": 0, "invalid_keys": 0, "cooldown_keys": 0}
+            for ki in keys:
+                if ki.status == APIKeyStatus.VALID and now >= ki.cooldown_until:
+                    ps["valid_keys"] += 1
+                elif ki.status == APIKeyStatus.RATE_LIMITED:
+                    ps["rate_limited_keys"] += 1
+                elif ki.status == APIKeyStatus.INVALID:
+                    ps["invalid_keys"] += 1
+                elif now < ki.cooldown_until:
+                    ps["cooldown_keys"] += 1
+            status[provider] = ps
+        return status
+
+
+# ── Singleton (P3-1 fix: double-checked locking) ─────────────────────────────
+_key_manager      = None
+_key_manager_lock = threading.Lock()   # module-level lock — created once safely
+
 
 def get_api_key_manager() -> APIKeyManager:
-    """Get global API key manager instance"""
     global _key_manager
     if _key_manager is None:
-        _key_manager = APIKeyManager()
+        with _key_manager_lock:
+            if _key_manager is None:   # second check inside lock
+                _key_manager = APIKeyManager()
     return _key_manager
