@@ -117,6 +117,7 @@ class SystemDiagnostics:
             print(f"  RSS Δ  : +{mb_after - mb_before:.1f} MB")
             print(f"  Peak   : {peak / 1024 / 1024:.1f} MB")
             print(f"  Groq   : {'✅' if client.groq_available else '❌'}")
+            print(f"  Gemini : {'✅' if client.gemini_available else '❌'}")
             print(f"  Cerebras: {'✅' if client.cerebras_available else '❌'}")
             print(f"  OpenRouter: {'✅' if client.openrouter_available else '❌'}")
 
