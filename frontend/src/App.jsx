@@ -38,7 +38,7 @@ import FeedbackPanel from './components/results/FeedbackPanel';
 import DebateArena from './components/debate/DebateArena';
 
 export default function App() {
-  const { claim, isRunning, result, error, sourceResults, setClaim, reset } = useDebateStore();
+  const { claim, isRunning, result, error, sourceResults, setClaim, reset, history } = useDebateStore();
 
   // Start the /api/status polling on mount
   useApiHealth();
@@ -67,7 +67,7 @@ export default function App() {
     <div className="app-shell">
       <Sidebar
         onExampleClick={(ex) => setClaim(ex)}
-        history={useDebateStore(s => s.history)}
+        history={history}
       />
 
       <main className="main-content">
