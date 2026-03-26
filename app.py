@@ -562,7 +562,8 @@ def render_sidebar() -> None:
             render_resource_monitor()
         
         st.markdown("---")
-        st.session_state.use_simulation = st.toggle("Simulation Mode (Offline Demo)", value=False, help="Use mock responses for testing the UI flow.")
+        # B4-P7 fix: do not assign toggle result manually — Streamlit already writes it to session_state
+        st.toggle("Simulation Mode (Offline Demo)", key="use_simulation", value=False, help="Use mock responses for testing the UI flow.")
 
 
 def render_progress(active: int) -> None:
@@ -833,11 +834,10 @@ def main() -> None:
             st.error(f"Invalid claim: {validation_err}")
             return None
 
-        # Prepare for background execution
         task_queue = get_task_queue()
-        task_id = f"debate_{st.session_state.thread_id}"
+        task_id    = f"debate_{st.session_state.thread_id}"
         st.session_state.task_id = task_id
-        
+
         if not st.session_state.progress_tracker:
             st.session_state.progress_tracker = ProgressTracker()
         tracker = st.session_state.progress_tracker
@@ -845,22 +845,36 @@ def main() -> None:
         use_sim = st.session_state.get("use_simulation", False)
 
         try:
-            # Create orchestrator with this specific tracker
             if use_sim:
-                from tests.sandbox.api_simulator import MockChaosClient, ChaosConfig
-                config = ChaosConfig(failure_rate=0.0, rate_limit_rate=0.0) # Clean demo
-                client = MockChaosClient(config)
-                orchestrator = DebateOrchestrator(llm_client=client, tracker=tracker)
+                # B3-P7-REMNANT fix: guard simulation import gracefully
+                try:
+                    from tests.sandbox.api_simulator import MockChaosClient, ChaosConfig
+                    config = ChaosConfig(failure_rate=0.0, rate_limit_rate=0.0)
+                    client = MockChaosClient(config)
+                    orchestrator = DebateOrchestrator(llm_client=client, tracker=tracker)
+                except ImportError:
+                    st.session_state.debate_error = (
+                        "Simulation mode unavailable — "
+                        "tests/sandbox/api_simulator.py not found. "
+                        "Disable Simulation Mode and retry."
+                    )
+                    st.session_state.is_running = False
+                    return None
             else:
-                orchestrator = DebateOrchestrator(tracker=tracker)
+                # B4-P8 fix: reuse cached orchestrator — only rebuild if not yet created
+                if "orchestrator" not in st.session_state or st.session_state.orchestrator is None:
+                    st.session_state.orchestrator = DebateOrchestrator()
+                orchestrator = st.session_state.orchestrator
+                orchestrator.set_tracker(tracker)
+
         except Exception as e:
             st.session_state.debate_error = f"Orchestrator init failed: {e}"
             st.session_state.is_running = False
             return None
 
-        # Submit to background
         task_queue.submit(task_id, orchestrator.run, claim_text, st.session_state.thread_id)
         return task_id
+
 
     # ── Handle running task ───────────────────────────────────────────────────
     if st.session_state.is_running and st.session_state.task_id:
