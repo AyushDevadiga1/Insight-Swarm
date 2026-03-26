@@ -50,6 +50,7 @@ class SemanticCache:
         self._model        = None
         self._model_failed = False
         self._model_fail_count = 0
+        self._model_lock   = __import__("threading").Lock()  # B4-P6 fix
         self._init_db()
 
     # ── Model lazy-load ───────────────────────────────────────────────────────
@@ -60,21 +61,25 @@ class SemanticCache:
             raise RuntimeError("Semantic cache disabled by SEMANTIC_CACHE_ENABLED")
         if self._model_failed:
             raise RuntimeError("Semantic cache model previously failed to load")
-        if self._model is None:
-            if not HAS_SENTENCE_TRANSFORMERS:
-                self._model_failed = True
-                raise RuntimeError("sentence-transformers not installed")
-            logger.info("Loading SentenceTransformer model for semantic cache...")
-            try:
-                self._model = SentenceTransformer("all-MiniLM-L6-v2",
-                                                  local_files_only=self.local_only)
-                self._model_fail_count = 0
-            except Exception:
-                self._model_fail_count += 1
-                if self._model_fail_count >= 3:
+        if self._model is not None:
+            return self._model  # fast path — no lock needed after first load
+        # B4-P6 fix: double-checked locking prevents two threads loading the model
+        with self._model_lock:
+            if self._model is None:
+                if not HAS_SENTENCE_TRANSFORMERS:
                     self._model_failed = True
-                    logger.error("Semantic cache model failed 3 times — disabling permanently")
-                raise
+                    raise RuntimeError("sentence-transformers not installed")
+                logger.info("Loading SentenceTransformer model for semantic cache...")
+                try:
+                    self._model = SentenceTransformer("all-MiniLM-L6-v2",
+                                                      local_files_only=self.local_only)
+                    self._model_fail_count = 0
+                except Exception:
+                    self._model_fail_count += 1
+                    if self._model_fail_count >= 3:
+                        self._model_failed = True
+                        logger.error("Semantic cache model failed 3 times — disabling permanently")
+                    raise
         return self._model
 
     def _encode(self, text: str) -> Optional[np.ndarray]:
@@ -256,14 +261,20 @@ class SemanticCache:
 
 # ── Module-level helpers ──────────────────────────────────────────────────────
 
-_cache_instance = None
+# B2-P10 fix: module-level lock protects singleton creation
+import threading as _threading
+_cache_instance      = None
+_cache_instance_lock = _threading.Lock()
 
 
 def get_cache() -> SemanticCache:
     global _cache_instance
     if _cache_instance is None:
-        _cache_instance = SemanticCache()
+        with _cache_instance_lock:
+            if _cache_instance is None:   # double-checked locking
+                _cache_instance = SemanticCache()
     return _cache_instance
+
 
 
 def get_cached_verdict(claim: str) -> Optional[Dict[str, Any]]:
