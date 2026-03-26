@@ -1,161 +1,187 @@
 """
-ProgressTracker — tracks debate pipeline stages and broadcasts updates.
-
-Defines granular Stage enum with a pre-mapped progress percentage.
-Subscribers (e.g. Streamlit UI) receive ProgressUpdate objects in real-time.
-
-Usage:
-    from src.ui.progress_tracker import ProgressTracker, Stage
-
-    tracker = ProgressTracker()
-    tracker.subscribe(lambda u: print(u.message))
-
-    tracker.update(Stage.SEARCHING, "Finding evidence for claim...")
-    tracker.update(Stage.ROUND_1_PRO, "ProAgent building case...")
-    tracker.update(Stage.COMPLETE, "Debate finished.")
+src/ui/progress_tracker.py
+Extended to expose .updates, .current, .elapsed, .start_time so that
+streamlit_observable.py can read them (B3-P1 / B3-P5 fix).
 """
-
-import time
+from __future__ import annotations
 import threading
+import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Optional
+from typing import List, Optional
 
 
-class Stage(Enum):
-    INITIALIZING  = "initializing"
-    SEARCHING     = "searching"
-    ROUND_1_PRO   = "round_1_pro"
-    ROUND_1_CON   = "round_1_con"
-    ROUND_2_PRO   = "round_2_pro"
-    ROUND_2_CON   = "round_2_con"
-    ROUND_3_PRO   = "round_3_pro"
-    ROUND_3_CON   = "round_3_con"
-    FACT_CHECKING = "fact_checking"
-    MODERATING    = "moderating"
-    COMPLETE      = "complete"
-    ERROR         = "error"
+class Stage(str, Enum):
+    """Pipeline stages.  Covers both the simple 5-stage view and the detailed per-round view."""
+    IDLE         = "IDLE"
+    CONSENSUS    = "CONSENSUS"
+    SEARCHING    = "SEARCHING"
+    # Per-round stages (used by render_stage_grid)
+    ROUND_1_PRO  = "ROUND_1_PRO"
+    ROUND_2_PRO  = "ROUND_2_PRO"
+    ROUND_3_PRO  = "ROUND_3_PRO"
+    ROUND_1_CON  = "ROUND_1_CON"
+    ROUND_2_CON  = "ROUND_2_CON"
+    ROUND_3_CON  = "ROUND_3_CON"
+    # Generic single-round stages (used by debate.py _set_stage calls)
+    PRO          = "PRO"
+    CON          = "CON"
+    FACT_CHECK   = "FACT_CHECK"
+    FACT_CHECKING = "FACT_CHECKING"
+    MODERATOR    = "MODERATOR"
+    MODERATING   = "MODERATING"
+    COMPLETE     = "COMPLETE"
+    ERROR        = "ERROR"
+
+    # Icon for display
+    @property
+    def icon(self) -> str:
+        _icons = {
+            "IDLE":          "⏸",
+            "CONSENSUS":     "🔎",
+            "SEARCHING":     "🌐",
+            "ROUND_1_PRO":   "💬",
+            "ROUND_2_PRO":   "💬",
+            "ROUND_3_PRO":   "💬",
+            "ROUND_1_CON":   "🔴",
+            "ROUND_2_CON":   "🔴",
+            "ROUND_3_CON":   "🔴",
+            "PRO":           "💬",
+            "CON":           "🔴",
+            "FACT_CHECK":    "✅",
+            "FACT_CHECKING": "✅",
+            "MODERATOR":     "⚖️",
+            "MODERATING":    "⚖️",
+            "COMPLETE":      "🏁",
+            "ERROR":         "❌",
+        }
+        return _icons.get(self.value, "•")
 
 
-# Maps each stage to the percentage through the pipeline
-_STAGE_PCT: dict[Stage, float] = {
-    Stage.INITIALIZING:  0.02,
-    Stage.SEARCHING:     0.10,
-    Stage.ROUND_1_PRO:   0.22,
-    Stage.ROUND_1_CON:   0.35,
-    Stage.ROUND_2_PRO:   0.47,
-    Stage.ROUND_2_CON:   0.58,
-    Stage.ROUND_3_PRO:   0.70,
-    Stage.ROUND_3_CON:   0.80,
-    Stage.FACT_CHECKING: 0.88,
-    Stage.MODERATING:    0.95,
-    Stage.COMPLETE:      1.00,
-    Stage.ERROR:         0.00,
+# Maps Stage → numeric progress fraction 0.0–1.0
+STAGE_PROGRESS: dict = {
+    Stage.IDLE:          0.0,
+    Stage.CONSENSUS:     0.05,
+    Stage.SEARCHING:     0.1,
+    Stage.ROUND_1_PRO:   0.2,
+    Stage.ROUND_1_CON:   0.3,
+    Stage.ROUND_2_PRO:   0.4,
+    Stage.ROUND_2_CON:   0.5,
+    Stage.ROUND_3_PRO:   0.6,
+    Stage.ROUND_3_CON:   0.7,
+    Stage.PRO:           0.35,
+    Stage.CON:           0.55,
+    Stage.FACT_CHECK:    0.75,
+    Stage.FACT_CHECKING: 0.75,
+    Stage.MODERATOR:     0.9,
+    Stage.MODERATING:    0.9,
+    Stage.COMPLETE:      1.0,
+    Stage.ERROR:         1.0,
 }
 
-_STAGE_ICON: dict[Stage, str] = {
-    Stage.INITIALIZING:  "⚙️",
-    Stage.SEARCHING:     "🔍",
-    Stage.ROUND_1_PRO:   "💬",
-    Stage.ROUND_1_CON:   "🔴",
-    Stage.ROUND_2_PRO:   "💬",
-    Stage.ROUND_2_CON:   "🔴",
-    Stage.ROUND_3_PRO:   "💬",
-    Stage.ROUND_3_CON:   "🔴",
-    Stage.FACT_CHECKING: "✅",
-    Stage.MODERATING:    "⚖️",
-    Stage.COMPLETE:      "🎉",
-    Stage.ERROR:         "❌",
+# For the simple integer index (used by app.py render_progress)
+STAGE_INDEX: dict = {
+    Stage.IDLE:          0,
+    Stage.CONSENSUS:     0,
+    Stage.SEARCHING:     0,
+    Stage.PRO:           1,
+    Stage.ROUND_1_PRO:   1,
+    Stage.ROUND_2_PRO:   1,
+    Stage.ROUND_3_PRO:   1,
+    Stage.CON:           2,
+    Stage.ROUND_1_CON:   2,
+    Stage.ROUND_2_CON:   2,
+    Stage.ROUND_3_CON:   2,
+    Stage.FACT_CHECK:    3,
+    Stage.FACT_CHECKING: 3,
+    Stage.MODERATOR:     4,
+    Stage.MODERATING:    4,
+    Stage.COMPLETE:      5,
+    Stage.ERROR:         5,
 }
 
 
 @dataclass
-class ProgressUpdate:
-    stage: Stage
-    message: str
-    progress_pct: float          # 0.0 → 1.0
-    metadata: dict = field(default_factory=dict)
-    timestamp: float = field(default_factory=time.time)
+class StageUpdate:
+    """One recorded stage transition."""
+    stage:      Stage
+    message:    str
+    timestamp:  float = field(default_factory=time.time)
+
+    @property
+    def progress_pct(self) -> float:
+        return STAGE_PROGRESS.get(self.stage, 0.0)
 
     @property
     def icon(self) -> str:
-        return _STAGE_ICON.get(self.stage, "•")
-
-    @property
-    def elapsed_label(self) -> str:
-        """Formatted elapsed time from `start_time` stored in metadata."""
-        start = self.metadata.get("start_time", self.timestamp)
-        secs = int(time.time() - start)
-        return f"{secs}s"
+        return self.stage.icon
 
 
 class ProgressTracker:
     """
-    Tracks debate progress.  Thread-safe, subscriber-based.
+    Thread-safe pipeline progress tracker.
 
-    Attributes:
-        updates: Full history of ProgressUpdate objects.
-        current: Most recent update (or None).
+    Exposes:
+      .current        → most recent StageUpdate (or None)
+      .updates        → list of all StageUpdates so far
+      .elapsed        → seconds since first stage was set
+      .start_time     → float timestamp of first set_stage() call
+      .current_stage  → Stage enum value
+      .stage_index    → int 0-5
+      .message        → current message string
     """
 
     def __init__(self) -> None:
-        self.start_time = time.time()
-        self.updates: list[ProgressUpdate] = []
-        self._callbacks: list[Callable[[ProgressUpdate], None]] = []
-        self._lock = threading.Lock()
+        self._updates: List[StageUpdate] = []
+        self._lock      = threading.Lock()
+        self._start_time: Optional[float] = None
 
-    # ── Core API ──────────────────────────────────────────────────────────────
-
-    def update(
-        self,
-        stage: Stage,
-        message: str,
-        metadata: Optional[dict] = None,
-    ) -> None:
-        """Emit a progress update and notify all subscribers."""
-        meta = {"start_time": self.start_time}
-        if metadata:
-            meta.update(metadata)
-
-        upd = ProgressUpdate(
-            stage=stage,
-            message=message,
-            progress_pct=_STAGE_PCT[stage],
-            metadata=meta,
-        )
-
+    def set_stage(self, stage: Stage, message: str = "") -> None:
         with self._lock:
-            self.updates.append(upd)
-            callbacks = list(self._callbacks)
-
-        for cb in callbacks:
-            try:
-                cb(upd)
-            except Exception:
-                pass
-
-    def subscribe(self, callback: Callable[[ProgressUpdate], None]) -> None:
-        """Register a callback that receives each ProgressUpdate."""
-        with self._lock:
-            if callback not in self._callbacks:
-                self._callbacks.append(callback)
-
-    def unsubscribe(self, callback: Callable[[ProgressUpdate], None]) -> None:
-        with self._lock:
-            self._callbacks = [c for c in self._callbacks if c is not callback]
-
-    # ── Properties ────────────────────────────────────────────────────────────
+            if self._start_time is None:
+                self._start_time = time.time()
+            self._updates.append(StageUpdate(stage=stage, message=message))
 
     @property
-    def current(self) -> Optional[ProgressUpdate]:
+    def current(self) -> Optional[StageUpdate]:
         with self._lock:
-            return self.updates[-1] if self.updates else None
+            return self._updates[-1] if self._updates else None
+
+    @property
+    def updates(self) -> List[StageUpdate]:
+        with self._lock:
+            return list(self._updates)
+
+    @property
+    def start_time(self) -> float:
+        with self._lock:
+            return self._start_time or time.time()
 
     @property
     def elapsed(self) -> float:
-        return time.time() - self.start_time
+        with self._lock:
+            if self._start_time is None:
+                return 0.0
+            return time.time() - self._start_time
 
     @property
-    def is_complete(self) -> bool:
+    def current_stage(self) -> Stage:
         c = self.current
-        return c is not None and c.stage in (Stage.COMPLETE, Stage.ERROR)
+        return c.stage if c else Stage.IDLE
+
+    @property
+    def message(self) -> str:
+        c = self.current
+        return c.message if c else ""
+
+    @property
+    def stage_index(self) -> int:
+        return STAGE_INDEX.get(self.current_stage, 0)
+
+    def is_complete(self) -> bool:
+        return self.current_stage in (Stage.COMPLETE, Stage.ERROR)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._updates    = []
+            self._start_time = None
