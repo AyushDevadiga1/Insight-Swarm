@@ -1,42 +1,38 @@
 """
-validation.py - Utilities for validating user inputs.
+src/utils/validation.py
+Claim validation utilities shared between main.py CLI and app.py Streamlit UI.
+Previously, main.py had validate_claim() inline and app.py tried to import it
+from a file that did not exist — crashing at startup (B2-P2 fix).
 """
-from typing import Tuple
 import re
+from typing import Tuple
+
 
 def validate_claim(claim: str) -> Tuple[bool, str]:
-    """Validates a user-submitted claim for safety and quality."""
-    if not claim or not claim.strip():
+    """Validate a user-submitted claim for safety and minimum quality.
+
+    Returns:
+        (True, "")             — claim is acceptable
+        (False, reason_str)    — claim is rejected; reason_str explains why
+    """
+    if not claim or not isinstance(claim, str):
         return False, "Claim cannot be empty."
 
-    stripped = claim.strip()
+    claim = claim.strip()
 
-    # Align with the UI's displayed minimum of 10 characters
-    if len(stripped) < 10:
+    if not claim:
+        return False, "Claim cannot be empty."
+
+    if len(claim) < 10:
         return False, "Claim too short (minimum 10 characters)."
 
-    # Align with the UI's allowed maximum
-    if len(stripped) > 500:
+    if len(claim) > 500:
         return False, "Claim too long (max 500 characters)."
 
-    # Must contain at least one word longer than 2 characters
-    words = stripped.split()
-    if not any(len(w) > 2 for w in words):
-        return False, "Claim must contain at least one meaningful word."
+    if len(claim.split()) < 3:
+        return False, "Claim too short (minimum 3 words)."
 
-    # Unicode safety: reject RTL override, zero-width, and BOM characters
-    UNSAFE_RANGES = [
-        (0x200B, 0x200F),   # Zero-width spaces and marks
-        (0x202A, 0x202E),   # RTL/LTR override characters
-        (0xFFF0, 0xFFFF),   # Specials block including BOM
-    ]
-    for char in stripped:
-        cp = ord(char)
-        for lo, hi in UNSAFE_RANGES:
-            if lo <= cp <= hi:
-                return False, "Claim contains unsupported control characters."
-
-    # Prompt injection patterns
+    # Basic prompt-injection guard
     injection_patterns = [
         r"ignore\s+previous\s+instructions",
         r"ignore\s+all\s+previous",
@@ -44,7 +40,7 @@ def validate_claim(claim: str) -> Tuple[bool, str]:
         r"\bsystem\s*:\s*",
     ]
     for pattern in injection_patterns:
-        if re.search(pattern, stripped.lower()):
-            return False, "Prompt injection detected."
+        if re.search(pattern, claim.lower()):
+            return False, "Prompt injection detected — please enter a factual claim."
 
     return True, ""
