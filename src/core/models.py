@@ -5,7 +5,7 @@ Fixes: P0-1 (Pydantic v2 @validator crash), P2-3 (trust_score=None crash in get_
 
 Drop-in replacement for src/core/models.py.
 """
-from pydantic import BaseModel, Field, field_validator   # field_validator replaces validator (Pydantic v2)
+from pydantic import BaseModel, Field, field_validator, ConfigDict   # field_validator replaces validator (Pydantic v2)
 from typing import List, Dict, Any, Optional, Literal
 from datetime import datetime
 import logging
@@ -32,6 +32,18 @@ class SourceVerification(BaseModel):
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()   # Pydantic v2: model_dump() replaces dict()
+
+
+class AgentArgumentResponse(BaseModel):
+    """
+    B4-P3 fix: slim schema used by ProAgent and ConAgent for LLM calls.
+    Excludes agent, round, timestamp (set by the caller after the call),
+    verdict, reasoning, metrics (not filled by debating agents).
+    Prevents the LLM from failing validation on the Literal agent field.
+    """
+    argument:   str
+    sources:    list = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class AgentResponse(BaseModel):
@@ -110,6 +122,9 @@ class ConsensusResponse(BaseModel):
 
 class DebateState(BaseModel):
     """Complete state of the debate workflow."""
+    # B4-P1 fix: allow LangGraph checkpoint metadata
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     claim:         str
     round:         int = 1
     pro_arguments: List[str]        = Field(default_factory=list)

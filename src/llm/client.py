@@ -44,6 +44,20 @@ except ImportError:
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# B4-P2 fix: module-level schema cache — schema_json() is expensive and identical
+# across calls for the same output_schema type; generate it once and reuse.
+_SCHEMA_CACHE: dict = {}
+
+
+def _get_schema_json(output_schema) -> str:
+    """Return cached JSON schema string for the given Pydantic model class."""
+    key = id(output_schema)
+    if key not in _SCHEMA_CACHE:
+        _SCHEMA_CACHE[key] = json.dumps(output_schema.model_json_schema(), indent=2)
+    return _SCHEMA_CACHE[key]
+
+
+
 from src.utils.api_key_manager import get_api_key_manager
 
 # How long (seconds) a provider stays in soft-cooldown after a rate-limit hit.
@@ -253,10 +267,11 @@ class FreeLLMClient:
     ) -> Any:
         """
         Call LLM and parse response as a Pydantic model.
-        Uses Pydantic v2 APIs: model_json_schema() and model_validate_json().
+        B3-P9 fix: ValidationError is never treated as a rate-limit event.
         """
-        # P0-2 fix: use Pydantic v2 schema API
-        schema_json = json.dumps(output_schema.model_json_schema(), indent=2)
+        from pydantic import ValidationError as PydanticValidationError
+
+        schema_json = _get_schema_json(output_schema)  # B4-P2: cached
         json_prompt = (
             f"{prompt}\n\nIMPORTANT: Return a valid JSON object matching this schema:\n"
             f"{schema_json}"
@@ -286,26 +301,43 @@ class FreeLLMClient:
                             raise RuntimeError(f"{provider} rate limit exceeded")
                         call_times.append(time.time())
 
-                    raw = self._dispatch_call(provider, json_prompt, temperature, max_tokens, key)
+                    raw     = self._dispatch_call(provider, json_prompt, temperature, max_tokens, key)
                     cleaned = self._clean_json_response(raw)
-
-                    # P0-2 fix: Pydantic v2 parse API
-                    result = output_schema.model_validate_json(cleaned)
-
+                    result  = output_schema.model_validate_json(cleaned)
                     self.key_manager.report_key_success(provider, key_hash)
                     return result
+
+                except PydanticValidationError as ve:
+                    # B3-P9 fix: JSON parsed but schema mismatch — retry with same
+                    # provider, never trigger cooldown. LLM returned bad structure.
+                    last_error = ve
+                    logger.warning("%s structured parse error (attempt %d/%d): %s",
+                                   provider, attempt + 1, max_retries + 1, ve)
+                    if attempt < max_retries:
+                        time.sleep(1)
+                    continue
+
+                except json.JSONDecodeError as je:
+                    # Malformed JSON from LLM — retry, don't cooldown
+                    last_error = je
+                    logger.warning("%s malformed JSON (attempt %d/%d): %s",
+                                   provider, attempt + 1, max_retries + 1, je)
+                    if attempt < max_retries:
+                        time.sleep(1)
+                    continue
 
                 except Exception as e:
                     last_error = e
                     self.key_manager.report_key_failure(provider, key_hash, e)
                     err_lower = str(e).lower()
 
-                    if any(kw in err_lower for kw in ("429", "rate limit", "quota", "exceeded",
+                    # Only apply cooldown for genuine quota/rate-limit errors
+                    if any(kw in err_lower for kw in ("429", "rate limit", "quota",
                                                        "limit reached", "model_decommissioned",
                                                        "resource_exhausted")):
                         retry_after = self._extract_retry_after(str(e))
                         cooldown    = retry_after or _PROVIDER_COOLDOWN_SECONDS
-                        self._set_provider_cooldown(provider, cooldown)   # timed, not permanent
+                        self._set_provider_cooldown(provider, cooldown)
                         break
 
                     logger.warning("%s structured attempt %d/%d: %s",
@@ -318,7 +350,7 @@ class FreeLLMClient:
         logger.error("All structured calls failed. Last: %s", last_error)
         raise RuntimeError(f"Failed to get structured output: {last_error}")
 
-    # ── call (plain text) ─────────────────────────────────────────────────────
+
 
     def call(
         self,
@@ -446,14 +478,18 @@ class FreeLLMClient:
     def _call_gemini(self, prompt: str, temperature: float, max_tokens: int,
                      timeout: int, gemini_key: str) -> str:
         """
-        P0-3 fix: reuse self.genai_client instead of creating a new one per call.
-        If the stored client's key differs (rotation), reinitialise once.
+        B2-P5 fix: initialise genai_client under _counter_lock to prevent
+        two threads from both seeing None and both calling genai.Client().
+        The lock is already imported and used for rate-limit tracking.
         """
         if self.genai_client is None:
-            from google import genai
-            from google.genai import types as genai_types
-            self._genai_types = genai_types
-            self.genai_client = genai.Client(api_key=gemini_key)
+            with self._counter_lock:
+                # Double-checked locking — only one thread does the init
+                if self.genai_client is None:
+                    from google import genai
+                    from google.genai import types as genai_types
+                    self._genai_types  = genai_types
+                    self.genai_client  = genai.Client(api_key=gemini_key)
 
         if self._genai_types is None:
             from google.genai import types as genai_types
