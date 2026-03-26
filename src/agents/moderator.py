@@ -47,10 +47,16 @@ class Moderator(BaseAgent):
             # Weights: argument quality 30%, source verification 30%,
             #          source trust 20%, consensus pre-check 20%
 
+            # B2-P8 fix: treat empty metrics dict same as None for argument_quality
             arg_quality = 0.5
-            if result.metrics and "argument_quality" in result.metrics:
-                raw         = result.metrics["argument_quality"]
-                arg_quality = raw / 100.0 if raw > 1 else float(raw)
+            metrics_dict = result.metrics or {}
+            raw_aq = metrics_dict.get("argument_quality")
+            if raw_aq is not None:
+                try:
+                    raw_aq = float(raw_aq)
+                    arg_quality = raw_aq / 100.0 if raw_aq > 1.0 else raw_aq
+                except (TypeError, ValueError):
+                    pass
 
             pro_rate     = state.pro_verification_rate or 0.0
             con_rate     = state.con_verification_rate or 0.0

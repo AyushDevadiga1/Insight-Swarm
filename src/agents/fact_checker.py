@@ -293,7 +293,10 @@ class FactChecker(BaseAgent):
                 trust_score      = TrustScorer.get_score(url)
                 trust_level      = TrustScorer.get_tier_label(trust_score)
 
-                if max_sim > FactCheckerConfig.SEMANTIC_THRESHOLD if hasattr(FactCheckerConfig, "SEMANTIC_THRESHOLD") else 0.75:
+                # B2-P11 fix: SEMANTIC_THRESHOLD is now guaranteed in config (Batch 1 fix_07)
+                threshold = FactCheckerConfig.SEMANTIC_THRESHOLD
+
+                if max_sim > threshold:
                     return SourceVerification(
                         url=url, status="VERIFIED", agent_source=agent,
                         confidence=max_sim, trust_score=trust_score, trust_tier=trust_level,
