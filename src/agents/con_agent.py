@@ -1,11 +1,10 @@
 """
-src/agents/con_agent.py
-B2-P6: _format_evidence() removed — inherited from BaseAgent.
-B2-P7: f-string logging → % lazy formatting.
+src/agents/con_agent.py — All batches applied. Final production version.
 """
 from datetime import datetime
 from typing import Optional
 from src.agents.base import BaseAgent, AgentResponse, DebateState
+from src.core.models import AgentArgumentResponse
 from src.llm.client import FreeLLMClient
 import logging
 
@@ -22,15 +21,14 @@ class ConAgent(BaseAgent):
         logger.info("ConAgent generating — Round %d", state.round)
         prompt = self._build_prompt(state, state.round)
         try:
-            # B4-P3 fix: use slim schema — LLM only fills argument/sources/confidence
-            from src.core.models import AgentArgumentResponse
             raw = self.client.call_structured(
                 prompt=prompt,
                 output_schema=AgentArgumentResponse,
                 temperature=0.7,
                 preferred_provider=self.preferred_provider,
             )
-            response = AgentResponse(
+            self.call_count += 1
+            return AgentResponse(
                 agent="CON",
                 round=state.round,
                 argument=raw.argument,
@@ -38,25 +36,22 @@ class ConAgent(BaseAgent):
                 confidence=raw.confidence,
                 timestamp=datetime.now().strftime("%H:%M:%S"),
             )
-            self.call_count += 1
-            return response
         except Exception as e:
             logger.error("ConAgent failed: %s", e)
             err = str(e)
             if "QUOTA_EXHAUSTED" in err or "429" in err.lower():
                 arg, conf = "[API_FAILURE] Quota exhausted — update API keys or wait for reset.", 0.0
             else:
-                arg  = (f"The claim \'{state.claim}\' is not fully supported. "
+                arg  = (f"The claim '{state.claim}' is not fully supported. "
                         f"[Fallback — technical issue encountered.]")
                 conf = 0.3
             return AgentResponse(agent="CON", round=state.round, argument=arg,
                                  sources=[], confidence=conf,
                                  timestamp=datetime.now().strftime("%H:%M:%S"))
 
-
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
         evidence_bundle    = state.evidence_sources or state.con_evidence or []
-        formatted_evidence = self._format_evidence(evidence_bundle)   # B2-P6: uses BaseAgent
+        formatted_evidence = self._format_evidence(evidence_bundle)
         pro_argument       = state.pro_arguments[-1] if state.pro_arguments else "No Pro argument."
 
         if round_num == 1:
@@ -75,11 +70,11 @@ YOUR TASK:
 2. Directly challenge the Pro argument — identify flaws or missing context.
 3. Cite pre-fetched URLs if available; otherwise use training knowledge labeled [General Knowledge].
 4. Be specific in 3-5 sentences.
-5. List source URLs in the \'sources\' field.
+5. List source URLs in the 'sources' field.
 
 Do NOT start with "I" or "As an AI"."""
         else:
-            latest_pro       = state.pro_arguments[-1] if state.pro_arguments else "No new Pro argument."
+            latest_pro = state.pro_arguments[-1] if state.pro_arguments else "No new Pro argument."
             feedback_section = (
                 f"\n\nVERIFICATION FEEDBACK:\n{state.verification_feedback}\n"
                 if state.verification_feedback else ""
@@ -95,7 +90,7 @@ LATEST PRO REBUTTAL:
 COUNTER-EVIDENCE:
 {formatted_evidence}
 
-1. Rebut the Pro\'s latest argument specifically.
+1. Rebut the Pro's latest argument specifically.
 2. Identify new flaws, missing context, or contradictory evidence.
 3. If previous sources failed, cite stronger alternatives.
 4. Keep to 3-5 focused sentences."""

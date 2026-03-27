@@ -1,6 +1,5 @@
 """
-src/agents/base.py
-B2-P6: _format_evidence() moved here from ProAgent/ConAgent to eliminate duplication.
+src/agents/base.py — All batches applied. Final production version.
 """
 import logging
 from abc import ABC, abstractmethod
@@ -26,10 +25,6 @@ class BaseAgent(ABC):
         raise NotImplementedError
 
     def _format_evidence(self, evidence_bundle: Optional[List[Dict[str, Any]]]) -> str:
-        """
-        B2-P6 fix: single shared implementation — remove the identical copy in
-        ProAgent and ConAgent and call self._format_evidence() instead.
-        """
         if not evidence_bundle:
             return (
                 "No pre-fetched evidence available. "
@@ -40,8 +35,7 @@ class BaseAgent(ABC):
         for item in evidence_bundle:
             title   = item.get("title", "Source")
             url     = item.get("url", "")
-            # B4-P5 fix: increase evidence context to 500 chars (from 300)
-            content = item.get("content", "")[:500]
+            content = item.get("content", "")[:500]   # raised from 300 → 500 chars
             lines.append(f"- {title} ({url}): {content}...")
         return "\n".join(lines)
 
