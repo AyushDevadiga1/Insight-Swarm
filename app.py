@@ -879,13 +879,18 @@ def main() -> None:
     # ── Handle running task ───────────────────────────────────────────────────
     if st.session_state.is_running and st.session_state.task_id:
         task_queue = get_task_queue()
-        status_code, result, error = task_queue.get_status(st.session_state.task_id)
+        try:
+            status_code, result, error = task_queue.get_status(st.session_state.task_id)
+        except Exception as e:
+            status_code, result, error = "FAILED", None, f"Task Queue Error: {e}"
         
         if status_code == "COMPLETED":
             st.session_state.result = result
             st.session_state.debate_run = True
             st.session_state.is_running = False
             task_queue.clear_task(st.session_state.task_id)
+            # Ensure result is serializable if being passed to external API layers
+            # result_json = json.dumps(result, default=str) 
             st.rerun()
         elif status_code == "FAILED":
             st.session_state.debate_error = str(error)
