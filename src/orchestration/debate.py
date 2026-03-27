@@ -1,11 +1,8 @@
 """
-src/orchestration/debate.py
-Batch 1-3 fixes + B3-P10-REMNANT: duplicate method definitions removed.
-B4-P8: DebateOrchestrator cached in session state (see app.py).
+src/orchestration/debate.py — All batches applied. Final production version.
+Single definition of every method. No duplicates.
 """
-import sys
-import logging
-import json
+import sys, logging, json, re
 from pathlib import Path
 from typing import Optional, Literal, Any
 
@@ -28,10 +25,19 @@ from src.utils.url_helper import URLNormalizer
 
 logger = logging.getLogger(__name__)
 
+SETTLED_TRUTHS = {
+    r"earth is flat":             ("FALSE", 1.0,  "Earth is an oblate spheroid."),
+    r"earth is round":            ("TRUE",  1.0,  "Earth is an oblate spheroid."),
+    r"vaccines cause autism":     ("FALSE", 0.99, "Debunked by global medical research."),
+    r"\bsmoking causes cancer\b":     ("TRUE",  0.99, "Established medical consensus."),
+    r"\bclimate change is real\b":    ("TRUE",  0.98, "IPCC scientific consensus."),
+    r"\bwater is h2o\b":              ("TRUE",  1.0,  "Fundamental chemistry."),
+    r"\bmoon landing was faked\b":    ("FALSE", 1.0,  "Documented historical fact."),
+    r"\bsun revolves around earth\b": ("FALSE", 1.0,  "Heliocentric model."),
+}
+
 
 class DebateOrchestrator:
-    """Orchestrates multi-round debate using LangGraph."""
-
     def __init__(self, llm_client=None, pro_agent=None, con_agent=None,
                  fact_checker=None, moderator=None, tracker=None):
         self.client  = llm_client or FreeLLMClient()
@@ -43,17 +49,15 @@ class DebateOrchestrator:
         self.moderator    = moderator    or Moderator(self.client)
         self.summarizer       = Summarizer(self.client)
         self.claim_decomposer = ClaimDecomposer(self.client)
-
         self.checkpointer = MemorySaver()
         self.graph        = self._build_graph()
 
     def set_tracker(self, tracker) -> None:
-        """B4-P8: allow injecting a tracker without recreating the whole orchestrator."""
+        """Inject tracker without rebuilding graph."""
         self.tracker = tracker
 
     def _set_stage(self, stage_name: str, message: str = "") -> None:
-        if self.tracker is None:
-            return
+        if self.tracker is None: return
         try:
             from src.ui.progress_tracker import Stage
             self.tracker.set_stage(Stage(stage_name), message)
@@ -62,7 +66,6 @@ class DebateOrchestrator:
 
     def _build_graph(self) -> Any:
         workflow = StateGraph(DebateState)
-
         workflow.add_node("consensus_check", self._consensus_check_node)
         workflow.add_node("summarizer",      self._summarize_node)
         workflow.add_node("pro_agent",       self._pro_agent_node)
@@ -71,26 +74,23 @@ class DebateOrchestrator:
         workflow.add_node("moderator",       self._moderator_node)
         workflow.add_node("verdict",         self._verdict_node)
         workflow.add_node("revision",        self._retry_revision_node)
-
         workflow.add_edge(START, "consensus_check")
         workflow.add_conditional_edges("consensus_check", self._should_debate,
-                                       {"skip": "moderator", "debate": "summarizer"})
+                                       {"skip":"moderator","debate":"summarizer"})
         workflow.add_edge("summarizer", "pro_agent")
         workflow.add_edge("pro_agent",  "con_agent")
         workflow.add_conditional_edges("con_agent", self._should_continue,
-                                       {"continue": "summarizer", "end": "fact_checker"})
+                                       {"continue":"summarizer","end":"fact_checker"})
         workflow.add_conditional_edges("fact_checker", self._should_retry,
-                                       {"retry": "revision", "proceed": "moderator"})
-        workflow.add_edge("revision",  "fact_checker")
+                                       {"retry":"revision","proceed":"moderator"})
+        workflow.add_edge("revision", "fact_checker")
         workflow.add_edge("moderator", "verdict")
         workflow.add_edge("verdict",   END)
-
         return workflow.compile(checkpointer=self.checkpointer)
 
-    # ── Graph nodes (each defined ONCE) ──────────────────────────────────────
+    # ── Nodes — each defined EXACTLY ONCE ────────────────────────────────────
 
     def _summarize_node(self, state: DebateState) -> DebateState:
-        """B3-P10 fix (single definition): slice reassignment, not in-place mutation."""
         if state.round > 2:
             logger.info("Round > 2 — generating debate summary.")
             state.summary = self.summarizer.summarize_history(state)
@@ -100,64 +100,44 @@ class DebateOrchestrator:
         return state
 
     def _consensus_check_node(self, state: DebateState) -> DebateState:
-        import re
         self._set_stage("CONSENSUS", "Running consensus pre-check...")
         logger.info("Consensus pre-check for: %s", state.claim)
         claim_lower = state.claim.lower()
-
-        SETTLED_TRUTHS = {
-            r"\bearth is flat\b":             ("FALSE", 1.0,  "Earth is an oblate spheroid."),
-            r"\bearth is round\b":            ("TRUE",  1.0,  "Earth is an oblate spheroid."),
-            r"\bvaccines cause autism\b":     ("FALSE", 0.99, "Debunked by global medical research."),
-            r"\bsmoking causes cancer\b":     ("TRUE",  0.99, "Established medical consensus."),
-            r"\bclimate change is real\b":    ("TRUE",  0.98, "IPCC scientific consensus."),
-            r"\bwater is h2o\b":              ("TRUE",  1.0,  "Fundamental chemistry."),
-            r"\bmoon landing was faked\b":    ("FALSE", 1.0,  "Documented historical fact."),
-            r"\bsun revolves around earth\b": ("FALSE", 1.0,  "Heliocentric model."),
-        }
 
         for pattern, (verdict, conf, reasoning) in SETTLED_TRUTHS.items():
             if re.search(pattern, claim_lower):
                 state.verdict    = verdict
                 state.confidence = conf
                 state.moderator_reasoning = f"Settled Science: {reasoning}"
-                if state.metrics is None:
-                    state.metrics = {}
-                state.metrics["consensus"] = {"verdict": verdict, "reasoning": reasoning, "score": conf}
+                if state.metrics is None: state.metrics = {}
+                state.metrics["consensus"] = {"verdict":verdict,"reasoning":reasoning,"score":conf}
                 logger.info("Hardcoded consensus: %s", verdict)
                 return state
 
-        prompt = f"""You are a Consensus Checker. Determine if there is a massive scientific consensus.
-CLAIM: {state.claim}
-Respond ONLY in JSON: {{"verdict": "TRUE"|"FALSE"|"NEUTRAL"|"DEBATE", "reasoning": "...", "confidence": 0.0-1.0}}
-If settled fact return TRUE/FALSE. If controversial return DEBATE."""
-
+        prompt = (
+            f"You are a Consensus Checker. Determine if there is a massive scientific consensus.\n"
+            f"CLAIM: {state.claim}\n"
+            f'Respond ONLY in JSON: {{"verdict":"TRUE"|"FALSE"|"NEUTRAL"|"DEBATE","reasoning":"...","confidence":0.0-1.0}}\n'
+            f"If settled fact return TRUE/FALSE. If controversial return DEBATE."
+        )
         try:
             import concurrent.futures as _cf
             with _cf.ThreadPoolExecutor(max_workers=1) as tex:
-                fut = tex.submit(self.client.call_structured,
-                                 prompt, ConsensusResponse, 0.1, 500, 1, "gemini")
+                fut      = tex.submit(self.client.call_structured, prompt, ConsensusResponse, 0.1, 500, 1, "gemini")
                 response = fut.result(timeout=15)
-
             if response.verdict != "DEBATE" and response.confidence > 0.9:
                 state.verdict    = response.verdict
                 state.confidence = response.confidence
                 state.moderator_reasoning = f"Consensus Pre-Check: {response.reasoning}"
                 logger.info("Consensus found: %s", state.verdict)
-
-            if state.metrics is None:
-                state.metrics = {}
-            state.metrics["consensus"] = {
-                "verdict": response.verdict, "reasoning": response.reasoning,
-                "score": response.confidence,
-            }
+            if state.metrics is None: state.metrics = {}
+            state.metrics["consensus"] = {"verdict":response.verdict,"reasoning":response.reasoning,"score":response.confidence}
         except Exception as e:
             logger.warning("Consensus check failed (non-fatal): %s", e)
-
         return state
 
-    def _should_debate(self, state: DebateState) -> Literal["skip", "debate"]:
-        if state.verdict in ("TRUE", "FALSE", "NEUTRAL") and (state.confidence or 0) > 0.9:
+    def _should_debate(self, state: DebateState) -> Literal["skip","debate"]:
+        if state.verdict in ("TRUE","FALSE","NEUTRAL") and (state.confidence or 0) > 0.9:
             return "skip"
         return "debate"
 
@@ -175,27 +155,25 @@ If settled fact return TRUE/FALSE. If controversial return DEBATE."""
         response = self.con_agent.generate(state)
         state.con_arguments = state.con_arguments + [response.argument]
         state.con_sources   = state.con_sources   + [response.sources]
-        state.round        += 1
+        state.round += 1
         return state
 
-    def _should_continue(self, state: DebateState) -> Literal["continue", "end"]:
+    def _should_continue(self, state: DebateState) -> Literal["continue","end"]:
         if isinstance(state, dict):
-            return "end" if state.get("round", 1) > state.get("num_rounds", 3) else "continue"
+            return "end" if state.get("round",1) > state.get("num_rounds",3) else "continue"
         return "end" if state.round > state.num_rounds else "continue"
 
-    def _should_retry(self, state: DebateState) -> Literal["retry", "proceed"]:
+    def _should_retry(self, state: DebateState) -> Literal["retry","proceed"]:
         last_pro = state.pro_arguments[-1] if state.pro_arguments else ""
         last_con = state.con_arguments[-1] if state.con_arguments else ""
         if "[API_FAILURE]" in last_pro or "[API_FAILURE]" in last_con:
             return "proceed"
-        pro_rate = state.pro_verification_rate or 0.0
-        con_rate = state.con_verification_rate or 0.0
-        if (pro_rate < 0.3 or con_rate < 0.3) and state.retry_count < 1:
-            return "retry"
+        if (state.pro_verification_rate or 0) < 0.3 or (state.con_verification_rate or 0) < 0.3:
+            if state.retry_count < 1:
+                return "retry"
         return "proceed"
 
     def _retry_revision_node(self, state: DebateState) -> DebateState:
-        """B3-P10 fix (single definition): slice+concat, no in-place mutation."""
         logger.info("Revision loop triggered.")
         state.retry_count += 1
         saved_round = state.round
@@ -275,11 +253,10 @@ If settled fact return TRUE/FALSE. If controversial return DEBATE."""
         tavily = get_tavily_retriever()
         try:
             with _cf.ThreadPoolExecutor(max_workers=1) as tex:
-                fut        = tex.submit(tavily.search_adversarial, target_claim, 5)
-                adversarial = fut.result(timeout=12)
+                adversarial = tex.submit(tavily.search_adversarial, target_claim, 5).result(timeout=12)
         except Exception:
             logger.warning("Tavily timed out or failed — proceeding without evidence")
-            adversarial = {"pro": [], "con": []}
+            adversarial = {"pro":[],"con":[]}
 
         initial_state = DebateState(
             claim=target_claim,
@@ -287,12 +264,10 @@ If settled fact return TRUE/FALSE. If controversial return DEBATE."""
             con_evidence=adversarial["con"],
             evidence_sources=adversarial["pro"] + adversarial["con"],
         )
-
         final_state = initial_state
-        try:
-            config     = {"configurable": {"thread_id": thread_id}}
-            raw_result = self.graph.invoke(initial_state, config=config)
 
+        try:
+            raw_result = self.graph.invoke(initial_state, config={"configurable":{"thread_id":thread_id}})
             if isinstance(raw_result, dict):
                 final_state = DebateState.model_validate(raw_result)
             elif hasattr(raw_result, "model_dump"):
@@ -305,18 +280,17 @@ If settled fact return TRUE/FALSE. If controversial return DEBATE."""
                 final_state.confidence = final_state.confidence or 0.0
                 final_state.moderator_reasoning = final_state.moderator_reasoning or "No verdict produced."
 
-            if final_state.verdict not in ("ERROR", "RATE_LIMITED", "SYSTEM_ERROR", None):
+            if final_state.verdict not in ("ERROR","RATE_LIMITED","SYSTEM_ERROR",None):
                 if final_state.verdict != "INSUFFICIENT EVIDENCE" or \
                         (final_state.confidence is not None and final_state.confidence > 0.1):
                     try:
                         set_cached_verdict(target_claim, json.loads(final_state.model_dump_json()))
-                    except Exception as cache_err:
-                        logger.warning("Cache write failed: %s", cache_err)
-
+                    except Exception as ce:
+                        logger.warning("Cache write failed: %s", ce)
             return final_state
 
-        except (ValueError, TypeError, AttributeError) as programming_error:
-            logger.error("Programming error in debate graph: %s", programming_error)
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.error("Programming error in debate graph: %s", e)
             raise
         except Exception as e:
             logger.error("Debate failed (runtime): %s", e)
@@ -345,11 +319,10 @@ If settled fact return TRUE/FALSE. If controversial return DEBATE."""
         tavily = get_tavily_retriever()
         try:
             with _cf.ThreadPoolExecutor(max_workers=1) as tex:
-                fut        = tex.submit(tavily.search_adversarial, target_claim, 5)
-                adversarial = fut.result(timeout=12)
+                adversarial = tex.submit(tavily.search_adversarial, target_claim, 5).result(timeout=12)
         except Exception:
             logger.warning("Tavily timed out — proceeding without evidence")
-            adversarial = {"pro": [], "con": []}
+            adversarial = {"pro":[],"con":[]}
 
         initial_state = DebateState(
             claim=target_claim,
@@ -357,23 +330,20 @@ If settled fact return TRUE/FALSE. If controversial return DEBATE."""
             con_evidence=adversarial["con"],
             evidence_sources=adversarial["pro"] + adversarial["con"],
         )
-
-        config     = {"configurable": {"thread_id": thread_id}}
         last_state = initial_state
 
         try:
-            for event in self.graph.stream(initial_state, config=config, stream_mode="values"):
+            for event in self.graph.stream(initial_state, config={"configurable":{"thread_id":thread_id}}, stream_mode="values"):
                 last_state = DebateState.model_validate(event) if isinstance(event, dict) else event
                 yield "progress", last_state
 
-            if last_state.verdict not in ("ERROR", "RATE_LIMITED", "SYSTEM_ERROR", None):
+            if last_state.verdict not in ("ERROR","RATE_LIMITED","SYSTEM_ERROR",None):
                 if last_state.verdict != "INSUFFICIENT EVIDENCE" or \
                         (last_state.confidence is not None and last_state.confidence > 0.1):
                     try:
                         set_cached_verdict(target_claim, json.loads(last_state.model_dump_json()))
-                    except Exception as cache_err:
-                        logger.warning("Stream cache write failed: %s", cache_err)
-
+                    except Exception as ce:
+                        logger.warning("Stream cache write failed: %s", ce)
             yield "complete", last_state
 
         except (ValueError, TypeError, AttributeError) as e:
