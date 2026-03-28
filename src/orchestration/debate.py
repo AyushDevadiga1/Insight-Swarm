@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Optional, Literal, Any
 
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -49,7 +50,7 @@ class DebateOrchestrator:
         self.moderator    = moderator    or Moderator(self.client)
         self.summarizer       = Summarizer(self.client)
         self.claim_decomposer = ClaimDecomposer(self.client)
-        self.checkpointer = MemorySaver()
+        self.checkpointer = SqliteSaver.from_conn_string("insightswarm_graph.db")
         self.graph        = self._build_graph()
 
     def set_tracker(self, tracker) -> None:
@@ -245,7 +246,10 @@ class DebateOrchestrator:
             return state
 
         sub_claims   = self.claim_decomposer.decompose(claim)
-        target_claim = sub_claims[0]
+        if len(sub_claims) > 1:
+            target_claim = f"Complex User Claim:\n" + "\n".join(f"- {sc}" for sc in sub_claims)
+        else:
+            target_claim = claim
         if len(sub_claims) > 1:
             logger.info("Multi-part claim — primary: %r", target_claim)
 
@@ -313,7 +317,10 @@ class DebateOrchestrator:
             return
 
         sub_claims   = self.claim_decomposer.decompose(claim)
-        target_claim = sub_claims[0]
+        if len(sub_claims) > 1:
+            target_claim = f"Complex User Claim:\n" + "\n".join(f"- {sc}" for sc in sub_claims)
+        else:
+            target_claim = claim
 
         import concurrent.futures as _cf
         tavily = get_tavily_retriever()
