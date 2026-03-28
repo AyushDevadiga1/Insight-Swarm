@@ -188,15 +188,72 @@ async def stream_debate(claim: str, request: Request):
 
     async def generate():
         q = _queue.Queue()
+        
         def run():
+            start_time = time.time()
             try:
                 orch = get_orchestrator()
+                
+                class SSETracker:
+                    def set_stage(self, stage, message=""):
+                        s_str = str(stage).split('.')[-1].lower()
+                        elapsed = round(time.time() - start_time, 2)
+                        # Map internal string logic to frontend stages
+                        mapped = s_str
+                        if "round" in message.lower():
+                            for i in range(1, 10):
+                                if str(i) in message:
+                                    mapped = f"round_{i}_{s_str}"
+                                    break
+                        if mapped == "fact_check": mapped = "fact_checking"
+                        if mapped == "moderator": mapped = "moderating"
+                        
+                        q.put({"type": "stage", "data": {
+                            "stage": mapped, 
+                            "message": message, 
+                            "progress": 0.5, 
+                            "elapsed": elapsed
+                        }})
+                
+                orch.set_tracker(SSETracker())
+                
+                prev_pro = 0
+                prev_con = 0
+                prev_src = 0
+                
                 for event_type, state in orch.stream(claim.strip(), str(uuid.uuid4())):
                     raw = _state_to_dict(state)
-                    q.put({"type": event_type, "data": _normalise(raw)})
+                    
+                    cur_pro = len(raw.get("pro_arguments", []))
+                    if cur_pro > prev_pro:
+                        arg = raw["pro_arguments"][-1]
+                        chunk_size = 20
+                        for i in range(0, len(arg), chunk_size):
+                            q.put({"type": "agent_text", "data": {"agent": "PRO", "round": cur_pro, "chunk": arg[i:i+chunk_size]}})
+                            time.sleep(0.015)
+                        prev_pro = cur_pro
+                        
+                    cur_con = len(raw.get("con_arguments", []))
+                    if cur_con > prev_con:
+                        arg = raw["con_arguments"][-1]
+                        chunk_size = 20
+                        for i in range(0, len(arg), chunk_size):
+                            q.put({"type": "agent_text", "data": {"agent": "CON", "round": cur_con, "chunk": arg[i:i+chunk_size]}})
+                            time.sleep(0.015)
+                        prev_con = cur_con
+                        
+                    cur_src = len(raw.get("verification_results", []))
+                    if cur_src > prev_src:
+                        for s in raw["verification_results"][prev_src:]:
+                            q.put({"type": "source", "data": s})
+                        prev_src = cur_src
+                        
+                    if event_type in ("complete", "cache_hit"):
+                        q.put({"type": "verdict", "data": _normalise(raw)})
+                        
             except Exception as e:
                 logger.exception("Stream thread failed")
-                q.put({"type": "error", "data": {"message": str(e)}})
+                q.put({"type": "error", "data": {"type": "SYSTEM_ERROR", "message": str(e)}})
             finally:
                 q.put(None)  # sentinel
 
@@ -206,7 +263,6 @@ async def stream_debate(claim: str, request: Request):
             if await request.is_disconnected():
                 break
             try:
-                # Use a timeout so we can check for is_disconnected
                 item = await asyncio.get_event_loop().run_in_executor(None, q.get, True, 1.0)
                 if item is None:
                     yield f"event: done\ndata: {{\"message\":\"complete\"}}\n\n"
