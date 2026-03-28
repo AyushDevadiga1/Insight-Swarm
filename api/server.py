@@ -23,7 +23,7 @@ import json
 import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 # ── Path setup so imports from root work ─────────────────────────────────────
@@ -124,6 +124,43 @@ def _normalise(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+def root():
+    return """
+    <html>
+        <head>
+            <title>InsightSwarm API</title>
+            <style>
+                body { font-family: 'Inter', sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+                .card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); padding: 2.5rem; border-radius: 1.5rem; text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); max-width: 500px; }
+                h1 { color: #38bdf8; margin-bottom: 1rem; font-weight: 700; }
+                p { line-height: 1.6; color: #94a3b8; }
+                .status { display: inline-block; padding: 0.5rem 1rem; background: #10b981; color: #fff; border-radius: 9999px; font-size: 0.875rem; font-weight: 600; margin-bottom: 1.5rem; }
+                .instruction { background: #1e293b; padding: 1rem; border-radius: 0.75rem; text-align: left; border-left: 4px solid #38bdf8; margin-top: 2rem; }
+                code { color: #f472b6; font-family: 'Fira Code', monospace; }
+                a { color: #38bdf8; text-decoration: none; font-weight: 600; }
+                a:hover { text-decoration: underline; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <div class="status">Backend Online</div>
+                <h1>🦅 InsightSwarm API</h1>
+                <p>The multi-agent truth verification backend is running correctly.</p>
+                <div class="instruction">
+                    <strong>Next Step:</strong> Start the UI to interact with the app.
+                    <br><br>
+                    1. Open a new terminal<br>
+                    2. Run <code>cd frontend && npm run dev</code><br>
+                    3. Visit <a href="http://localhost:5173">http://localhost:5173</a>
+                </div>
+                <p style="margin-top: 1.5rem; font-size: 0.8rem;"><a href="/health">Health Check</a> | <a href="/docs">Docs</a></p>
+            </div>
+        </body>
+    </html>
+    """
+
 
 @app.get("/health")
 def health() -> Dict[str, str]:
