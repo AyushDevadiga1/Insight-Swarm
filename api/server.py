@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import sys
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -37,11 +38,28 @@ from src.llm.client import RateLimitError
 logger = logging.getLogger("insightswarm.api")
 logging.basicConfig(level=logging.INFO)
 
+# ── Pre-warm orchestrator at startup ─────────────────────────────────────────
+# Loads sentence-transformers embedding model NOW so the first user request
+# doesn't block for 5-15s waiting for the model to download.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    import asyncio
+    loop = asyncio.get_event_loop()
+    logger.info("Pre-warming orchestrator (loading embedding model)...")
+    try:
+        await loop.run_in_executor(None, get_orchestrator)
+        logger.info("Orchestrator pre-warm complete.")
+    except Exception as e:
+        logger.warning("Orchestrator pre-warm failed (non-fatal): %s", e)
+    yield
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="InsightSwarm API",
     description="Multi-Agent Truth Verification Protocol",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -188,6 +206,8 @@ async def stream_debate(claim: str, request: Request):
 
     async def generate():
         q = _queue.Queue()
+        DEBATE_TIMEOUT_S = 180   # hard cap — emit error if debate takes > 3 min
+        HEARTBEAT_EVERY_S = 3    # keep browser alive during silent LLM/Tavily phases
         
         def run():
             start_time = time.time()
@@ -259,16 +279,31 @@ async def stream_debate(claim: str, request: Request):
 
         threading.Thread(target=run, daemon=True).start()
 
+        last_heartbeat = time.time()
+        debate_start   = time.time()
+
         while True:
             if await request.is_disconnected():
                 break
             try:
                 item = await asyncio.get_event_loop().run_in_executor(None, q.get, True, 1.0)
+                last_heartbeat = time.time()
                 if item is None:
                     yield f"event: done\ndata: {{\"message\":\"complete\"}}\n\n"
                     break
                 yield f"event: {item['type']}\ndata: {json.dumps(item['data'])}\n\n"
             except _queue.Empty:
+                elapsed = time.time() - debate_start
+                # Hard timeout guard — emit error event if debate stalls
+                if elapsed > DEBATE_TIMEOUT_S:
+                    yield (
+                        f"event: error\ndata: {json.dumps({'type': 'TIMEOUT', 'message': f'Debate timed out after {int(elapsed)}s.'})}\n\n"
+                    )
+                    break
+                # Send heartbeat every 3s so the browser knows we're alive
+                if time.time() - last_heartbeat >= HEARTBEAT_EVERY_S:
+                    yield f"event: heartbeat\ndata: {json.dumps({'elapsed': round(elapsed, 1)})}\n\n"
+                    last_heartbeat = time.time()
                 continue
 
     return StreamingResponse(generate(), media_type="text/event-stream",
