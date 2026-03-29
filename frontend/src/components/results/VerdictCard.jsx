@@ -56,10 +56,22 @@ export default function VerdictCard({ result }) {
 
       <div className="verdict-emoji">{emoji}</div>
 
-      <div className="verdict-value">{verdict || 'UNKNOWN'}</div>
+      <div className={`verdict-value gradient-text gradient-${vc}`}>
+        {verdict || 'UNKNOWN'}
+      </div>
 
       {claim && (
         <blockquote className="verdict-claim">"{claim}"</blockquote>
+      )}
+
+      {/* Model Attribution */}
+      {(result.pro_model_used || result.con_model_used || result.moderator_model_used) && (
+        <div className="verdict-models">
+          <span className="verdict-model-label">Powered by:</span>
+          {result.pro_model_used && <span className="model-chip">Pro: {result.pro_model_used}</span>}
+          {result.con_model_used && <span className="model-chip">Con: {result.con_model_used}</span>}
+          {result.moderator_model_used && <span className="model-chip">Mod: {result.moderator_model_used}</span>}
+        </div>
       )}
 
       {/* Confidence bar */}
