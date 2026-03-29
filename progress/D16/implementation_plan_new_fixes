@@ -1,0 +1,504 @@
+# InsightSwarm — Complete Revamp Plan (FINAL)
+
+> [!IMPORTANT]
+> All decisions locked. Ready for execution. Start with Batches 1 + 4 (critical frozen-screen fix), then continue in order.
+
+A precise, root-cause-driven plan incorporating all user feedback, novelty feature gap analysis, and a full UI redesign.
+
+---
+
+## User Feedback — Resolved Decisions
+
+| Question | Your Decision | Implementation |
+|----------|---------------|----------------|
+| Q1 — Tavily limits | **Custom Google Search fallback** | Build `GoogleCSERetriever` using existing `GOOGLE_CX` + `GOOGLE_CLOUD` keys in `.env` |
+| Q2 — Debate speed | **Keep 3 rounds. Accuracy > speed.** | Show animated estimated time + "Why this takes time" tooltip UX |
+| Q3 — API key rotation | **Cross-provider borrowing**: borrow from the other side's provider when preferred is busy | Fix `_provider_order()` to allow same provider for both agents when primary is rate-limited |
+| Q4 — UI layout | **Mock both** — you pick | See Batch 6 — two complete layout concepts described |
+| Source links | **Claude-style hyperlinks** | Parse agent text for URLs → render `<a>` tags + full source panel at bottom |
+
+---
+
+## Novelty Features — Gap Analysis
+
+Features planned or advertised in the README that are **not yet implemented or only partially wired**:
+
+| Feature | Status | What's Missing |
+|---------|--------|----------------|
+| **Mid-Debate Verification Gates** | ❌ Dead code | `_verification_gate_node()` exists but is never added to the LangGraph graph |
+| **Human-in-the-Loop (HITL) Override** | ❌ Not started | No backend endpoint, no frontend UI component |
+| **Fallacy Detection** | ❌ Not started | Listed in README; no code exists anywhere |
+| **Claim Decomposition → UI** | ⚠️ Backend only | `claim_decomposer.py` works; frontend never shows sub-claims |
+| **Google Custom Search Fallback** | ❌ Not started | Keys exist in `.env`; no retriever class written |
+| **Temporal Verification reason in UI** | ⚠️ Backend only | `CONTENT_MISMATCH` status shown but no explanation of *why* |
+| **Feedback Learning Loop** | ⚠️ Stored, not used | `record_feedback()` saves to SQLite; never influences cache or trust |
+| **Hyperlink Citations in Chat** | ❌ Not started | Agent text outputs raw URLs as text; not parsed into links |
+| **Context Summarization** | ✅ Working | `_summarize_node()` is wired in the graph |
+| **Consensus Pre-Check** | ⚠️ Bug | Leaves blank debate tab for settled science (synthetic args fix needed) |
+| **Paywall Detection** | ✅ Working | `fact_checker.py` + shown in source table |
+| **User-Agent Rotation** | ✅ Working | `fact_checker.py` |
+| **Trust Tier System** | ✅ Working | `trust_scorer.py` + source table |
+| **Semantic Caching** | ✅ Working | Numpy index rebuild applied |
+| **Real-Time SSE Streaming** | ❌ Broken | Race condition + missing stage events + Vite buffering = effectively non-functional |
+
+---
+
+## All Decisions Locked ✅
+
+| # | Question | Decision |
+|---|----------|----------|
+| Q1 | Tavily limits | Google Custom Search fallback using existing `.env` keys |
+| Q2 | Debate speed | Keep 3 rounds — accuracy first. Improve wait UX. |
+| Q3 | API keys | Cross-provider borrowing when preferred is rate-limited |
+| Q4 | UI layout | Both concepts mocked — final pick deferred to user |
+| Q5 | HITL scope | **Deferred** — post-debate revision only, as a follow-up sprint |
+| Q6 | Fallacy detection | **LLM-based via Groq** — fast, consistent with existing stack, flags top 2 fallacies per argument |
+| Q7 | Source link previews | **Claude-style hover cards** — domain label inline + hover card showing title, domain, trust tier + link |
+
+---
+
+## Root-Cause Analysis
+
+### 🔴 Problem 1 — Frozen screen / long wait
+
+**Backend:**
+- The entire debate (consensus → Tavily → 6 LLM calls → fact-check → moderator) runs in a blocking `threading.Thread`. No SSE events emitted during Tavily search phase (10–12 s silent gap).
+- `_fact_checker_node` batches all 60 s of HTTP verification before emitting a single event.
+- Embedding model (`sentence-transformers`) loads lazily on the **first request** — 5–15 s startup freeze.
+
+**Frontend (critical bug):**
+- `App.jsx` line 60: `requestAnimationFrame(() => setSseEnabled(false))` — SSE connection opens then immediately closes on the next animation frame before any events arrive. **The entire SSE system never works in practice.**
+- No heartbeat events → browser sees silence → appears frozen.
+
+---
+
+### 🔴 Problem 2 — 404 sources, no fallback
+
+- Agent prompts don't hard-restrict URLs to Tavily-provided sources → LLMs hallucinate URLs.
+- `FactChecker` marks them `NOT_FOUND`/`INVALID_URL` but the frontend shows them with only a red badge — no explanation of **why** they failed.
+- Tavily content is truncated to 600 chars — agents sometimes can't find a matching URL and make one up.
+- When Tavily itself fails (rate-limited), `adversarial = {"pro":[], "con":[]}` → agents get zero evidence → hallucinate everything.
+
+---
+
+### 🔴 Problem 3 — Rate limits misconfigured
+
+- `MAX_CALLS_PER_MINUTE = 60` for all providers. Reality: Groq=30/min, Gemini=15/min, Cerebras=30/min.
+- Rolling window list not properly thread-safe (race condition between append and read).  
+- Tavily `tvly-dev-*` key = 1,000 searches/month → exhausted at ~500 debates.
+- When all providers fail, error is `RuntimeError("All LLM providers failed")` → frontend shows generic `SYSTEM_ERROR` with no actionable info.
+
+---
+
+### 🔴 Problem 4 — Frontend SSE & fetching bugs
+
+- Vite proxy for `/stream` has no `changeOrigin: true` and no SSE buffering disable → events get batched.
+- `EventSource` auto-reconnects on any drop → starts **duplicate debate** on backend.
+- `AbortSignal.timeout(8000)` in `useApiStatusStore` not supported in all browsers.
+- `stageHistory` never deduplicates → doubles on reconnect.
+
+---
+
+### 🔴 Problem 5 — Heavy processes
+
+- `DebateOrchestrator` singleton created on first HTTP request (not at startup).
+- 5 concurrent HTTP verify threads with no socket limit.
+- `SqliteSaver` with relative path — breaks on uvicorn reload on Windows.
+- Zustand `agentMessages` spreads full object on every 80 ms flush.
+
+---
+
+### 🔴 Problem 6 — Dull UI
+
+- Monochrome `#000000` / `#f0f0f0` terminal look — no depth, no gradients.
+- System font stack — functional but invisible.
+- No micro-animations, no glassmorphism.
+- Agent chat uses stacked bubbles with no visual split between PRO and CON.
+- Source URLs are raw text — not hyperlinks, massive truncated strings.
+
+---
+
+## Implementation Batches
+
+---
+
+### Batch 1 — Backend: Fix Streaming & Remove Blocking
+
+#### [MODIFY] [server.py](file:///c:/Users/hp/Desktop/InsightSwarm/api/server.py)
+
+1. **Pre-warm orchestrator** with FastAPI `lifespan` context:
+   ```python
+   @asynccontextmanager
+   async def lifespan(app):
+       get_orchestrator()  # loads sentence-transformers at startup
+       yield
+   app = FastAPI(lifespan=lifespan, ...)
+   ```
+2. **Heartbeat thread**: alongside the debate thread, run a separate coroutine that `yield`s `event: heartbeat` every 3 s while the queue is empty.
+3. **180 s global timeout**: if the queue sentinel (None) hasn't arrived after 180 s, emit `event: error` and close.
+4. **Add `DECOMPOSING` and `SEARCHING` stage events** inside `stream()` before the Tavily call.
+5. Fix Vite proxy buffering — add to `vite.config.js`:
+   ```js
+   '/stream': {
+     target: 'http://127.0.0.1:8000',
+     changeOrigin: true,
+     configure: (proxy) => {
+       proxy.on('proxyRes', (proxyRes) => {
+         proxyRes.headers['cache-control'] = 'no-cache';
+         proxyRes.headers['x-accel-buffering'] = 'no';
+       });
+     }
+   }
+   ```
+
+#### [MODIFY] [debate.py](file:///c:/Users/hp/Desktop/InsightSwarm/src/orchestration/debate.py)
+
+1. Add `_set_stage("DECOMPOSING", ...)` and `_set_stage("SEARCHING", ...)` before Tavily call in both `run()` and `stream()`.
+2. Fix **consensus blank tab bug** (from codebase_status Issue 3): add synthetic pro/con arguments when SETTLED_TRUTHS or LLM consensus skips debate.
+3. Fix **sources/arguments misalignment bug** (codebase_status Issue): cap `pro_sources`/`con_sources` in sync with arguments in `_summarize_node`.
+4. Delete dead `_verification_gate_node()` method (or wire it — see Batch 5).
+
+---
+
+### Batch 2 — Backend: Source Fallback + Google CSE
+
+#### [NEW] [google_cse_retriever.py](file:///c:/Users/hp/Desktop/InsightSwarm/src/utils/google_cse_retriever.py)
+
+Build a `GoogleCSERetriever` class:
+```python
+class GoogleCSERetriever:
+    BASE = "https://www.googleapis.com/customsearch/v1"
+    def __init__(self, api_key=None, cx=None):
+        self.api_key = api_key or os.getenv("GOOGLE_CLOUD")
+        self.cx = cx or os.getenv("GOOGLE_CX")
+    
+    def search_adversarial(self, claim, max_results=5):
+        # Two queries: pro + con
+        # Returns same {"pro": [...], "con": [...]} shape as Tavily
+        ...
+    
+    def _search(self, query, n):
+        resp = requests.get(self.BASE, params={
+            "key": self.api_key, "cx": self.cx,
+            "q": query, "num": min(n, 10)
+        }, timeout=10)
+        ...
+```
+
+#### [MODIFY] [tavily_retriever.py](file:///c:/Users/hp/Desktop/InsightSwarm/src/utils/tavily_retriever.py)
+
+1. Catch Tavily 429 / quota errors and **automatically fall back** to `GoogleCSERetriever`.
+2. Log which retriever was used so the frontend can show "Evidence via Google" vs "Evidence via Tavily".
+
+#### [MODIFY] [fact_checker.py](file:///c:/Users/hp/Desktop/InsightSwarm/src/agents/fact_checker.py)
+
+1. **Pre-validate URLs**: reject `localhost`, `127.0.0.1`, missing-scheme, non-ASCII domains before HTTP fetch.
+2. **Tavily-provided URL fallback**: if a URL is from Tavily's evidence set and returns 404, mark as `CONTENT_MISMATCH` (not `NOT_FOUND`) with note "Source unavailable at verification time" — prevents unfair low verification rates.
+3. **Temporal mismatch explanation**: store the temporal mismatch reason in `SourceVerification.error` with a template: `"Year mismatch: claim mentions {year_in_claim}, source mentions {year_in_source}"`.
+
+#### [MODIFY] [debate.py](file:///c:/Users/hp/Desktop/InsightSwarm/src/orchestration/debate.py)
+
+1. **Grounded citation enforcement**: in `ProAgent`/`ConAgent` prompt, add a section:
+   ```
+   AVAILABLE SOURCES (cite ONLY these URLs):
+   {"\n".join(f"- {e['url']}" for e in pro_evidence)}
+   ```
+2. **Post-debate hallucination strip**: `_sanitize_sources()` — compare agent-cited URLs against `state.evidence_sources` list; flag non-matching as `HALLUCINATED`.
+
+---
+
+### Batch 3 — Backend: Rate-Limit Overhaul + Cross-Provider Borrowing
+
+#### [MODIFY] [client.py](file:///c:/Users/hp/Desktop/InsightSwarm/src/llm/client.py)
+
+1. **Per-provider rate limits**:
+   ```python
+   PROVIDER_RATE_LIMITS = {
+       "groq":       30,   # free tier
+       "gemini":     15,   # free tier
+       "cerebras":   30,
+       "openrouter": 20,
+   }
+   ```
+2. **Thread-safe rolling windows**: one `threading.Lock` per provider's `last_call_times` list.
+3. **Cross-provider borrowing**: when the preferred provider for an agent is rate-limited, try the secondary providers in order but note the substitution in `state.metrics["model_substitutions"]`. This way both the moderator can see it and the UI can warn "Used Gemini instead of Groq for ProAgent (Groq rate-limited)."
+4. **Informative rate-limit errors**: when all providers fail, raise `RateLimitError` with:
+   ```
+   "All providers rate-limited. Groq cooldown: 45s, Gemini cooldown: 12s. Fastest retry: Gemini in 12s."
+   ```
+5. Remove the Cerebras `preferred_provider` from `claim_decomposer.py` → change to `"groq"` (Cerebras DNS issues confirmed).
+
+#### [MODIFY] [api_key_manager.py](file:///c:/Users/hp/Desktop/InsightSwarm/src/utils/api_key_manager.py)
+
+1. Cap `report_key_failure` cooldown at **120 s max** (current max is 300 s — too long for interactive use).
+2. Add `ENABLE_API_LIVENESS_PROBES=true` path for Cerebras and OpenRouter so expired keys are detected at startup, not at call time.
+
+---
+
+### Batch 4 — Frontend: Fix SSE Race Condition & State
+
+#### [MODIFY] [App.jsx](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/src/App.jsx)
+
+**Critical fix — replace the broken SSE trigger:**
+```jsx
+// REMOVE: requestAnimationFrame(() => setSseEnabled(false)) ← kills the connection
+// REPLACE WITH: runId-based trigger
+const runIdRef = useRef(null);
+
+const handleVerify = () => {
+  if (!claim.trim() || isRunning) return;
+  const id = crypto.randomUUID();
+  runIdRef.current = id;
+  setSseClaim(claim);
+  setSseRunId(id); // stable trigger — useSSE reconnects only when runId changes
+};
+```
+
+Add waiting state: if `isRunning && !streamConnected && stageHistory.length === 0`, show a "Connecting to debate engine…" orb for up to 10 s.
+
+#### [MODIFY] [useSSE.js](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/src/hooks/useSSE.js)
+
+1. **Prevent duplicate runs**: set a `closedIntentionally` ref flag — in `onerror`, if flag is false, close and set error instead of letting `EventSource` auto-reconnect.
+2. **Heartbeat listener**: `es.addEventListener('heartbeat', () => useDebateStore.getState().setHeartbeat(Date.now()))`.
+3. **Stage events during pre-debate**: add `DECOMPOSING` and `SEARCHING` to `STAGES` map in `useDebateStore.js`.
+
+#### [MODIFY] [useDebateStore.js](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/src/store/useDebateStore.js)
+
+1. Add `DECOMPOSING` and `SEARCHING` entries to the `STAGES` map.
+2. `pushStage`: skip if `stageHistory[last].stage === stageData.stage` (deduplication).
+3. Add `lastHeartbeat: null` field; add `setHeartbeat(ts)` action.
+4. Add `subClaims: []` field for claim decomposition display.
+
+#### [MODIFY] [vite.config.js](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/vite.config.js)
+
+Add `changeOrigin: true` + SSE buffering disable to all proxy entries (code shown in Batch 1 above).
+
+#### [MODIFY] [useApiStatusStore.js](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/src/store/useApiStatusStore.js)
+
+Replace `AbortSignal.timeout()` with `AbortController` + `clearTimeout` pattern. Add exponential backoff after 3 consecutive failures.
+
+---
+
+### Batch 5 — Novelty Features: Wire the Unfinished Parts
+
+#### [NEW] [google_cse_retriever.py](file:///c:/Users/hp/Desktop/InsightSwarm/src/utils/google_cse_retriever.py)
+_(Already described in Batch 2)_
+
+#### [MODIFY] Sub-Claim Display
+
+**[MODIFY] [debate.py](file:///c:/Users/hp/Desktop/InsightSwarm/src/orchestration/debate.py)**  
+After decomposition, emit a `stage` SSE event with type `"sub_claims"` and the list:
+```python
+q.put({"type": "sub_claims", "data": {"claims": sub_claims}})
+```
+
+**[NEW] components/input/SubClaimBanner.jsx**  
+Shows a compact banner below the input when the claim was split:
+```
+🔀 Claim split into 2 sub-claims:
+  • "Coffee contains antioxidants" 
+  • "Antioxidants prevent disease"
+```
+
+#### Hyperlink Citations in Agent Bubbles — Claude-Style Hover Cards
+
+**[MODIFY] [AgentBubble.jsx](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/src/components/debate/AgentBubble.jsx)**  
+Add a `parseAgentText(text, sources)` utility and a `<SourceHoverCard>` component:
+
+**Inline rendering:**
+- Regex-match raw URLs in agent argument text
+- Replace each URL with a inline chip: `[domain.com]` styled like a pill badge
+- On **hover**, show a card (CSS `position: absolute`, no JS library) containing:
+  - 🏷 Source title (from Tavily metadata or `<title>` tag)
+  - 🌐 Full domain + favicon
+  - 🔒 Trust tier badge (AUTHORITATIVE / CREDIBLE / GENERAL)
+  - ✅/❌ Verification status
+  - Direct link button → opens URL in new tab
+
+**Footer reference list** at the bottom of each bubble:
+```
+Sources cited:
+[1] harvard.edu — Coffee and Cancer Risk   ✅ CREDIBLE
+[2] nejm.org — Antioxidant Meta-Analysis   ✅ AUTHORITATIVE  
+[3] blogspot.com — Health Tips 2024        ❌ NOT FOUND
+```
+
+**Fallback** (if URL has no Tavily metadata): show domain only, link opens URL directly.
+
+#### Fallacy Detection (LLM-based)
+
+**[MODIFY] [moderator.py](file:///c:/Users/hp/Desktop/InsightSwarm/src/agents/moderator.py)**  
+Add a `detect_fallacies(argument)` method that calls Groq with a small structured prompt:
+```
+Identify any logical fallacies in this argument. Return JSON:
+{"fallacies": [{"name": "...", "quote": "...", "explanation": "..."}]}
+```
+Run for both PRO and CON final arguments. Store in `state.metrics["fallacies"]`.
+
+**[NEW] components/results/FallacyPanel.jsx**  
+Shows detected fallacies per agent with expandable explanation cards.
+
+#### Temporal Rejection Explanation
+
+**[MODIFY] [SourceTable.jsx](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/src/components/results/SourceTable.jsx)**  
+For `CONTENT_MISMATCH` rows, show the `error` field in a tooltip/expand:
+```
+⚠ MISMATCH  (hover) → "Year in claim: 2023, Year in source: 2019"
+```
+
+---
+
+### Batch 6 — Complete UI Redesign (Both Concepts)
+
+> [!IMPORTANT]
+> Both layouts use the same design system. Pick one after seeing the mockups.
+
+**Design System (shared):**
+- Font: **Inter** (Google Fonts, weights 400/500/600/700) — loaded in `index.html`
+- Background: `#050810` deep space with animated aurora gradient blobs (CSS `@keyframes`, no JS library)
+- Glass surfaces: `backdrop-filter: blur(20px)` + `background: rgba(255,255,255,0.04)` + `border: 1px solid rgba(255,255,255,0.08)`
+- Accent: `linear-gradient(135deg, #6366f1, #8b5cf6, #06b6d4)` (indigo → violet → cyan)
+- PRO agent colour: `#10b981` emerald with `box-shadow: 0 0 20px rgba(16,185,129,0.2)`
+- CON agent colour: `#f43f5e` rose with `box-shadow: 0 0 20px rgba(244,63,94,0.2)`
+- Verdict colours: TRUE=emerald, FALSE=rose, PARTIALLY TRUE=amber, INSUFFICIENT=slate
+- Micro-animations: card entrance `fadeSlideUp 0.3s ease`, hover `translateY(-2px)`, button press `scale(0.97)`
+- Scrollbar: 4px, glass-tinted thumb
+
+---
+
+**Concept A — "Mission Control" (keep sidebar)**
+
+```
+┌─────────────┬──────────────────────────────────────┐
+│  SIDEBAR    │  MAIN CONTENT (scrollable)            │
+│  (glass)    │                                       │
+│             │  [INSIGHTSWARM]  ← aurora gradient    │
+│  ● Groq     │  Multi-Agent Truth Verification       │
+│  ● Gemini   │                                       │
+│  ● Cerebras │  ┌──────────────────────────────────┐ │
+│  ● Tavily   │  │ 📝 Enter a claim to verify...    │ │
+│             │  │                     [VERIFY →]   │ │
+│  Examples   │  └──────────────────────────────────┘ │
+│  ─────────  │                                       │
+│  • Coffee.. │  ┌─── DEBATE ARENA ─────────────────┐ │
+│  • Vaccines │  │ PRO (Groq)     │ CON (Gemini)    │ │
+│             │  │ ┌────────────┐ │ ┌─────────────┐ │ │
+│  History    │  │ │ [bubble]   │ │ │ [bubble]    │ │ │
+│  ─────────  │  │ │ [bubble]   │ │ │ [bubble]    │ │ │
+│  • Coffee.. │  │ └────────────┘ │ └─────────────┘ │ │
+│    TRUE 92% │  └────────────────────────────────────┘ │
+└─────────────┴──────────────────────────────────────┘
+```
+
+Provider health dots pulse green/amber/red. Sidebar is collapsible on mobile.
+
+---
+
+**Concept B — "Chat First" (no sidebar, full-width debates)**
+
+```
+┌─────────────────────────────────────────────────────┐
+│  🦅 INSIGHTSWARM     [● Groq ● Gemini ● Tavily]  ≡  │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │
+│                                                     │
+│  ┌──────────────────────────────────────────────┐  │
+│  │ Coffee drinking has been shown to prevent     │  │
+│  │ multiple types of cancer.              [✓]→  │  │
+│  └──────────────────────────────────────────────┘  │
+│                          ↓ Claim split into 2 parts │
+│  ┌──── LIVE DEBATE ─────────────────────────────┐  │
+│  │                                              │  │
+│  │  🟢 PRO (Groq · Round 1)                     │  │
+│  │  Coffee contains polyphenols¹ that...  [1]   │  │
+│  │                                              │  │
+│  │              🔴 CON (Gemini · Round 1)       │  │
+│  │              Studies show correlation²...    │  │
+│  │                                              │  │
+│  └──────────────────────────────────────────────┘  │
+│                                                     │
+│  [VERDICT: PARTIALLY TRUE — 71% confidence]        │
+│  ══ SOURCES ══ ══ REASONING ══ ══ FALLACIES ══     │
+└─────────────────────────────────────────────────────┘
+```
+
+API status shown as a compact status bar at the top. History accessible via hamburger menu. Debates feel like a conversation thread.
+
+---
+
+**Common to both concepts:**
+
+#### [MODIFY] [index.css](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/src/index.css)
+Complete rewrite with new design tokens, aurora background animation, glassmorphism surfaces, agent-specific colour theming, and micro-animation keyframes.
+
+#### [MODIFY] [index.html](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/index.html)
+Add Google Fonts Inter preconnect and stylesheet link.
+
+#### [MODIFY] [VerdictCard.jsx](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/src/components/results/VerdictCard.jsx)
+- Large gradient verdict badge with colour-coded glow
+- Animated confidence meter (CSS transition)
+- Model attribution row: "Moderated by OpenRouter · claude-3.5-sonnet"
+
+#### [MODIFY] [AgentBubble.jsx](file:///c:/Users/hp/Desktop/InsightSwarm/frontend/src/components/debate/AgentBubble.jsx)
+- Left/right split (PRO left, CON right) or top/bottom depending on concept chosen
+- Typing cursor `▋` while streaming
+- Hyperlink citations (see Batch 5)
+- Numbered source reference list at bubble footer
+
+#### [NEW] components/common/LoadingOrb.jsx
+Animated SVG orbit ring with stage label inside — replaces plain spinner during debate.
+
+#### [NEW] components/common/AuroraBackground.jsx
+CSS-only animated gradient blob layer behind the app shell (no canvas, no library).
+
+#### [NEW] components/results/FallacyPanel.jsx
+Expandable fallacy detection results per agent (see Batch 5).
+
+#### [NEW] components/input/SubClaimBanner.jsx
+Shows split sub-claims after decomposition (see Batch 5).
+
+---
+
+## Execution Order
+
+| Batch | Area | Blocks on | Risk | Est. Hours |
+|-------|------|-----------|------|-----------|
+| **1** | Backend streaming + heartbeat | Nothing | Medium | 2.5 h |
+| **2** | Google CSE fallback + source grounding | Batch 1 | Low | 2 h |
+| **3** | Rate-limit overhaul + cross-borrowing | Nothing | Low | 1.5 h |
+| **4** | Frontend SSE race fix + state | Batch 1 | High (critical) | 2 h |
+| **5** | Novelty features (hyperlinks, fallacies, sub-claims) | Batch 4 | Low | 2.5 h |
+| **6** | Full UI redesign | Batch 4 | Low (visual only) | 3 h |
+
+**Total: ~14 hours.** Batches 1+4 must ship together — they are the core fix for the frozen screen problem.
+
+---
+
+## Verification Plan
+
+```bash
+# 1. Backend health
+python -m uvicorn api.server:app --port 8000
+
+# 2. SSE integrity — verify events arrive one by one (not batched)
+curl -N "http://127.0.0.1:8000/stream?claim=coffee+prevents+cancer" --max-time 120
+
+# 3. Rate-limit stats
+python -c "from src.llm.client import FreeLLMClient; c=FreeLLMClient(); print(c.get_stats())"
+
+# 4. Google CSE retriever
+python -c "from src.utils.google_cse_retriever import GoogleCSERetriever; r=GoogleCSERetriever(); print(r.search_adversarial('coffee cancer', 3))"
+
+# 5. Frontend SSE flow
+# Start frontend → submit claim → open DevTools Network tab → filter "stream"
+# Verify: events arrive progressively, not all at once
+```
+
+**Manual checklist:**
+- [ ] Submit claim → first stage event appears within 3 s
+- [ ] "Backend still working…" heartbeat shows during Tavily phase
+- [ ] Kill backend mid-debate → clean error with retry button (not frozen)
+- [ ] Source with 404 → banner shows "Source unavailable at verification time"
+- [ ] Sub-claim banner appears for multi-part claims
+- [ ] Agent bubble URLs render as `[domain.com]` links, not raw text
+- [ ] Fallacy panel shows detected fallacies for each agent
+- [ ] New UI renders correctly at 1080p and 1440p in Chrome/Edge
