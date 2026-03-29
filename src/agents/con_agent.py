@@ -68,9 +68,10 @@ COUNTER-EVIDENCE:
 YOUR TASK:
 1. Build the strongest case AGAINST this claim.
 2. Directly challenge the Pro argument — identify flaws or missing context.
-3. Cite pre-fetched URLs if available; otherwise use training knowledge labeled [General Knowledge].
-4. Be specific in 3-5 sentences.
-5. List source URLs in the 'sources' field.
+3. CITE ONLY URLS FROM THE EVIDENCE PROVIDED ABOVE. Do not make up or hallucinate URLs.
+4. If no URLs are provided, use training knowledge labeled [General Knowledge].
+5. Be specific in 3-5 sentences.
+6. List the source URLs you cited in the 'sources' field.
 
 Do NOT start with "I" or "As an AI"."""
         else:
@@ -90,7 +91,9 @@ LATEST PRO REBUTTAL:
 COUNTER-EVIDENCE:
 {formatted_evidence}
 
+YOUR TASK:
 1. Rebut the Pro's latest argument specifically.
 2. Identify new flaws, missing context, or contradictory evidence.
-3. If previous sources failed, cite stronger alternatives.
-4. Keep to 3-5 focused sentences."""
+3. CITE ONLY URLS FROM THE EVIDENCE PROVIDED ABOVE. Do not hallucinate.
+4. If previous sources failed, cite stronger alternatives from the list.
+5. Keep to 3-5 focused sentences."""
