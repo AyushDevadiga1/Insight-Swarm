@@ -6,11 +6,35 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/verify': 'http://127.0.0.1:8000',
-      '/feedback': 'http://127.0.0.1:8000',
-      '/health': 'http://127.0.0.1:8000',
-      '/api/status': 'http://127.0.0.1:8000',
-      '/stream': 'http://127.0.0.1:8000',
+      '/verify': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/feedback': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/health': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/api/status': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      // SSE endpoint — disable buffering so events flow immediately
+      '/stream': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('proxyRes', (_proxyRes, _req, res) => {
+            // Tell Nginx/Vite not to buffer this response
+            res.setHeader('Cache-Control', 'no-cache')
+            res.setHeader('X-Accel-Buffering', 'no')
+          })
+        },
+      },
     }
   }
 })
+
