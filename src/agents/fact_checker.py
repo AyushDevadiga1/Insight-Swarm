@@ -145,12 +145,19 @@ class FactChecker(BaseAgent):
             if not (parsed.scheme in ("http", "https") and parsed.netloc):
                 return SourceVerification(url=url, status="INVALID_URL", agent_source=agent, error="Invalid URL format")
 
+            netloc = parsed.netloc.lower()
+            if "localhost" in netloc or "127.0.0.1" in netloc or not netloc.isascii():
+                return SourceVerification(url=url, status="INVALID_URL", agent_source=agent, error="Invalid or restricted domain")
+
+            is_tavily_source = False
             if state:
                 for pool in [state.evidence_sources, state.pro_evidence, state.con_evidence]:
                     if not pool: continue
                     for item in pool:
-                        if item.get("url") == url and item.get("content"):
-                            return self._process_content(url, item["content"], agent, claim, claim_embedding)
+                        if item.get("url") == url:
+                            is_tavily_source = True
+                            if item.get("content"):
+                                return self._process_content(url, item["content"], agent, claim, claim_embedding)
 
             resp = self._fetch_url(url)
             raw_bytes = b""
@@ -166,6 +173,9 @@ class FactChecker(BaseAgent):
 
             if resp.status_code == 200:
                 return self._process_content(url, content_text, agent, claim, claim_embedding)
+            
+            if is_tavily_source and resp.status_code == 404:
+                return SourceVerification(url=url, status="CONTENT_MISMATCH", agent_source=agent, error="Source unavailable at verification time")
             return SourceVerification(url=url, status="NOT_FOUND", agent_source=agent, error=f"HTTP {resp.status_code}")
 
         except requests.Timeout:
