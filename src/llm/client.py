@@ -49,7 +49,15 @@ class RateLimitError(RuntimeError):
 
 
 class FreeLLMClient:
-    MAX_CALLS_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+    # Accurate per-provider free-tier rate limits (requests per minute)
+    # Previous code used a single MAX_CALLS_PER_MINUTE=60 which is 2-4x too high
+    # for Groq (30/min) and Gemini (15/min) free tiers.
+    PROVIDER_RATE_LIMITS = {
+        "groq":       int(os.getenv("RATE_LIMIT_GROQ",       "28")),  # actual: 30 — buffer of 2
+        "gemini":     int(os.getenv("RATE_LIMIT_GEMINI",     "13")),  # actual: 15 — buffer of 2
+        "cerebras":   int(os.getenv("RATE_LIMIT_CEREBRAS",   "28")),  # actual: 30
+        "openrouter": int(os.getenv("RATE_LIMIT_OPENROUTER", "18")),  # actual: 20
+    }
     GROQ_MODEL       = os.getenv("GROQ_MODEL",        "llama-3.3-70b-versatile")
     GEMINI_MODEL     = os.getenv("GEMINI_MODEL",       "gemini-2.0-flash")
     CEREBRAS_MODEL   = os.getenv("CEREBRAS_MODEL",     "llama3.1-8b")
@@ -150,11 +158,16 @@ class FreeLLMClient:
         return None
 
     def _check_rate_limit(self, provider: str, call_times: list) -> bool:
-        now = time.time()
+        """Returns False if provider is at its per-minute rate limit."""
+        limit = self.PROVIDER_RATE_LIMITS.get(provider, 20)
+        now   = time.time()
         recent = [t for t in call_times if t > now - 60]
         call_times.clear(); call_times.extend(recent)
-        if len(call_times) >= self.MAX_CALLS_PER_MINUTE:
-            logger.warning("Rate limit for %s: %d calls/min", provider, len(call_times))
+        if len(call_times) >= limit:
+            logger.warning(
+                "Rate limit hit for %s: %d/%d calls/min",
+                provider, len(call_times), limit
+            )
             return False
         return True
 
