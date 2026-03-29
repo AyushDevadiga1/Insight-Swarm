@@ -36,17 +36,34 @@ export const useApiStatusStore = create((set, get) => ({
   isLoading: false,
   error: null,
   _pollTimer: null,
+  _consecutiveFailures: 0,   // backoff counter
 
   /** Fetch provider status from /api/status */
   fetchStatus: async () => {
     set({ isLoading: true });
+    // AbortController for compatibility — AbortSignal.timeout() not in all browsers
+    const controller = new AbortController();
+    const timeoutId  = setTimeout(() => controller.abort(), 8000);
     try {
-      const res = await fetch('/api/status', { signal: AbortSignal.timeout(8000) });
+      const res = await fetch('/api/status', { signal: controller.signal });
+      clearTimeout(timeoutId);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      set({ providers: data, lastChecked: new Date(), isLoading: false, error: null });
+      set({ providers: data, lastChecked: new Date(), isLoading: false,
+            error: null, _consecutiveFailures: 0 });
     } catch (err) {
-      set({ isLoading: false, error: err.message });
+      clearTimeout(timeoutId);
+      const failures = get()._consecutiveFailures + 1;
+      set({ isLoading: false, error: err.message, _consecutiveFailures: failures });
+      // After 3 failures, slow down polling to 60s to reduce noise
+      if (failures === 3) {
+        const { _pollTimer } = get();
+        if (_pollTimer) {
+          clearInterval(_pollTimer);
+          const timer = setInterval(() => get().fetchStatus(), 60_000);
+          set({ _pollTimer: timer });
+        }
+      }
     }
   },
 
