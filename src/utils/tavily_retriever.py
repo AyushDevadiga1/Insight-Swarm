@@ -31,9 +31,10 @@ class TavilyEvidenceRetriever:
                 self.client = None
 
     def search_adversarial(self, claim: str, max_results: int = 5) -> Dict[str, List[Dict[str, Any]]]:
-        """Dual-sided search: one for supporting evidence, one for rebuttals."""
+        """Dual-sided search: one for supporting evidence, one for rebuttals.
+        Falls back to Google Custom Search if Tavily is rate-limited or quota-exhausted."""
         if not self.client:
-            return {"pro": [], "con": []}
+            return self._google_fallback(claim, max_results)
         try:
             pro_resp = self.client.search(query=f"{claim} facts and supporting evidence",
                                           search_depth="advanced", max_results=max_results)
@@ -50,10 +51,24 @@ class TavilyEvidenceRetriever:
             return data
         except Exception as e:
             err = str(e).lower()
-            if "429" in err or "rate limit" in err:
-                logger.warning("Tavily rate limit reached: %s", e)
+            if "429" in err or "rate limit" in err or "quota" in err:
+                logger.warning("Tavily rate-limited — falling back to Google CSE: %s", e)
+                return self._google_fallback(claim, max_results)
             else:
                 logger.error("Adversarial search failed: %s", e)
+            return {"pro": [], "con": []}
+
+    def _google_fallback(self, claim: str, max_results: int) -> Dict[str, List[Dict[str, Any]]]:
+        """Use Google Custom Search as fallback when Tavily is unavailable."""
+        try:
+            from src.utils.google_cse_retriever import get_google_cse_retriever
+            cse = get_google_cse_retriever()
+            result = cse.search_adversarial(claim, max_results)
+            if result["pro"] or result["con"]:
+                logger.info("Google CSE fallback: %d pro / %d con", len(result["pro"]), len(result["con"]))
+            return result
+        except Exception as e:
+            logger.error("Google CSE fallback also failed: %s", e)
             return {"pro": [], "con": []}
 
     def search_evidence(self, claim: str, max_results: int = 5) -> List[Dict[str, Any]]:
