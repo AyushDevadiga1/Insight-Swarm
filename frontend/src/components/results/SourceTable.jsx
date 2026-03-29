@@ -13,7 +13,7 @@
  */
 
 import React, { useState } from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Info } from 'lucide-react';
 
 const STATUS_CONFIG = {
   VERIFIED:           { label: 'VERIFIED',   color: 'var(--pro)',   bg: 'rgba(34,197,94,0.08)' },
@@ -119,9 +119,15 @@ export default function SourceTable({ sources }) {
                   {clip(src.url)}
                   <ExternalLink size={10} className="source-ext-icon" />
                 </a>
-                {!isVerified && src.error && (
-                  <span className="source-error">{src.error}</span>
-                )}
+                <div className="source-meta">
+                  {!isVerified && src.error && src.status === 'CONTENT_MISMATCH' ? (
+                    <span className="source-error-tooltip" title={src.error}>
+                      <Info size={12} className="info-icon" /> Temporal Mismatch
+                    </span>
+                  ) : !isVerified && src.error ? (
+                    <span className="source-error">{src.error}</span>
+                  ) : null}
+                </div>
               </div>
 
               {/* Trust tier */}
