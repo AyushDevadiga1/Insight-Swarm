@@ -72,6 +72,8 @@ class Moderator(BaseAgent):
                 "trust_weight":            0.2, "trust_score":            avg_trust,
                 "consensus_weight":        0.2, "consensus_score":        consensus_score,
             }
+            final_metrics["pro_fallacies"] = metrics_dict.get("pro_fallacies", [])
+            final_metrics["con_fallacies"] = metrics_dict.get("con_fallacies", [])
 
             reasoning = result.reasoning or ""
             if len(reasoning) > 1500:
@@ -173,6 +175,7 @@ reasoning with: "SAFETY NOTE: Consult a medical professional before acting on he
 
 STRUCTURED OUTPUT — include in your metrics dictionary:
 - "argument_quality": float 0.0-1.0 (logical strength of arguments overall)
-- "logical_fallacies": list of any fallacies detected (empty list if none)
+- "pro_fallacies": list of strings (flag max 2 logical fallacies used by ProAgent, e.g., ["Strawman: misrepresented X"], empty if none)
+- "con_fallacies": list of strings (flag max 2 logical fallacies used by ConAgent, empty if none)
 - "credibility_score": float 0.0-1.0 (evidence credibility)
 """
