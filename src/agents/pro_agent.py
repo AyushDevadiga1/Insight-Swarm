@@ -63,9 +63,10 @@ EVIDENCE TO USE:
 
 YOUR TASK:
 1. Build the strongest case FOR this claim.
-2. Cite pre-fetched URLs if available; otherwise use training knowledge labeled [General Knowledge].
-3. Make a persuasive argument in 3-5 sentences.
-4. List source URLs in the 'sources' field.
+2. CITE ONLY URLS FROM THE EVIDENCE PROVIDED ABOVE. Do not make up or hallucinate URLs.
+3. If no URLs are provided, use training knowledge labeled [General Knowledge].
+4. Make a persuasive argument in 3-5 sentences.
+5. List the source URLs you cited in the 'sources' field.
 
 Do NOT start with "I" or "As an AI"."""
         else:
@@ -82,7 +83,9 @@ OPPOSING ARGUMENT:
 SUPPORTING EVIDENCE:
 {formatted_evidence}
 
+YOUR TASK:
 1. Directly rebut the Con argument.
 2. Reinforce with additional evidence or stronger reasoning.
-3. If previous sources failed, cite different ones.
-4. Keep to 3-5 focused sentences."""
+3. CITE ONLY URLS FROM THE EVIDENCE PROVIDED ABOVE. Do not hallucinate.
+4. If previous sources failed, cite different ones from the list.
+5. Keep to 3-5 focused sentences."""
