@@ -1350,3 +1350,481 @@ input, textarea { font-family: var(--sans); }
   .source-agent, .source-trust { display: none; }
   .breakdown-item { grid-template-columns: 120px 1fr 36px; }
 }
+
+/* ── New Components ───────────────────────────────────────────────────────── */
+
+/* SubClaimBanner */
+.subclaim-banner {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 24px;
+}
+.subclaim-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.subclaim-icon {
+  font-size: 14px;
+}
+.subclaim-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.subclaim-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.subclaim-item {
+  font-size: 13px;
+  color: var(--text2);
+  padding-left: 24px;
+  position: relative;
+}
+.subclaim-item::before {
+  content: "→";
+  position: absolute;
+  left: 4px;
+  color: var(--border);
+}
+
+/* FallacyPanel */
+.fallacy-panel {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.fallacy-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 16px;
+}
+.fallacy-column-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+.fallacy-pro .fallacy-column-title { color: var(--pro); }
+.fallacy-con .fallacy-column-title { color: var(--con); }
+.fallacy-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fallacy-list li {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.5;
+  padding: 8px 12px;
+  background: var(--s1);
+  border-left: 2px solid var(--border);
+  border-radius: 0 4px 4px 0;
+}
+.fallacy-pro .fallacy-list li { border-left-color: var(--pro); }
+.fallacy-con .fallacy-list li { border-left-color: var(--con); }
+
+@media (max-width: 700px) {
+  .fallacy-columns { grid-template-columns: 1fr; gap: 16px; }
+}
+
+/* SourceTable Temporal Mismatch Tooltip */
+.source-error-tooltip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--amber);
+  cursor: help;
+  font-size: 12px;
+}
+
+/* Agent sources — progressive disclosure via <details> */
+.agent-sources { margin-top: 10px; }
+
+.agent-sources-toggle {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text3);
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 0;
+  border-top: 1px solid var(--border);
+  transition: color var(--t-fast);
+}
+.agent-sources-toggle:hover { color: var(--text2); }
+
+.agent-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+}
+
+.agent-source-link {
+  font-size: 10px;
+  color: var(--fact);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity var(--t-fast);
+}
+.agent-source-link:hover { opacity: 0.7; }
+
+/* ── Feedback Panel ───────────────────────────────────────────────────────── */
+.feedback-panel {
+  padding: 24px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  content-visibility: auto;
+}
+
+.feedback-btns { display: flex; gap: 10px; }
+
+.btn-feedback {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  border: 1px solid;
+  transition: all var(--t-fast);
+}
+
+.btn-feedback--up { color: var(--pro); border-color: rgba(34,197,94,0.4); }
+.btn-feedback--up:hover { background: rgba(34,197,94,0.08); border-color: var(--pro); }
+
+.btn-feedback--down { color: var(--con); border-color: rgba(239,68,68,0.4); }
+.btn-feedback--down:hover { background: rgba(239,68,68,0.08); border-color: var(--con); }
+
+.feedback-done {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--text3);
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+.app-footer {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 24px;
+  margin-top: 40px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text3);
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 700px) {
+  .sidebar { display: none; }
+  .main-inner { padding: 24px 16px 60px; }
+  .hero-title { font-size: 36px; }
+  .source-row { grid-template-columns: 28px 1fr 60px; }
+  .source-agent, .source-trust { display: none; }
+  .breakdown-item { grid-template-columns: 120px 1fr 36px; }
+}
+
+/* ── New Components ───────────────────────────────────────────────────────── */
+
+/* SubClaimBanner */
+.subclaim-banner {
+  background: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 24px;
+}
+.subclaim-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.subclaim-icon {
+  font-size: 14px;
+}
+.subclaim-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.subclaim-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.subclaim-item {
+  font-size: 13px;
+  color: var(--text2);
+  padding-left: 24px;
+  position: relative;
+}
+.subclaim-item::before {
+  content: "→";
+  position: absolute;
+  left: 4px;
+  color: var(--border);
+}
+
+/* FallacyPanel */
+.fallacy-panel {
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.fallacy-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 16px;
+}
+.fallacy-column-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+.fallacy-pro .fallacy-column-title { color: var(--pro); }
+.fallacy-con .fallacy-column-title { color: var(--con); }
+.fallacy-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fallacy-list li {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.5;
+  padding: 8px 12px;
+  background: var(--s1);
+  border-left: 2px solid var(--border);
+  border-radius: 0 4px 4px 0;
+}
+.fallacy-pro .fallacy-list li { border-left-color: var(--pro); }
+.fallacy-con .fallacy-list li { border-left-color: var(--con); }
+
+@media (max-width: 700px) {
+  .fallacy-columns { grid-template-columns: 1fr; gap: 16px; }
+}
+
+/* SourceTable Temporal Mismatch Tooltip */
+.source-error-tooltip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--amber);
+  cursor: help;
+  font-size: 12px;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.info-icon {
+  flex-shrink: 0;
+}
+
+/* ── Aurora Background ────────────────────────────────────────────────────── */
+.aurora-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -1;
+  overflow: hidden;
+  background: var(--bg);
+}
+.aurora-gradient {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.15;
+  animation: aurora-float 20s infinite alternate cubic-bezier(0.4, 0, 0.2, 1);
+}
+.aurora-gradient-1 {
+  width: 60vw;
+  height: 60vw;
+  background: var(--pro);
+  top: -10vw;
+  left: -10vw;
+  animation-duration: 25s;
+}
+.aurora-gradient-2 {
+  width: 70vw;
+  height: 70vw;
+  background: var(--con);
+  bottom: -20vw;
+  right: -10vw;
+  animation-delay: -5s;
+}
+.aurora-gradient-3 {
+  width: 50vw;
+  height: 50vw;
+  background: var(--fact);
+  top: 30vh;
+  left: 30vw;
+  animation-duration: 30s;
+  animation-delay: -15s;
+}
+.aurora-noise-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opactiy='0.08'/%3E%3C/svg%3E");
+  opacity: 0.04;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+@keyframes aurora-float {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(5%, 10%) scale(1.1); }
+  100% { transform: translate(-5%, -5%) scale(0.95); }
+}
+
+/* ── Loading Orb ──────────────────────────────────────────────────────────── */
+.waiting-state-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex: 1;
+  min-height: 400px;
+}
+.loading-orb-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+.loading-orb {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.orb-ring {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  animation: orb-spin linear infinite;
+  opacity: 0.6;
+}
+.orb-ring-1 {
+  border-top-color: var(--pro);
+  border-bottom-color: var(--fact);
+  animation-duration: 3s;
+}
+.orb-ring-2 {
+  width: 85%;
+  height: 85%;
+  border-left-color: var(--con);
+  border-right-color: var(--mod);
+  animation-duration: 2s;
+  animation-direction: reverse;
+}
+.orb-ring-3 {
+  width: 70%;
+  height: 70%;
+  border-top-color: var(--pro);
+  border-bottom-color: var(--con);
+  animation-duration: 1.5s;
+}
+.orb-core {
+  width: 40px;
+  height: 40px;
+  background: radial-gradient(circle, var(--text) 0%, transparent 80%);
+  border-radius: 50%;
+  filter: blur(4px);
+  animation: orb-pulse 2s ease-in-out infinite alternate;
+}
+.loading-orb-message {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text2);
+  animation: flash 2s infinite;
+}
+@keyframes orb-spin {
+  100% { transform: rotate(360deg); }
+}
+@keyframes orb-pulse {
+  0% { opacity: 0.4; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1.2); }
+}
+
+/* ── Verdict Card Gradient & Model Attribution ────────────────────────────── */
+.gradient-text {
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  width: fit-content;
+}
+.gradient-vt {
+  background-image: linear-gradient(90deg, #4ade80, #22c55e);
+}
+.gradient-vf {
+  background-image: linear-gradient(90deg, #f87171, #ef4444);
+}
+.gradient-vu {
+  background-image: linear-gradient(90deg, #fbbf24, #f59e0b);
+}
+.gradient-vx {
+  background-image: linear-gradient(90deg, #9ca3af, #6b7280);
+}
+
+.verdict-models {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.verdict-model-label {
+  font-size: 10px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text3);
+}
+.model-chip {
+  font-size: 10px;
+  font-family: var(--mono);
+  padding: 2px 6px;
+  background: var(--s1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text2);
+}
