@@ -12,6 +12,12 @@
  */
 
 import React from 'react';
+import { useDebateStore } from '../../store/useDebateStore';
+
+function getDomain(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } 
+  catch { return url; }
+}
 
 const AGENT_META = {
   PRO: {
@@ -37,6 +43,21 @@ const AGENT_META = {
 export default function AgentBubble({ agent, round, text, isStreaming, sources = [] }) {
   const meta = AGENT_META[agent] || { label: agent, color: '#888', avatar: '?', side: 'left' };
   const isEmpty = !text;
+
+  const sourceResults = useDebateStore(state => state.sourceResults || []);
+  
+  const enrichedSources = sources.map(url => {
+    const verifiedData = sourceResults.find(r => r.url === url);
+    return {
+      url,
+      domain: getDomain(url),
+      status: verifiedData?.status || 'PENDING',
+      trustScore: verifiedData?.trust_score ?? null,
+      trustTier: verifiedData?.trust_tier || 'UNKNOWN',
+      preview: verifiedData?.content_preview || null,
+      error: verifiedData?.error || null
+    };
+  });
 
   return (
     <div className={`agent-bubble agent-bubble--${meta.side}`}>
@@ -75,26 +96,42 @@ export default function AgentBubble({ agent, round, text, isStreaming, sources =
           )}
         </div>
 
-        {/* Sources cited — progressive disclosure */}
-        {sources.length > 0 && !isStreaming && (
-          <details className="agent-sources">
-            <summary className="agent-sources-toggle">
-              {sources.length} source{sources.length !== 1 ? 's' : ''} cited
-            </summary>
-            <div className="agent-sources-list">
-              {sources.map((url, i) => (
-                <a
-                  key={i}
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="agent-source-link"
-                >
-                  {url}
-                </a>
+        {/* Sources cited — Claude-style hover cards */}
+        {enrichedSources.length > 0 && !isStreaming && (
+          <div className="agent-sources-chips-container">
+            <div className="agent-sources-label">Sources:</div>
+            <div className="agent-sources-chips">
+              {enrichedSources.map((src, i) => (
+                <div key={i} className="source-chip-wrapper">
+                  <a
+                    href={src.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`source-chip status-${src.status.toLowerCase()}`}
+                  >
+                    [{i + 1}] {src.domain}
+                  </a>
+                  <div className="source-hover-card">
+                    <div className="source-hc-header">
+                      <span className={`source-hc-status badge-${src.status.toLowerCase()}`}>
+                        {src.status.replace(/_/g, ' ')}
+                      </span>
+                      <span className="source-hc-domain">{src.domain}</span>
+                    </div>
+                    {src.error ? (
+                      <div className="source-hc-error">{src.error}</div>
+                    ) : src.preview ? (
+                      <div className="source-hc-preview">"{src.preview}..."</div>
+                    ) : null}
+                    <div className="source-hc-footer">
+                      <span className="source-hc-tier">Tier: {src.trustTier}</span>
+                      <span className="source-hc-link">Click to open ↗</span>
+                    </div>
+                  </div>
+                </div>
               ))}
             </div>
-          </details>
+          </div>
         )}
       </div>
     </div>
