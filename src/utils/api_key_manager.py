@@ -146,7 +146,7 @@ class APIKeyManager:
                 logger.error("%s key has zero quota", provider)
             elif any(kw in err for kw in ("rate limit","resource_exhausted","429","quota")):
                 ki.status         = APIKeyStatus.RATE_LIMITED
-                ki.cooldown_until = time.time() + min(30 * (2 ** ki.consecutive_failures), 300)
+                ki.cooldown_until = time.time() + min(30 * (2 ** ki.consecutive_failures), 120)
                 logger.warning("%s key rate limited, cooling down", provider)
             elif ki.consecutive_failures >= 5:
                 ki.status         = APIKeyStatus.RATE_LIMITED
