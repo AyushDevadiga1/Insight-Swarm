@@ -98,6 +98,9 @@ class DebateOrchestrator:
         if len(state.pro_arguments) > 5:
             state.pro_arguments = state.pro_arguments[-5:]
             state.con_arguments = state.con_arguments[-5:]
+            # Keep sources list in sync so FactChecker can pair by index
+            state.pro_sources = state.pro_sources[-5:]
+            state.con_sources = state.con_sources[-5:]
         return state
 
     def _consensus_check_node(self, state: DebateState) -> DebateState:
@@ -113,6 +116,15 @@ class DebateOrchestrator:
                 if state.metrics is None: state.metrics = {}
                 state.metrics["consensus"] = {"verdict":verdict,"reasoning":reasoning,"score":conf}
                 logger.info("Hardcoded consensus: %s", verdict)
+                # Populate synthetic debate entries so the UI debate tab is not blank
+                if not state.pro_arguments:
+                    state.pro_arguments = [f"[Settled science — debate skipped] {reasoning}"]
+                if not state.con_arguments:
+                    state.con_arguments = [f"[Consensus verdict: {verdict} ({conf:.0%} confidence) — no debate required]"]
+                if not state.pro_sources:
+                    state.pro_sources = [[]]
+                if not state.con_sources:
+                    state.con_sources = [[]]
                 return state
 
         prompt = (
@@ -131,6 +143,15 @@ class DebateOrchestrator:
                 state.confidence = response.confidence
                 state.moderator_reasoning = f"Consensus Pre-Check: {response.reasoning}"
                 logger.info("Consensus found: %s", state.verdict)
+                # Populate synthetic debate entries so UI debate tab is not blank
+                if not state.pro_arguments:
+                    state.pro_arguments = [f"[Consensus settled — debate skipped] {response.reasoning}"]
+                if not state.con_arguments:
+                    state.con_arguments = [f"[Consensus verdict: {response.verdict} ({response.confidence:.0%} confidence)]"]
+                if not state.pro_sources:
+                    state.pro_sources = [[]]
+                if not state.con_sources:
+                    state.con_sources = [[]]
             if state.metrics is None: state.metrics = {}
             state.metrics["consensus"] = {"verdict":response.verdict,"reasoning":response.reasoning,"score":response.confidence}
         except Exception as e:
@@ -198,6 +219,31 @@ class DebateOrchestrator:
     def _fact_checker_node(self, state: DebateState) -> DebateState:
         self._set_stage("FACT_CHECK", "Verifying sources...")
         logger.info("FactChecker verifying sources...")
+        
+        # Step 1: Strip hallucinated URLs not present in the evidence
+        allowed_urls = set()
+        for pool in [state.evidence_sources, state.pro_evidence, state.con_evidence]:
+            if pool:
+                for item in pool:
+                    if item.get("url"):
+                        allowed_urls.add(item["url"])
+
+        def strip_hallucinations(source_lists):
+            cleaned = []
+            for slist in source_lists:
+                valid = []
+                for url in slist:
+                    if url in allowed_urls:
+                        valid.append(url)
+                    else:
+                        logger.warning("Stripped hallucinated URL: %s", url)
+                cleaned.append(valid)
+            return cleaned
+
+        if allowed_urls:  # Only enforce if we actually retrieved evidence
+            state.pro_sources = strip_hallucinations(state.pro_sources)
+            state.con_sources = strip_hallucinations(state.con_sources)
+            
         try:
             state.pro_sources = URLNormalizer.sanitize_list(state.pro_sources)
             state.con_sources = URLNormalizer.sanitize_list(state.con_sources)
@@ -245,6 +291,7 @@ class DebateOrchestrator:
             self._set_stage("COMPLETE", "Loaded from cache")
             return state
 
+        self._set_stage("DECOMPOSING", "Analyzing claim structure...")
         sub_claims   = self.claim_decomposer.decompose(claim)
         if len(sub_claims) > 1:
             target_claim = f"Complex User Claim:\n" + "\n".join(f"- {sc}" for sc in sub_claims)
@@ -255,6 +302,7 @@ class DebateOrchestrator:
 
         import concurrent.futures as _cf
         tavily = get_tavily_retriever()
+        self._set_stage("SEARCHING", "Retrieving web evidence...")
         try:
             with _cf.ThreadPoolExecutor(max_workers=1) as tex:
                 adversarial = tex.submit(tavily.search_adversarial, target_claim, 5).result(timeout=12)
@@ -316,6 +364,7 @@ class DebateOrchestrator:
             yield "cache_hit", state
             return
 
+        self._set_stage("DECOMPOSING", "Analyzing claim structure...")
         sub_claims   = self.claim_decomposer.decompose(claim)
         if len(sub_claims) > 1:
             target_claim = f"Complex User Claim:\n" + "\n".join(f"- {sc}" for sc in sub_claims)
@@ -324,6 +373,7 @@ class DebateOrchestrator:
 
         import concurrent.futures as _cf
         tavily = get_tavily_retriever()
+        self._set_stage("SEARCHING", "Retrieving web evidence...")
         try:
             with _cf.ThreadPoolExecutor(max_workers=1) as tex:
                 adversarial = tex.submit(tavily.search_adversarial, target_claim, 5).result(timeout=12)
