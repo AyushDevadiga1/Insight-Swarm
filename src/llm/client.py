@@ -349,8 +349,10 @@ class FreeLLMClient:
             json={"model": self.CEREBRAS_MODEL, "messages":[{"role":"user","content":prompt}],
                   "temperature": temperature, "max_tokens": max_tokens}, timeout=timeout)
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
-
+        data = resp.json()
+        if not data.get("choices"):
+            raise ValueError("Cerebras returned empty response")
+        return data["choices"][0].get("message", {}).get("content") or ""
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=10),
            retry=retry_if_exception(lambda e: not isinstance(e, (ValueError, TypeError))), reraise=True)
     def _call_openrouter(self, prompt, temperature, max_tokens, timeout, openrouter_key) -> str:
@@ -360,8 +362,10 @@ class FreeLLMClient:
             json={"model": self.OPENROUTER_MODEL, "messages":[{"role":"user","content":prompt}],
                   "temperature": temperature, "max_tokens": max_tokens}, timeout=timeout)
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
-
+        data = resp.json()
+        if not data.get("choices"):
+            raise ValueError("OpenRouter returned empty response")
+        return data["choices"][0].get("message", {}).get("content") or ""
     def get_stats(self) -> dict:
         with self._counter_lock:
             return {
