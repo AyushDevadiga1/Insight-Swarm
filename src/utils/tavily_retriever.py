@@ -51,8 +51,8 @@ class TavilyEvidenceRetriever:
             return data
         except Exception as e:
             err = str(e).lower()
-            if "429" in err or "rate limit" in err or "quota" in err:
-                logger.warning("Tavily rate-limited — falling back to Google CSE: %s", e)
+            if any(key in err for key in ("429", "rate limit", "quota", "forbidden", "403")):
+                logger.warning("Tavily rate-limited or quota exhausted — falling back to Google CSE: %s", e)
                 return self._google_fallback(claim, max_results)
             else:
                 logger.error("Adversarial search failed: %s", e)
