@@ -97,21 +97,21 @@ class DebateState(BaseModel):
     con_arguments: List[str]       = Field(default_factory=list)
     pro_sources:   List[List[str]] = Field(default_factory=list)
     con_sources:   List[List[str]] = Field(default_factory=list)
-    verdict:       Optional[str]   = None
-    confidence:    Optional[float] = None
-    verification_results:  Optional[List[Dict[str,Any]]] = None
-    pro_verification_rate: Optional[float] = None
-    con_verification_rate: Optional[float] = None
-    moderator_reasoning:   Optional[str]   = None
-    metrics:       Optional[Dict[str,Any]] = None
-    retry_count:   int  = 0
-    is_cached:     Optional[bool] = False
-    summary:       Optional[str]  = ""
-    num_rounds:    int  = 3
+    verdict:       str   = "UNKNOWN"
+    confidence:    float = Field(default=0.0, ge=0.0, le=1.0)
+    verification_results:  List[Dict[str,Any]] = Field(default_factory=list)
+    pro_verification_rate: float = 0.0
+    con_verification_rate: float = 0.0
+    moderator_reasoning:   str   = ""
+    metrics:       Dict[str,Any] = Field(default_factory=dict)
+    retry_count:   int   = 0
+    is_cached:     bool  = False
+    summary:       str   = ""
+    num_rounds:    int   = 3
     pro_evidence:     List[Dict[str,Any]] = Field(default_factory=list)
     con_evidence:     List[Dict[str,Any]] = Field(default_factory=list)
     evidence_sources: List[Dict[str,Any]] = Field(default_factory=list)
-    verification_feedback: Optional[str] = None
+    verification_feedback: str = ""
     pro_model_used:       Optional[str]  = None
     con_model_used:       Optional[str]  = None
     moderator_model_used: Optional[str]  = None
