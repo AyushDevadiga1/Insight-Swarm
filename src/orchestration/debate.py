@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional, Literal, Any
 
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.memory import MemorySaver
 
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -50,7 +50,7 @@ class DebateOrchestrator:
         self.moderator    = moderator    or Moderator(self.client)
         self.summarizer       = Summarizer(self.client)
         self.claim_decomposer = ClaimDecomposer(self.client)
-        self.checkpointer = SqliteSaver.from_conn_string("insightswarm_graph.db")
+        self.checkpointer = MemorySaver()
         self.graph        = self._build_graph()
 
     def set_tracker(self, tracker) -> None:
