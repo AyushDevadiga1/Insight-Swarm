@@ -244,28 +244,27 @@ async def stream_debate(claim: str, request: Request):
                 for event_type, state in orch.stream(claim.strip(), str(uuid.uuid4())):
                     raw = _state_to_dict(state)
                     
-                    cur_pro = len(raw.get("pro_arguments", []))
+                    # Extract lists once per tick — all default to [] if None
+                    pro_args = raw.get("pro_arguments") or []
+                    con_args = raw.get("con_arguments") or []
+                    src_list = raw.get("verification_results") or []
+
+                    cur_pro = len(pro_args)
                     if cur_pro > prev_pro:
-                        arg = raw["pro_arguments"][-1]
-                        chunk_size = 20
-                        for i in range(0, len(arg), chunk_size):
-                            q.put({"type": "agent_text", "data": {"agent": "PRO", "round": cur_pro, "chunk": arg[i:i+chunk_size]}})
-                            time.sleep(0.015)
+                        for i in range(prev_pro, cur_pro):
+                            q.put({"type": "pro_argument", "data": pro_args[i]})
                         prev_pro = cur_pro
-                        
-                    cur_con = len(raw.get("con_arguments", []))
+
+                    cur_con = len(con_args)
                     if cur_con > prev_con:
-                        arg = raw["con_arguments"][-1]
-                        chunk_size = 20
-                        for i in range(0, len(arg), chunk_size):
-                            q.put({"type": "agent_text", "data": {"agent": "CON", "round": cur_con, "chunk": arg[i:i+chunk_size]}})
-                            time.sleep(0.015)
+                        for i in range(prev_con, cur_con):
+                            q.put({"type": "con_argument", "data": con_args[i]})
                         prev_con = cur_con
-                        
-                    cur_src = len(raw.get("verification_results", []))
+
+                    cur_src = len(src_list)
                     if cur_src > prev_src:
-                        for s in raw["verification_results"][prev_src:]:
-                            q.put({"type": "source", "data": s})
+                        for i in range(prev_src, cur_src):
+                            q.put({"type": "verification_result", "data": src_list[i]})
                         prev_src = cur_src
                         
                     if event_type in ("complete", "cache_hit"):
