@@ -796,10 +796,10 @@ class TestDebateState:
         state = DebateState(claim="Test")
         assert state.get("nonexistent_key", "default") == "default"
 
-    def test_get_does_not_treat_none_as_missing(self):
-        """A field explicitly set to None should return None, not the default."""
-        state = DebateState(claim="Test", verdict=None)
-        assert state.get("verdict", "UNKNOWN") is None
+    def test_get_returns_default_verdict_when_unset(self):
+        """verdict defaults to 'UNKNOWN' (non-optional); .get() should return it."""
+        state = DebateState(claim="Test")
+        assert state.get("verdict", "FALLBACK") == "UNKNOWN"
 
     def test_dict_style_access(self):
         state = DebateState(claim="Test", round=2)
@@ -955,7 +955,7 @@ class TestOrchestratorLogic:
         assert orch._should_debate(state) == "skip"
 
     def test_should_debate_when_no_verdict(self, orch):
-        state = DebateState(claim="T", verdict=None, confidence=None)
+        state = DebateState(claim="T")  # verdict="UNKNOWN", confidence=0.0 by default
         assert orch._should_debate(state) == "debate"
 
     def test_should_debate_when_low_confidence(self, orch):
@@ -982,14 +982,14 @@ class TestOrchestratorLogic:
         assert state.verdict == "TRUE"
         assert state.confidence >= 0.95
 
-    def test_non_settled_claim_keeps_none_verdict(self, orch):
+    def test_non_settled_claim_keeps_unknown_verdict(self, orch):
         """A novel claim should not get a verdict from hardcoded dict."""
         state = DebateState(claim="Drinking green tea extends lifespan by 10 years")
         # Mute the LLM call so it doesn't fail without keys
         orch.client.call_structured.side_effect = Exception("no keys")
         orch._consensus_check_node(state)
-        # Verdict should still be None (hardcoded didn't match, LLM failed gracefully)
-        assert state.verdict is None
+        # Verdict should still be UNKNOWN (hardcoded didn't match, LLM failed gracefully)
+        assert state.verdict == "UNKNOWN"
 
     def test_consensus_metrics_populated(self, orch):
         """Consensus check must always populate state.metrics['consensus']."""
