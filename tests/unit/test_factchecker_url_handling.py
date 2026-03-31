@@ -13,6 +13,8 @@ class DummyResponse:
     def __init__(self, status_code=200, text="ok"):
         self.status_code = status_code
         self.text = text
+    def iter_content(self, chunk_size=8192):
+        yield self.text.encode("utf-8")
 
 
 def test_factchecker_avoids_fetching_invalid_titles(monkeypatch, caplog):
