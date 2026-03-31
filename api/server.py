@@ -194,9 +194,12 @@ async def api_status() -> Dict[str, Any]:
 
 
 @app.get("/stream")
-async def stream_debate(claim: str, request: Request):
+async def stream_debate(claim: str, request: Request, thread_id: str = None):
     """SSE endpoint for real-time debate progress."""
     import asyncio, threading, queue as _queue
+    
+    if not thread_id:
+        thread_id = str(uuid.uuid4())
 
     valid, err_msg = validate_claim(claim.strip())
     if not valid:
@@ -241,7 +244,7 @@ async def stream_debate(claim: str, request: Request):
                 prev_con = 0
                 prev_src = 0
                 
-                for event_type, state in orch.stream(claim.strip(), str(uuid.uuid4())):
+                for event_type, state in orch.stream(claim.strip(), thread_id):
                     raw = _state_to_dict(state)
                     
                     # Extract lists once per tick — all default to [] if None
