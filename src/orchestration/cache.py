@@ -78,7 +78,7 @@ class SemanticCache:
 
     def _has_live_rows(self) -> bool:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=15) as conn:
                 c = conn.cursor()
                 c.execute("SELECT 1 FROM claim_cache WHERE expires_at > ? LIMIT 1", (datetime.now().isoformat(),))
                 return c.fetchone() is not None
@@ -87,7 +87,7 @@ class SemanticCache:
 
     def _init_db(self):
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=15) as conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
                 c = conn.cursor()
@@ -118,9 +118,9 @@ class SemanticCache:
             query_embedding = self._encode(claim)
             if query_embedding is None: return None
 
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=15) as conn:
                 rows = conn.execute(
-                    "SELECT claim_text, claim_embedding, verdict_data, created_at FROM claim_cache WHERE expires_at > ?",
+                    "SELECT claim_text, claim_embedding, verdict_data, created_at FROM claim_cache WHERE expires_at > ? ORDER BY created_at DESC LIMIT 2000",
                     (datetime.now().isoformat(),)).fetchall()
 
             if not rows: return None
@@ -161,7 +161,7 @@ class SemanticCache:
             embedding = self._encode(claim)
             if embedding is None: return
             now = datetime.now()
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=15) as conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute(
                     "INSERT INTO claim_cache (claim_text,claim_embedding,verdict_data,created_at,expires_at) VALUES (?,?,?,?,?)",
@@ -173,7 +173,7 @@ class SemanticCache:
 
     def record_debate(self, claim: str, verdict: str, confidence: float):
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=15) as conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("INSERT INTO debate_history (claim_text,verdict,confidence) VALUES (?,?,?)",
                              (claim, verdict, float(confidence)))
@@ -183,7 +183,7 @@ class SemanticCache:
 
     def get_history(self, limit: int = 50):
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=15) as conn:
                 rows = conn.execute(
                     "SELECT claim_text,verdict,confidence,timestamp FROM debate_history ORDER BY timestamp DESC LIMIT ?",
                     (limit,)).fetchall()
@@ -193,7 +193,7 @@ class SemanticCache:
 
     def record_user_feedback(self, claim: str, verdict: str, feedback_type: str):
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=15) as conn:
                 conn.execute("INSERT INTO user_feedback (claim_text,verdict,feedback_type) VALUES (?,?,?)",
                              (claim, verdict, feedback_type))
                 conn.commit()
