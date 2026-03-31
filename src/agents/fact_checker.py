@@ -1,7 +1,7 @@
 """
 src/agents/fact_checker.py — Final production version. All batches applied.
 """
-import logging, random, re, threading, atexit as _atexit
+import logging, random, re, threading, time, atexit as _atexit
 from typing import List, Optional, Tuple, Any
 from urllib.parse import urlparse
 
@@ -129,7 +129,7 @@ class FactChecker(BaseAgent):
     @retry(stop=stop_after_attempt(2), wait=wait_fixed(1),
            retry=retry_if_exception_type(requests.exceptions.ConnectionError), reraise=True)
     def _fetch_url(self, url: str) -> requests.Response:
-        return requests.get(url, timeout=self.url_timeout, allow_redirects=True, stream=True,
+        return requests.get(url, timeout=(3.0, self.url_timeout), allow_redirects=True, stream=True,
                             headers={"User-Agent": random.choice(_USER_AGENTS),
                                      "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
                                      "Accept-Language": "en-US,en;q=0.5", "DNT": "1",
@@ -161,7 +161,10 @@ class FactChecker(BaseAgent):
 
             resp = self._fetch_url(url)
             raw_bytes = b""
+            start_time = time.time()
             for chunk in resp.iter_content(chunk_size=8192):
+                if time.time() - start_time > self.url_timeout:
+                    break
                 raw_bytes += chunk
                 if len(raw_bytes) >= 51200: break
             content_text = raw_bytes.decode("utf-8", errors="ignore")
