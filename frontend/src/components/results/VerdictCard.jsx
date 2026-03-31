@@ -1,91 +1,73 @@
 /**
- * VerdictCard.jsx
- * 
- * Displays the final verdict with animated confidence bar.
- * Uses framer-motion for the entrance animation only —
- * the confidence bar fill uses a CSS transition.
+ * VerdictCard.jsx — v3
+ * Large verdict, animated confidence bar, model chips
  */
 
 import React, { useState, useEffect } from 'react';
 
-function verdictClass(verdict) {
+function verdictMeta(verdict) {
   const v = (verdict || '').toUpperCase();
-  if (['TRUE', 'CORRECT', 'ACCURATE', 'SUPPORTED'].some(k => v.includes(k))) return 'vt';
-  if (['FALSE', 'INCORRECT', 'INACCURATE', 'DEBUNKED'].some(k => v.includes(k))) return 'vf';
-  if (['PARTIAL', 'INSUFFICIENT', 'UNKNOWN', 'RATE_LIMITED'].some(k => v.includes(k))) return 'vu';
-  return 'vx';
+  if (['TRUE', 'CORRECT', 'ACCURATE', 'SUPPORTED', 'MOSTLY TRUE'].some(k => v.includes(k)))
+    return { cls: 'true',      icon: '✅', valueCls: '',                    iconCls: '',                    fillCls: '' };
+  if (['FALSE', 'INCORRECT', 'INACCURATE', 'DEBUNKED', 'MOSTLY FALSE'].some(k => v.includes(k)))
+    return { cls: 'false',     icon: '❌', valueCls: 'verdict-value-false', iconCls: 'verdict-icon-false',   fillCls: 'verdict-conf-fill-false' };
+  if (['PARTIAL', 'INSUFFICIENT', 'UNKNOWN', 'UNCERTAIN', 'MIXED'].some(k => v.includes(k)))
+    return { cls: 'uncertain', icon: '⚠️', valueCls: 'verdict-value-uncertain', iconCls: 'verdict-icon-uncertain', fillCls: 'verdict-conf-fill-uncertain' };
+  return { cls: 'uncertain', icon: '🔍', valueCls: 'verdict-value-uncertain', iconCls: 'verdict-icon-uncertain', fillCls: 'verdict-conf-fill-uncertain' };
 }
-
-const CLASS_COLOR = {
-  vt: 'var(--pro)',
-  vf: 'var(--con)',
-  vu: 'var(--amber)',
-  vx: 'var(--text-secondary)',
-};
-
-const VERDICT_EMOJI = {
-  TRUE: '✅',
-  FALSE: '❌',
-  'PARTIALLY TRUE': '⚠️',
-  'INSUFFICIENT EVIDENCE': '🔍',
-  RATE_LIMITED: '⏱',
-  SYSTEM_ERROR: '⚙️',
-};
 
 export default function VerdictCard({ result }) {
   const { verdict, confidence, claim, is_cached } = result;
-  const vc = verdictClass(verdict);
-  const color = CLASS_COLOR[vc];
-  const pct = Math.round((confidence || 0) * 100);
-  const emoji = VERDICT_EMOJI[verdict] || '⚖️';
+  const meta  = verdictMeta(verdict);
+  const pct   = Math.round((confidence || 0) * 100);
 
-  // Animate bar from 0 after mount
   const [displayPct, setDisplayPct] = useState(0);
   useEffect(() => {
-    const t = setTimeout(() => setDisplayPct(pct), 80);
+    const t = setTimeout(() => setDisplayPct(pct), 100);
     return () => clearTimeout(t);
   }, [pct]);
 
   return (
-    <div className="verdict-card" style={{ '--verdict-color': color }}>
-      {is_cached && (
-        <div className="verdict-cache-badge">💾 Cached result</div>
-      )}
-
-      <div className="verdict-label">Verdict</div>
-
-      <div className="verdict-emoji">{emoji}</div>
-
-      <div className={`verdict-value gradient-text gradient-${vc}`}>
-        {verdict || 'UNKNOWN'}
+    <div className="verdict-card">
+      <div className="verdict-card-top">
+        <div className={`verdict-icon ${meta.iconCls}`}>
+          {meta.icon}
+        </div>
+        <div className="verdict-text-block" style={{ flex: 1 }}>
+          <div className="verdict-label-sm">Verdict</div>
+          <div className={`verdict-value ${meta.valueCls}`}>
+            {verdict || 'Unknown'}
+          </div>
+          {claim && (
+            <div className="verdict-claim-text">"{claim}"</div>
+          )}
+        </div>
+        {is_cached && (
+          <div className="verdict-cached-badge">💾 cached</div>
+        )}
       </div>
 
-      {claim && (
-        <blockquote className="verdict-claim">"{claim}"</blockquote>
-      )}
-
-      {/* Model Attribution */}
-      {(result.pro_model_used || result.con_model_used || result.moderator_model_used) && (
-        <div className="verdict-models">
-          <span className="verdict-model-label">Powered by:</span>
-          {result.pro_model_used && <span className="model-chip">Pro: {result.pro_model_used}</span>}
-          {result.con_model_used && <span className="model-chip">Con: {result.con_model_used}</span>}
-          {result.moderator_model_used && <span className="model-chip">Mod: {result.moderator_model_used}</span>}
+      <div className="verdict-card-bottom">
+        <div className="verdict-conf-row">
+          <span className="verdict-conf-label">Confidence</span>
+          <span className={`verdict-conf-pct ${meta.cls === 'false' ? 'verdict-conf-pct-false' : ''}`}>
+            {pct}%
+          </span>
         </div>
-      )}
-
-      {/* Confidence bar */}
-      <div className="verdict-conf-wrap">
         <div className="verdict-conf-track">
           <div
-            className="verdict-conf-fill"
+            className={`verdict-conf-fill ${meta.fillCls}`}
             style={{ width: `${displayPct}%` }}
           />
         </div>
-        <div className="verdict-conf-labels">
-          <span>Confidence</span>
-          <span className="verdict-conf-pct">{pct}%</span>
-        </div>
+
+        {(result.pro_model_used || result.con_model_used || result.moderator_model_used) && (
+          <div className="verdict-model-chips">
+            {result.pro_model_used       && <span className="model-chip">🛡️ {result.pro_model_used}</span>}
+            {result.con_model_used       && <span className="model-chip">⚔️ {result.con_model_used}</span>}
+            {result.moderator_model_used && <span className="model-chip">⚖️ {result.moderator_model_used}</span>}
+          </div>
+        )}
       </div>
     </div>
   );
