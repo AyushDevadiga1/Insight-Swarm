@@ -13,6 +13,7 @@ from langgraph.checkpoint.memory import MemorySaver
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.core.models import DebateState, AgentResponse, ConsensusResponse
+from src.llm.client import RateLimitError
 from src.agents.pro_agent import ProAgent
 from src.agents.con_agent import ConAgent
 from src.agents.fact_checker import FactChecker
@@ -166,17 +167,36 @@ class DebateOrchestrator:
     def _pro_agent_node(self, state: DebateState) -> DebateState:
         self._set_stage("PRO", f"Round {state.round}")
         logger.info("ProAgent — Round %d", state.round)
-        response = self.pro_agent.generate(state)
-        state.pro_arguments = state.pro_arguments + [response.argument]
-        state.pro_sources   = state.pro_sources   + [response.sources]
+        try:
+            response = self.pro_agent.generate(state)
+            state.pro_arguments = state.pro_arguments + [response.argument]
+            state.pro_sources   = state.pro_sources   + [response.sources]
+        except RateLimitError as e:
+            logger.error("ProAgent rate limited")
+            state.pro_arguments = state.pro_arguments + [f"[API_FAILURE] ProAgent: Rate Limit Exceeded"]
+            state.pro_sources   = state.pro_sources   + [[]]
+        except Exception as e:
+            logger.error("ProAgent failed: %s", e)
+            state.pro_arguments = state.pro_arguments + [f"[API_FAILURE] ProAgent Error: {str(e)}"]
+            state.pro_sources   = state.pro_sources   + [[]]
         return state
 
     def _con_agent_node(self, state: DebateState) -> DebateState:
         self._set_stage("CON", f"Round {state.round}")
         logger.info("ConAgent — Round %d", state.round)
-        response = self.con_agent.generate(state)
-        state.con_arguments = state.con_arguments + [response.argument]
-        state.con_sources   = state.con_sources   + [response.sources]
+        try:
+            response = self.con_agent.generate(state)
+            state.con_arguments = state.con_arguments + [response.argument]
+            state.con_sources   = state.con_sources   + [response.sources]
+        except RateLimitError as e:
+            logger.error("ConAgent rate limited")
+            state.con_arguments = state.con_arguments + [f"[API_FAILURE] ConAgent: Rate Limit Exceeded"]
+            state.con_sources   = state.con_sources   + [[]]
+        except Exception as e:
+            logger.error("ConAgent failed: %s", e)
+            state.con_arguments = state.con_arguments + [f"[API_FAILURE] ConAgent Error: {str(e)}"]
+            state.con_sources   = state.con_sources   + [[]]
+        
         state.round += 1
         return state
 
