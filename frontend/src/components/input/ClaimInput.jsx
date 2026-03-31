@@ -1,9 +1,10 @@
 /**
- * ClaimInput.jsx — Revamped textarea with char counter and ready state
+ * ClaimInput.jsx — v3
+ * Clean bottom input bar with send button and reset
  */
 
 import React, { useRef } from 'react';
-import { RefreshCw, Send } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { useDebateStore } from '../../store/useDebateStore';
 import { useApiStatusStore } from '../../store/useApiStatusStore';
 
@@ -15,8 +16,8 @@ export default function ClaimInput({ onVerify }) {
   const { hasPrimaryProvider } = useApiStatusStore();
   const textareaRef = useRef(null);
 
-  const chars = (claim || '').trim().length;
-  const isReady = chars >= MIN_CHARS && chars <= MAX_CHARS && !isRunning;
+  const chars     = (claim || '').trim().length;
+  const isReady   = chars >= MIN_CHARS && chars <= MAX_CHARS && !isRunning;
   const noProviders = !hasPrimaryProvider();
 
   const handleKeyDown = (e) => {
@@ -27,7 +28,7 @@ export default function ClaimInput({ onVerify }) {
 
   return (
     <div className="claim-input-wrap">
-      <label className="claim-label">Subject Claim</label>
+      <label className="claim-label">Subject claim</label>
 
       <div className="claim-textarea-wrap">
         <textarea
@@ -39,50 +40,51 @@ export default function ClaimInput({ onVerify }) {
           placeholder="Enter a natural-language claim to verify…"
           disabled={isRunning}
           maxLength={MAX_CHARS}
-          rows={3}
+          rows={2}
         />
-        <div className={`claim-char-count ${chars > MAX_CHARS - 20 ? 'claim-char-warn' : ''}`}>
-          {chars} / {MAX_CHARS}
-        </div>
+        <button
+          className="claim-send-btn"
+          onClick={onVerify}
+          disabled={!isReady || noProviders}
+          title="Verify (Ctrl+Enter)"
+        >
+          {isRunning ? (
+            <span className="spinner" />
+          ) : (
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M2 21l21-9L2 3v7l15 2-15 2v7z" />
+            </svg>
+          )}
+        </button>
       </div>
 
       {noProviders && (
         <div className="claim-no-providers">
-          ⚠ No LLM providers available — check API status panel
+          ⚠ No LLM providers available — check API health panel
         </div>
       )}
 
-      <div className="claim-actions">
-        <button
-          className={`btn-verify ${isReady && !noProviders ? 'btn-verify--ready' : 'btn-verify--disabled'}`}
-          onClick={onVerify}
-          disabled={!isReady || noProviders}
-        >
-          {isRunning ? (
-            <span className="btn-verify-running">
-              <span className="spinner" />
-              Verifying…
-            </span>
-          ) : (
-            <>
-              <Send size={14} />
-              Verify Claim
-            </>
+      <div className="claim-actions-row">
+        <div className="claim-hint">
+          {chars > 0 && chars < MIN_CHARS && (
+            <span className="claim-hint-warn">{MIN_CHARS - chars} more chars needed</span>
           )}
-        </button>
-
-        <button className="btn-reset" onClick={reset} title="Reset">
-          <RefreshCw size={16} />
-        </button>
-      </div>
-
-      <div className="claim-hint">
-        {chars > 0 && chars < MIN_CHARS && (
-          <span className="hint-warn">{MIN_CHARS - chars} more characters needed</span>
-        )}
-        {chars >= MIN_CHARS && (
-          <span className="hint-ready">↵ Ctrl+Enter to verify</span>
-        )}
+          {chars >= MIN_CHARS && !isRunning && (
+            <span className="claim-hint-ready">Ctrl+Enter to verify</span>
+          )}
+          {isRunning && (
+            <span className="claim-hint-ready">Verification running…</span>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className={`claim-char-count ${chars > MAX_CHARS - 20 ? 'claim-char-warn' : ''}`}>
+            {chars}/{MAX_CHARS}
+          </span>
+          <button className="btn-reset" onClick={reset} title="Reset">
+            <RefreshCw size={11} />
+            Reset
+          </button>
+        </div>
       </div>
     </div>
   );
