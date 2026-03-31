@@ -1,43 +1,52 @@
-import React from 'react';
+/**
+ * FallacyPanel.jsx — v3
+ */
+
+import React, { useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function FallacyPanel({ result }) {
-  if (!result || !result.metrics) return null;
+  const [expanded, setExpanded] = useState(false);
 
-  const proFallacies = result.metrics.pro_fallacies || [];
-  const conFallacies = result.metrics.con_fallacies || [];
+  const proFallacies = result?.metrics?.pro_fallacies || [];
+  const conFallacies = result?.metrics?.con_fallacies || [];
+  const total = proFallacies.length + conFallacies.length;
 
-  if (proFallacies.length === 0 && conFallacies.length === 0) return null;
+  if (total === 0) return null;
 
   return (
-    <div className="panel fallacy-panel">
-      <div className="panel-header">
-        <span className="panel-icon">⚠️</span>
-        <span className="panel-title">Logical Fallacies Detected</span>
-      </div>
-      
-      <div className="fallacy-columns">
-        {proFallacies.length > 0 && (
-          <div className="fallacy-column fallacy-pro">
-            <h4 className="fallacy-column-title">ProAgent Fallacies</h4>
-            <ul className="fallacy-list">
-              {proFallacies.map((f, i) => (
-                <li key={`pro-${i}`}>{f}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+    <div className="fallacy-panel-wrap">
+      <button className="fallacy-toggle" onClick={() => setExpanded(v => !v)}>
+        <span className="section-label" style={{ margin: 0 }}>
+          Logical fallacies detected ({total})
+        </span>
+        {expanded ? <ChevronUp size={14} color="var(--text-3)" /> : <ChevronDown size={14} color="var(--text-3)" />}
+      </button>
 
-        {conFallacies.length > 0 && (
-          <div className="fallacy-column fallacy-con">
-            <h4 className="fallacy-column-title">ConAgent Fallacies</h4>
-            <ul className="fallacy-list">
-              {conFallacies.map((f, i) => (
-                <li key={`con-${i}`}>{f}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
+      {expanded && (
+        <div className="fallacy-columns">
+          {proFallacies.length > 0 && (
+            <div>
+              <div className="fallacy-column-title" style={{ color: 'var(--pro)' }}>🛡️ ProAgent</div>
+              <ul className="fallacy-items">
+                {proFallacies.map((f, i) => (
+                  <li key={i} className="fallacy-item" style={{ borderLeftColor: 'var(--pro-border)' }}>{f}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {conFallacies.length > 0 && (
+            <div>
+              <div className="fallacy-column-title" style={{ color: 'var(--con)' }}>⚔️ ConAgent</div>
+              <ul className="fallacy-items">
+                {conFallacies.map((f, i) => (
+                  <li key={i} className="fallacy-item" style={{ borderLeftColor: 'var(--con-border)' }}>{f}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
