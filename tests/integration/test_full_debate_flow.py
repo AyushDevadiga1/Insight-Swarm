@@ -75,7 +75,7 @@ class TestFullDebateFlow:
     def test_source_verification(self):
         """Test that sources are actually verified"""
         orch = DebateOrchestrator()
-        result = orch.run("Smoking causes cancer")
+        result = orch.run("Nuclear energy is the safest power source")
         
         assert result.verification_results is not None
         assert len(result.verification_results) > 0
