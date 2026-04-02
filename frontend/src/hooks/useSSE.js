@@ -18,13 +18,15 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useDebateStore } from '../store/useDebateStore';
 
-const FLUSH_INTERVAL_MS = 80;  // How often to flush buffered agent text to state
+const FLUSH_INTERVAL_MS = 150;  // How often to flush buffered agent text to state
 
 export function useSSE(claim, runId) {
   const esRef             = useRef(null);   // EventSource instance
   const flushTimerRef     = useRef(null);   // setInterval handle for text flush
   const bufferRef         = useRef({});     // { 'PRO_1': 'accumulated text' }
   const closedOnPurpose   = useRef(false);  // prevents auto-reconnect after intentional close
+  const retryCount        = useRef(0);      // Current retry count
+  const reconnectTimerRef = useRef(null);   // Timeout handle for scheduled reconnect
 
   const {
     startRun,
@@ -86,12 +88,18 @@ export function useSSE(claim, runId) {
     closedOnPurpose.current = false;
     bufferRef.current = {};
 
-    const url = `/stream?claim=${encodeURIComponent(claim)}`;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
+    const url = `/stream?claim=${encodeURIComponent(claim)}&thread_id=${encodeURIComponent(runId)}`;
     const es = new EventSource(url);
     esRef.current = es;
 
     es.onopen = () => {
       setStreamConnected(true);
+      retryCount.current = 0; // Reset retries on successful connection
       startFlushTimer();
     };
 
@@ -167,20 +175,29 @@ export function useSSE(claim, runId) {
       esRef.current = null;
     });
 
-    // ── Network/connection error ──────────────────────────────────────────────
-    // IMPORTANT: Do NOT allow auto-reconnect. EventSource auto-reconnects by
-    // default, which would trigger a NEW debate run on the backend every time
-    // the connection dropped. We close intentionally on any network error.
+    // ── Network/connection error with exponential backoff ───────────────────────
     es.onerror = () => {
-      if (closedOnPurpose.current) return; // already handled
-      closedOnPurpose.current = true;
+      if (closedOnPurpose.current) return;
+      
       stopFlushTimer();
-      setError({
-        type: 'NETWORK_ERROR',
-        message: 'Lost connection to server. Please try again.',
-      });
       es.close();
       esRef.current = null;
+      
+      if (retryCount.current < 5) {
+        const delay = Math.min(2000 * Math.pow(2, retryCount.current), 30000);
+        retryCount.current++;
+        console.warn(`[SSE] Connection lost. Reconnecting in ${delay}ms (Attempt ${retryCount.current}/5)...`);
+        
+        reconnectTimerRef.current = setTimeout(() => {
+          connect();
+        }, delay);
+      } else {
+        closedOnPurpose.current = true;
+        setError({
+          type: 'NETWORK_ERROR',
+          message: 'Lost connection to server. Connection retries exhausted. Please try again.',
+        });
+      }
     };
   }, [claim, runId, setStreamConnected, pushStage, pushSource, setResult, setError,
       setHeartbeat, setSubClaims, startFlushTimer, stopFlushTimer]);
@@ -193,6 +210,10 @@ export function useSSE(claim, runId) {
     }
     return () => {
       stopFlushTimer();
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       if (esRef.current) {
         closedOnPurpose.current = true;
         esRef.current.close();
