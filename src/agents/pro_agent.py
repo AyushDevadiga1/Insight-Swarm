@@ -53,6 +53,13 @@ class ProAgent(BaseAgent):
         evidence_bundle    = state.evidence_sources or state.pro_evidence or []
         formatted_evidence = self._format_evidence(evidence_bundle)
 
+        # Build grounded URL list from evidence
+        available_urls = [
+            item.get("url", "") for item in evidence_bundle if item.get("url")
+        ]
+        url_list_str = ("\n".join(f"  - {u}" for u in available_urls)
+                        if available_urls else "  (No URLs retrieved — use [General Knowledge])")
+
         if round_num == 1:
             return f"""You are ProAgent in a formal fact-checking debate. Argue that this claim is TRUE.
 
@@ -61,10 +68,13 @@ CLAIM: {state.claim}
 EVIDENCE TO USE:
 {formatted_evidence}
 
+AVAILABLE SOURCES (cite ONLY these URLs — do NOT fabricate or hallucinate URLs):
+{url_list_str}
+
 YOUR TASK:
 1. Build the strongest case FOR this claim.
-2. CITE ONLY URLS FROM THE EVIDENCE PROVIDED ABOVE. Do not make up or hallucinate URLs.
-3. If no URLs are provided, use training knowledge labeled [General Knowledge].
+2. Cite ONLY URLs from the AVAILABLE SOURCES list above.
+3. If no URLs are listed, use training knowledge labeled [General Knowledge].
 4. Make a persuasive argument in 3-5 sentences.
 5. List the source URLs you cited in the 'sources' field.
 
@@ -83,9 +93,12 @@ OPPOSING ARGUMENT:
 SUPPORTING EVIDENCE:
 {formatted_evidence}
 
+AVAILABLE SOURCES (cite ONLY these URLs — do NOT fabricate or hallucinate URLs):
+{url_list_str}
+
 YOUR TASK:
 1. Directly rebut the Con argument.
 2. Reinforce with additional evidence or stronger reasoning.
-3. CITE ONLY URLS FROM THE EVIDENCE PROVIDED ABOVE. Do not hallucinate.
+3. Cite ONLY URLs from the AVAILABLE SOURCES list above.
 4. If previous sources failed, cite different ones from the list.
 5. Keep to 3-5 focused sentences."""
