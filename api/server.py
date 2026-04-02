@@ -221,20 +221,32 @@ async def stream_debate(claim: str, request: Request, thread_id: str = None):
                     def set_stage(self, stage, message=""):
                         s_str = str(stage).split('.')[-1].lower()
                         elapsed = round(time.time() - start_time, 2)
-                        # Map internal string logic to frontend stages
+                        # Map internal stage strings to frontend stage keys
                         mapped = s_str
-                        if "round" in message.lower():
+                        if s_str == "decomposing":
+                            mapped = "decomposing"
+                        elif s_str == "searching":
+                            mapped = "searching"
+                        elif s_str == "consensus":
+                            mapped = "consensus_check"
+                        elif s_str == "fact_check":
+                            mapped = "fact_checking"
+                        elif s_str == "moderator":
+                            mapped = "moderating"
+                        elif s_str == "complete":
+                            mapped = "complete"
+                        elif s_str == "error":
+                            mapped = "error"
+                        elif "round" in message.lower():
                             for i in range(1, 10):
                                 if str(i) in message:
                                     mapped = f"round_{i}_{s_str}"
                                     break
-                        if mapped == "fact_check": mapped = "fact_checking"
-                        if mapped == "moderator": mapped = "moderating"
                         
                         q.put({"type": "stage", "data": {
-                            "stage": mapped, 
-                            "message": message, 
-                            "progress": 0.5, 
+                            "stage": mapped,
+                            "message": message,
+                            "progress": 0.5,
                             "elapsed": elapsed
                         }})
                 
@@ -243,10 +255,18 @@ async def stream_debate(claim: str, request: Request, thread_id: str = None):
                 prev_pro = 0
                 prev_con = 0
                 prev_src = 0
+                sub_claims_emitted = False   # Guard: emit sub_claims only once
                 
                 for event_type, state in orch.stream(claim.strip(), thread_id):
                     raw = _state_to_dict(state)
                     
+                    # ── Emit sub_claims once after decomposition is visible ────
+                    if not sub_claims_emitted:
+                        sub_claims_raw = raw.get("sub_claims") or []
+                        if sub_claims_raw:
+                            q.put({"type": "sub_claims", "data": {"claims": sub_claims_raw}})
+                            sub_claims_emitted = True
+
                     # Extract lists once per tick — all default to [] if None
                     pro_args = raw.get("pro_arguments") or []
                     con_args = raw.get("con_arguments") or []

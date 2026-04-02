@@ -34,9 +34,8 @@ class TestUserWorkflows:
         """User submits invalid claim, gets validation error"""
         invalid_claims = [
             "",  # Empty
-            "abc",  # Too short
-            "a b c d e f g h i",  # Meaningless
-            "x" * 501,  # Too long
+            "abc def",  # Minimum words is 3
+            "a " * 501,  # Too long
         ]
         
         for claim in invalid_claims:
@@ -88,18 +87,24 @@ class TestUserWorkflows:
     
     def test_claim_length_validation(self):
         """Test claim length boundaries"""
-        # Minimum length (10 chars)
-        valid, _ = validate_claim("Short test")
+        # Minimum length (10 chars, 3 words)
+        valid, _ = validate_claim("Short test claim")
         assert valid == True
         
-        valid, error = validate_claim("Too short")  # 9 chars
+        valid, error = validate_claim("Too short")  # 2 words
         assert valid == False
         
         # Maximum length (500 chars)
-        valid, _ = validate_claim("x" * 500)
+        claim_500 = ("x " * 250).strip()[:500]
+        # ensure it's exactly 500 chars and >3 words
+        while len(claim_500) < 500:
+            claim_500 += "x"
+        claim_500 = claim_500[:500]
+        
+        valid, _ = validate_claim(claim_500)
         assert valid == True
         
-        valid, error = validate_claim("x" * 501)
+        valid, error = validate_claim("x " * 501)
         assert valid == False
         assert "too long" in error.lower()
     

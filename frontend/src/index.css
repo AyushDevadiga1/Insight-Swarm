@@ -846,6 +846,84 @@ input, textarea { font-family: var(--font); }
 .source-chip:hover { color: var(--fact); border-color: var(--fact-border); }
 .source-chip.status-verified { border-color: var(--pro-border); color: var(--pro); }
 .source-chip.status-failed { border-color: var(--con-border); color: var(--con); }
+/* Source Hover Card */
+.source-chip-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.source-hover-card {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(10px);
+  width: 260px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-md);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.2s ease-in-out;
+  z-index: 100;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.source-chip-wrap:hover .source-hover-card {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(-8px);
+  pointer-events: auto;
+}
+
+.shc-domain {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.shc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.shc-trust-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid;
+  font-weight: 500;
+}
+
+.shc-status {
+  color: var(--text-2);
+}
+
+.shc-error {
+  font-size: 10px;
+  color: var(--con);
+  background: var(--con-dim);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.shc-link-btn {
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.shc-link-btn:hover {
+  text-decoration: underline;
+}
 
 /* ═══════════════════════════════════════════════════════════════════
    CLAIM INPUT BAR

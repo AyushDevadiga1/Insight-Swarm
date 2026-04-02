@@ -332,6 +332,7 @@ class DebateOrchestrator:
 
         initial_state = DebateState(
             claim=target_claim,
+            sub_claims=sub_claims if len(sub_claims) > 1 else [],
             pro_evidence=adversarial["pro"],
             con_evidence=adversarial["con"],
             evidence_sources=adversarial["pro"] + adversarial["con"],
@@ -403,6 +404,7 @@ class DebateOrchestrator:
 
         initial_state = DebateState(
             claim=target_claim,
+            sub_claims=sub_claims if len(sub_claims) > 1 else [],
             pro_evidence=adversarial["pro"],
             con_evidence=adversarial["con"],
             evidence_sources=adversarial["pro"] + adversarial["con"],

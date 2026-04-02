@@ -1,37 +1,44 @@
 /**
- * FeedbackPanel.jsx
+ * FeedbackPanel.jsx — v3
+ * Self-contained with local state to avoid store coupling issues.
  */
 
 import React, { useState } from 'react';
-import { ThumbsUp, ThumbsDown, Check } from 'lucide-react';
-import { submitFeedback } from '../../api/feedback';
+import { ThumbsUp, ThumbsDown } from 'lucide-react';
+import { submitFeedback } from '../../api';
 
 export default function FeedbackPanel({ result }) {
-  const [submitted, setSubmitted] = useState(null);
+  const [given, setGiven] = useState(null);
 
-  const handle = async (val) => {
-    const ok = await submitFeedback(result.claim, result.verdict, val);
-    if (ok) setSubmitted(val);
+  if (!result) return null;
+
+  const handleFeedback = async (value) => {
+    await submitFeedback(result.claim, result.verdict, value);
+    setGiven(value);
   };
 
-  if (submitted) {
+  if (given) {
+    const msg = given === 'UP'
+      ? '✓ Marked as accurate — thank you.'
+      : '✗ Flagged for review — thank you.';
     return (
-      <div className="feedback-done">
-        <Check size={14} />
-        {submitted === 'UP' ? 'Marked accurate — thank you.' : 'Flagged for human review.'}
+      <div className="feedback-panel">
+        <div className="feedback-done">{msg}</div>
       </div>
     );
   }
 
   return (
     <div className="feedback-panel">
-      <div className="section-label" style={{ marginBottom: '14px' }}>Feedback Protocol</div>
+      <div className="feedback-label">Was this verdict accurate?</div>
       <div className="feedback-btns">
-        <button className="btn-feedback btn-feedback--up" onClick={() => handle('UP')}>
-          <ThumbsUp size={14} /> Accurate
+        <button className="btn-feedback btn-feedback-up" onClick={() => handleFeedback('UP')}>
+          <ThumbsUp size={13} />
+          Accurate
         </button>
-        <button className="btn-feedback btn-feedback--down" onClick={() => handle('DOWN')}>
-          <ThumbsDown size={14} /> Inaccurate
+        <button className="btn-feedback btn-feedback-down" onClick={() => handleFeedback('DOWN')}>
+          <ThumbsDown size={13} />
+          Inaccurate
         </button>
       </div>
     </div>

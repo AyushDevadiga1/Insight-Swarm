@@ -54,6 +54,13 @@ class ConAgent(BaseAgent):
         formatted_evidence = self._format_evidence(evidence_bundle)
         pro_argument       = state.pro_arguments[-1] if state.pro_arguments else "No Pro argument."
 
+        # Build grounded URL list from evidence
+        available_urls = [
+            item.get("url", "") for item in evidence_bundle if item.get("url")
+        ]
+        url_list_str = ("\n".join(f"  - {u}" for u in available_urls)
+                        if available_urls else "  (No URLs retrieved — use [General Knowledge])")
+
         if round_num == 1:
             return f"""You are ConAgent in a formal fact-checking debate. Argue that this claim is FALSE.
 
@@ -65,11 +72,14 @@ PRO AGENT ARGUED:
 COUNTER-EVIDENCE:
 {formatted_evidence}
 
+AVAILABLE SOURCES (cite ONLY these URLs — do NOT fabricate or hallucinate URLs):
+{url_list_str}
+
 YOUR TASK:
 1. Build the strongest case AGAINST this claim.
 2. Directly challenge the Pro argument — identify flaws or missing context.
-3. CITE ONLY URLS FROM THE EVIDENCE PROVIDED ABOVE. Do not make up or hallucinate URLs.
-4. If no URLs are provided, use training knowledge labeled [General Knowledge].
+3. Cite ONLY URLs from the AVAILABLE SOURCES list above.
+4. If no URLs are listed, use training knowledge labeled [General Knowledge].
 5. Be specific in 3-5 sentences.
 6. List the source URLs you cited in the 'sources' field.
 
@@ -91,9 +101,12 @@ LATEST PRO REBUTTAL:
 COUNTER-EVIDENCE:
 {formatted_evidence}
 
+AVAILABLE SOURCES (cite ONLY these URLs — do NOT fabricate or hallucinate URLs):
+{url_list_str}
+
 YOUR TASK:
 1. Rebut the Pro's latest argument specifically.
 2. Identify new flaws, missing context, or contradictory evidence.
-3. CITE ONLY URLS FROM THE EVIDENCE PROVIDED ABOVE. Do not hallucinate.
+3. Cite ONLY URLs from the AVAILABLE SOURCES list above.
 4. If previous sources failed, cite stronger alternatives from the list.
 5. Keep to 3-5 focused sentences."""

@@ -112,6 +112,7 @@ class DebateState(BaseModel):
     con_evidence:     List[Dict[str,Any]] = Field(default_factory=list)
     evidence_sources: List[Dict[str,Any]] = Field(default_factory=list)
     verification_feedback: str = ""
+    sub_claims:           List[str]      = Field(default_factory=list)
     pro_model_used:       Optional[str]  = None
     con_model_used:       Optional[str]  = None
     moderator_model_used: Optional[str]  = None

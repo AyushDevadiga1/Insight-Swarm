@@ -45,6 +45,8 @@ def _fake_get(url, timeout=None, allow_redirects=True, **kwargs):
         def __init__(self):
             self.status_code = 200
             self.text = "Mock response content for verification."
+        def iter_content(self, chunk_size=8192):
+            yield self.text.encode("utf-8")
     return DummyResponse()
 
 
