@@ -23,7 +23,9 @@ const EXAMPLES = [
 ];
 
 export default function Sidebar({ onExampleClick, history = [] }) {
-  const { activeStage, isRunning } = useDebateStore();
+  const { activeStage, isRunning, result } = useDebateStore();
+
+  const substitutions = result?.metrics?.model_substitutions || [];
 
   const getAgentPulseColor = (key) => {
     if (!isRunning) return 'var(--text-4)';
@@ -55,7 +57,18 @@ export default function Sidebar({ onExampleClick, history = [] }) {
       {/* API Health */}
       <ApiStatusPanel />
 
+      {/* Model Substitutions Warning */}
+      {substitutions.length > 0 && (
+        <div className="sidebar-section" style={{ marginTop: '-10px' }}>
+          <div className="claim-no-providers" style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+            <span>⚠</span>
+            <span>Rate limit hit — switched to fallback provider</span>
+          </div>
+        </div>
+      )}
+
       {/* Agents */}
+
       <div className="sidebar-section">
         <div className="sidebar-section-label">Agents</div>
         <div className="agent-list">
