@@ -73,6 +73,7 @@ class DebateOrchestrator:
         workflow.add_node("pro_agent",       self._pro_agent_node)
         workflow.add_node("con_agent",       self._con_agent_node)
         workflow.add_node("fact_checker",    self._fact_checker_node)
+        workflow.add_node("human_review",    self._human_review_node)
         workflow.add_node("moderator",       self._moderator_node)
         workflow.add_node("verdict",         self._verdict_node)
         workflow.add_node("revision",        self._retry_revision_node)
@@ -84,11 +85,15 @@ class DebateOrchestrator:
         workflow.add_conditional_edges("con_agent", self._should_continue,
                                        {"continue":"summarizer","end":"fact_checker"})
         workflow.add_conditional_edges("fact_checker", self._should_retry,
-                                       {"retry":"revision","proceed":"moderator"})
+                                       {"retry":"revision","proceed":"human_review"})
         workflow.add_edge("revision", "fact_checker")
+        workflow.add_edge("human_review", "moderator")
         workflow.add_edge("moderator", "verdict")
         workflow.add_edge("verdict",   END)
-        return workflow.compile(checkpointer=self.checkpointer)
+        return workflow.compile(
+            checkpointer=self.checkpointer,
+            interrupt_before=["human_review"]
+        )
 
     # ── Nodes — each defined EXACTLY ONCE ────────────────────────────────────
 
@@ -276,6 +281,11 @@ class DebateOrchestrator:
             logger.error("FactChecker failed: %s", e)
         return state
 
+    def _human_review_node(self, state: DebateState) -> DebateState:
+        self._set_stage("HUMAN_REVIEW", "Awaiting human review override (if any)")
+        logger.info("Interrupt hit: awaiting human review...")
+        return state
+
     def _moderator_node(self, state: DebateState) -> DebateState:
         self._set_stage("MODERATOR", "Analysing debate quality...")
         try:
@@ -300,6 +310,120 @@ class DebateOrchestrator:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    def _debate_parallel_claims(self, claims: list[str], base_thread_id: str) -> list[DebateState]:
+        import concurrent.futures
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {
+                executor.submit(self._run_single_claim, claim, [], f"{base_thread_id}-subclaim-{i}"): claim
+                for i, claim in enumerate(claims)
+            }
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    results.append(future.result(timeout=180))
+                except Exception as e:
+                    logger.error("Sub-claim debate failed: %s", e)
+                    results.append(DebateState(
+                        claim=futures[future], verdict="ERROR", confidence=0.0,
+                        moderator_reasoning=f"Sub-claim debate failed: {e}",
+                        metrics={}, pro_evidence=[], con_evidence=[], evidence_sources=[],
+                        pro_arguments=[], con_arguments=[], pro_sources=[], con_sources=[]
+                    ))
+        return results
+
+    def _aggregate_sub_claim_verdicts(self, results: list[DebateState]) -> DebateState:
+        weighted_votes = {"TRUE": 0.0, "FALSE": 0.0, "PARTIALLY TRUE": 0.0, "INSUFFICIENT EVIDENCE": 0.0}
+        for result in results:
+            if result.verdict in weighted_votes:
+                weighted_votes[result.verdict] += result.confidence
+        
+        final_verdict = max(weighted_votes, key=weighted_votes.get) if any(weighted_votes.values()) else "INSUFFICIENT EVIDENCE"
+        total_weight = sum(weighted_votes.values())
+        final_confidence = weighted_votes[final_verdict] / total_weight if total_weight > 0 else 0.0
+        
+        parts = []
+        for i, result in enumerate(results, 1):
+            parts.append(f"Sub-claim {i}: \"{result.claim}\" → {result.verdict} ({result.confidence:.0%} confidence)")
+        
+        return DebateState(
+            claim=" AND ".join(r.claim for r in results),
+            sub_claims=[r.claim for r in results],
+            verdict=final_verdict,
+            confidence=final_confidence,
+            moderator_reasoning="Multi-claim analysis:\n" + "\n".join(parts),
+            pro_arguments=[arg for r in results for arg in r.pro_arguments],
+            con_arguments=[arg for r in results for arg in r.con_arguments],
+            pro_sources=[src for r in results for src in r.pro_sources],
+            con_sources=[src for r in results for src in r.con_sources],
+            pro_evidence=[], con_evidence=[], evidence_sources=[],
+            metrics={
+                "sub_claim_results": [r.model_dump() for r in results],
+                "aggregation_method": "confidence_weighted_voting"
+            }
+        )
+
+    def _run_single_claim(self, target_claim: str, sub_claims: list[str], thread_id: str) -> DebateState:
+        import concurrent.futures
+        tavily = get_tavily_retriever()
+        self._set_stage("SEARCHING", "Retrieving web evidence...")
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as tex:
+                adversarial = tex.submit(tavily.search_adversarial, target_claim, 5).result(timeout=12)
+        except Exception:
+            logger.warning("Tavily timed out or failed — proceeding without evidence")
+            adversarial = {"pro":[],"con":[]}
+
+        initial_state = DebateState(
+            claim=target_claim, sub_claims=sub_claims,
+            pro_evidence=adversarial["pro"], con_evidence=adversarial["con"],
+            evidence_sources=adversarial["pro"] + adversarial["con"],
+        )
+        final_state = initial_state
+        from src.resilience.fallback_handler import FallbackHandler
+        
+        def _execute_graph():
+            return self.graph.invoke(initial_state, config={"configurable":{"thread_id":thread_id}})
+
+        def _fallback_state():
+            f_state = initial_state.model_copy(deep=True)
+            f_state.verdict = "INSUFFICIENT EVIDENCE"
+            f_state.confidence = 0.0
+            f_state.moderator_reasoning = "System error prevented complete analysis."
+            return f_state
+
+        try:
+            raw_result = FallbackHandler.execute(operations=[_execute_graph], graceful_fallback=_fallback_state)
+            if isinstance(raw_result, dict):
+                final_state = DebateState.model_validate(raw_result)
+            elif hasattr(raw_result, "model_dump"):
+                final_state = raw_result
+            else:
+                final_state = DebateState.model_validate(dict(raw_result))
+
+            if not final_state.verdict:
+                final_state.verdict = "ERROR"
+                final_state.confidence = final_state.confidence or 0.0
+                final_state.moderator_reasoning = final_state.moderator_reasoning or "No verdict produced."
+
+            if final_state.verdict not in ("ERROR","RATE_LIMITED","SYSTEM_ERROR",None):
+                if final_state.verdict != "INSUFFICIENT EVIDENCE" or (final_state.confidence is not None and final_state.confidence > 0.1):
+                    try:
+                        set_cached_verdict(target_claim, json.loads(final_state.model_dump_json()))
+                    except Exception as ce:
+                        logger.warning("Cache write failed: %s", ce)
+            return final_state
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.error("Programming error in debate graph: %s", e)
+            raise
+        except Exception as e:
+            logger.error("Debate failed (runtime): %s", e)
+            self._set_stage("ERROR", str(e))
+            final_state.verdict = "INSUFFICIENT EVIDENCE"
+            final_state.confidence = 0.0
+            final_state.moderator_reasoning = f"Runtime error: {str(e)}"
+            final_state.metrics = {}
+            return final_state
+
     def run(self, claim: str, thread_id: str = "default") -> DebateState:
         logger.info("Running debate on: %s", claim)
 
@@ -314,65 +438,13 @@ class DebateOrchestrator:
         self._set_stage("DECOMPOSING", "Analyzing claim structure...")
         sub_claims   = self.claim_decomposer.decompose(claim)
         if len(sub_claims) > 1:
-            target_claim = f"Complex User Claim:\n" + "\n".join(f"- {sc}" for sc in sub_claims)
-        else:
-            target_claim = claim
-        if len(sub_claims) > 1:
-            logger.info("Multi-part claim — primary: %r", target_claim)
+            logger.info("Multi-claim detected: %d sub-claims", len(sub_claims))
+            sub_results = self._debate_parallel_claims(sub_claims, thread_id)
+            aggregated = self._aggregate_sub_claim_verdicts(sub_results)
+            aggregated.is_cached = False
+            return aggregated
 
-        import concurrent.futures as _cf
-        tavily = get_tavily_retriever()
-        self._set_stage("SEARCHING", "Retrieving web evidence...")
-        try:
-            with _cf.ThreadPoolExecutor(max_workers=1) as tex:
-                adversarial = tex.submit(tavily.search_adversarial, target_claim, 5).result(timeout=12)
-        except Exception:
-            logger.warning("Tavily timed out or failed — proceeding without evidence")
-            adversarial = {"pro":[],"con":[]}
-
-        initial_state = DebateState(
-            claim=target_claim,
-            sub_claims=sub_claims if len(sub_claims) > 1 else [],
-            pro_evidence=adversarial["pro"],
-            con_evidence=adversarial["con"],
-            evidence_sources=adversarial["pro"] + adversarial["con"],
-        )
-        final_state = initial_state
-
-        try:
-            raw_result = self.graph.invoke(initial_state, config={"configurable":{"thread_id":thread_id}})
-            if isinstance(raw_result, dict):
-                final_state = DebateState.model_validate(raw_result)
-            elif hasattr(raw_result, "model_dump"):
-                final_state = raw_result
-            else:
-                final_state = DebateState.model_validate(dict(raw_result))
-
-            if not final_state.verdict:
-                final_state.verdict    = "ERROR"
-                final_state.confidence = final_state.confidence or 0.0
-                final_state.moderator_reasoning = final_state.moderator_reasoning or "No verdict produced."
-
-            if final_state.verdict not in ("ERROR","RATE_LIMITED","SYSTEM_ERROR",None):
-                if final_state.verdict != "INSUFFICIENT EVIDENCE" or \
-                        (final_state.confidence is not None and final_state.confidence > 0.1):
-                    try:
-                        set_cached_verdict(target_claim, json.loads(final_state.model_dump_json()))
-                    except Exception as ce:
-                        logger.warning("Cache write failed: %s", ce)
-            return final_state
-
-        except (ValueError, TypeError, AttributeError) as e:
-            logger.error("Programming error in debate graph: %s", e)
-            raise
-        except Exception as e:
-            logger.error("Debate failed (runtime): %s", e)
-            self._set_stage("ERROR", str(e))
-            final_state.verdict    = "INSUFFICIENT EVIDENCE"
-            final_state.confidence = 0.0
-            final_state.moderator_reasoning = f"Runtime error: {str(e)}"
-            final_state.metrics    = {}
-            return final_state
+        return self._run_single_claim(claim, [], thread_id)
 
     def stream(self, claim: str, thread_id: str = "default"):
         logger.info("Streaming debate on: %s", claim)
