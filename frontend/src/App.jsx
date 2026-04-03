@@ -21,6 +21,7 @@ import ClaimInput from './components/input/ClaimInput';
 // Common
 import ErrorBanner from './components/common/ErrorBanner';
 import SubClaimBanner from './components/common/SubClaimBanner';
+import HITLReviewPanel from './components/pipeline/HITLReviewPanel';
 
 // Results
 import VerdictCard from './components/results/VerdictCard';
@@ -151,6 +152,9 @@ export default function App() {
           <StagePanel />
         </div>
       </div>
+      
+      {/* Human In The Loop Overlay */}
+      <HITLReviewPanel />
     </div>
   );
 }
