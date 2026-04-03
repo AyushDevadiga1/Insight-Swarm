@@ -37,8 +37,16 @@ def _get_schema_json(output_schema) -> str:
     return _SCHEMA_CACHE[key]
 
 from src.utils.api_key_manager import get_api_key_manager
+from src.resilience.circuit_breaker import CircuitBreaker
 
 _PROVIDER_COOLDOWN_SECONDS = 90
+
+_circuit_breakers = {
+    "groq": CircuitBreaker("groq", failure_threshold=3, recovery_timeout=60.0),
+    "gemini": CircuitBreaker("gemini", failure_threshold=3, recovery_timeout=60.0),
+    "cerebras": CircuitBreaker("cerebras", failure_threshold=3, recovery_timeout=60.0),
+    "openrouter": CircuitBreaker("openrouter", failure_threshold=3, recovery_timeout=60.0),
+}
 
 
 class RateLimitError(RuntimeError):
@@ -83,6 +91,8 @@ class FreeLLMClient:
     # ── Provider availability ─────────────────────────────────────────────────
 
     def _is_provider_available(self, provider: str) -> bool:
+        if not _circuit_breakers[provider].is_allowed():
+            return False
         if time.time() < self._provider_cooldown.get(provider, 0.0):
             return False
         return self.key_manager.has_working_keys(provider)
@@ -303,11 +313,21 @@ class FreeLLMClient:
 
     def _dispatch_call(self, provider: str, prompt: str, temperature: float,
                        max_tokens: int, key: str, timeout: int = 30) -> str:
-        if provider == "groq":       return self._call_groq(prompt, temperature, max_tokens, timeout, key)
-        if provider == "gemini":     return self._call_gemini(prompt, temperature, max_tokens, timeout, key)
-        if provider == "cerebras":   return self._call_cerebras(prompt, temperature, max_tokens, timeout, key)
-        if provider == "openrouter": return self._call_openrouter(prompt, temperature, max_tokens, timeout, key)
-        raise ValueError(f"Unknown provider: {provider!r}")
+        breaker = _circuit_breakers[provider]
+        if not breaker.is_allowed():
+            raise RuntimeError(f"Circuit OPEN for {provider}")
+        try:
+            if provider == "groq":       res = self._call_groq(prompt, temperature, max_tokens, timeout, key)
+            elif provider == "gemini":     res = self._call_gemini(prompt, temperature, max_tokens, timeout, key)
+            elif provider == "cerebras":   res = self._call_cerebras(prompt, temperature, max_tokens, timeout, key)
+            elif provider == "openrouter": res = self._call_openrouter(prompt, temperature, max_tokens, timeout, key)
+            else: raise ValueError(f"Unknown provider: {provider!r}")
+            breaker.record_success()
+            return res
+        except Exception as e:
+            if not self._is_rate_limit_error(e):
+                breaker.record_failure()
+            raise
 
     # ── Provider implementations ──────────────────────────────────────────────
 
