@@ -16,6 +16,7 @@ const PIPELINE_STEPS = [
   { key: 'round_3_pro',   label: 'Pro · round 3',  sub: 'supporting' },
   { key: 'round_3_con',   label: 'Con · round 3',  sub: 'rebuttal' },
   { key: 'fact_checking', label: 'Fact check',      sub: 'source verification' },
+  { key: 'human_review',  label: 'Human Review',    sub: 'intervention pause' },
   { key: 'moderating',    label: 'Moderator',       sub: 'synthesis' },
   { key: 'complete',      label: 'Verdict',         sub: 'complete' },
 ];
