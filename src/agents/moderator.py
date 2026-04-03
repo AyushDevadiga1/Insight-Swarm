@@ -41,8 +41,9 @@ class Moderator(BaseAgent):
                 except (TypeError, ValueError):
                     pass
 
-            pro_rate     = state.pro_verification_rate or 0.0
-            con_rate     = state.con_verification_rate or 0.0
+            results = state.verification_results or []
+            pro_rate = self._calculate_weighted_score(results, "PRO")
+            con_rate = self._calculate_weighted_score(results, "CON")
             avg_ver_rate = (pro_rate + con_rate) / 2
 
             trust_scores = []
@@ -113,14 +114,36 @@ class Moderator(BaseAgent):
             metrics={"credibility": 0.5, "balance": 0.5},
         )
 
+    def _calculate_weighted_score(self, results: list, agent: str) -> float:
+        """Calculate trust-weighted verification score."""
+        agent_results = [r for r in results if isinstance(r, dict) and r.get("agent_source") == agent]
+        if not agent_results:
+            return 0.0
+        
+        total_weight = 0.0
+        verified_weight = 0.0
+        
+        for result in agent_results:
+            trust = float(result.get("trust_score", 0.5))
+            confidence = float(result.get("confidence", 0.5))
+            is_verified = result.get("status") == "VERIFIED"
+            
+            weight = trust * confidence
+            total_weight += weight
+            if is_verified:
+                verified_weight += weight
+        
+        return verified_weight / total_weight if total_weight > 0 else 0.0
+
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
-        pro_ver_rate = state.pro_verification_rate or 0.0
-        con_ver_rate = state.con_verification_rate or 0.0
+        results = state.verification_results or []
+        pro_ver_rate = self._calculate_weighted_score(results, "PRO")
+        con_ver_rate = self._calculate_weighted_score(results, "CON")
         has_sources  = bool(
             (state.pro_sources and any(s for s in state.pro_sources)) or
             (state.con_sources and any(s for s in state.con_sources))
         )
-        no_sources = not has_sources or (pro_ver_rate == 0.0 and con_ver_rate == 0.0)
+        no_sources = not has_sources or len(results) == 0
 
         if state.summary:
             pro_final = (state.pro_arguments[-1] if state.pro_arguments else "No argument.")[:_MAX_ARG_CHARS]
@@ -132,11 +155,11 @@ class Moderator(BaseAgent):
             con_args = "\n\n".join(f"Round {i+1}: {arg[:_MAX_ARG_CHARS]}" for i, arg in enumerate(state.con_arguments)) or "No Con arguments recorded."
 
         verification_section = ""
-        if state.pro_verification_rate is not None:
+        if len(results) > 0:
             verification_section = (
                 f"\nSOURCE VERIFICATION SUMMARY:\n"
-                f"- ProAgent source verification rate: {pro_ver_rate:.1%}\n"
-                f"- ConAgent source verification rate: {con_ver_rate:.1%}\n"
+                f"- ProAgent Weighted Score (trust-adjusted): {pro_ver_rate:.1%}\n"
+                f"- ConAgent Weighted Score (trust-adjusted): {con_ver_rate:.1%}\n"
             )
 
         zero_source_guidance = ""
