@@ -32,8 +32,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from main import validate_claim
 from src.orchestration.debate import DebateOrchestrator
+from src.core.models import DebateState
 from src.orchestration.cache import record_feedback
 from src.llm.client import RateLimitError
+from fastapi import WebSocket, WebSocketDisconnect
+from api.websocket_hitl import hitl_manager
 
 logger = logging.getLogger("insightswarm.api")
 logging.basicConfig(level=logging.INFO)
@@ -252,6 +255,7 @@ async def stream_debate(claim: str, request: Request, thread_id: str = None):
                 
                 orch.set_tracker(SSETracker())
                 
+                config = {"configurable": {"thread_id": thread_id}}
                 prev_pro = 0
                 prev_con = 0
                 prev_src = 0
@@ -291,7 +295,12 @@ async def stream_debate(claim: str, request: Request, thread_id: str = None):
                         prev_src = cur_src
                         
                     if event_type in ("complete", "cache_hit"):
-                        q.put({"type": "verdict", "data": _normalise(raw)})
+                        # Check if graph paused
+                        graph_state = orch.graph.get_state(config)
+                        if graph_state and graph_state.next and "human_review" in graph_state.next:
+                            q.put({"type": "human_review_required", "data": _normalise(raw)})
+                        else:
+                            q.put({"type": "verdict", "data": _normalise(raw)})
                         
             except Exception as e:
                 logger.exception("Stream thread failed")
@@ -378,3 +387,57 @@ def feedback(req: FeedbackRequest) -> Dict[str, str]:
     except Exception as e:
         logger.warning("Feedback recording failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+class ResumeRequest(BaseModel):
+    source_overrides: Dict[str, str] = {}
+    verdict_override: Optional[str] = None
+
+@app.post("/api/debate/resume/{thread_id}")
+def resume_debate(thread_id: str, human_input: ResumeRequest) -> Dict[str, Any]:
+    """Resume debate after human intervention."""
+    orchestrator = get_orchestrator()
+    config = {"configurable": {"thread_id": thread_id}}
+    
+    current_state = orchestrator.graph.get_state(config)
+    if not current_state or not current_state.values:
+        raise HTTPException(status_code=404, detail="Thread state not found")
+        
+    state_vals = current_state.values
+    overrides = human_input.dict()
+    
+    for source_url, new_rating in overrides.get("source_overrides", {}).items():
+        for result in state_vals.get("verification_results", []):
+            if result.get("url") == source_url:
+                result["status"] = new_rating
+                result["human_override"] = True
+    
+    if overrides.get("verdict_override"):
+        state_vals["human_verdict_override"] = overrides["verdict_override"]
+        
+    # Resume execution
+    final_state_raw = orchestrator.graph.invoke(
+        None,  # Continue from checkpoint
+        config=config,
+        input=state_vals
+    )
+    
+    if isinstance(final_state_raw, dict):
+        final_state = DebateState.model_validate(final_state_raw)
+    elif hasattr(final_state_raw, "model_dump"):
+        final_state = final_state_raw
+    else:
+        final_state = DebateState.model_validate(dict(final_state_raw))
+        
+    return _normalise(_state_to_dict(final_state))
+
+@app.websocket("/ws/hitl/{thread_id}")
+async def hitl_websocket(websocket: WebSocket, thread_id: str):
+    await hitl_manager.connect(thread_id, websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            # Handle human override over ws if desired
+            if data.get("type") == "OVERRIDE":
+                pass
+    except WebSocketDisconnect:
+        await hitl_manager.disconnect(thread_id)
