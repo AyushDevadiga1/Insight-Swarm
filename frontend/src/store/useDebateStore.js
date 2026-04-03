@@ -29,6 +29,7 @@ export const STAGES = {
   round_3_pro:      { label: 'ProAgent — Rd 3',   pct: 0.70, icon: '💬' },
   round_3_con:      { label: 'ConAgent — Rd 3',   pct: 0.80, icon: '🔴' },
   fact_checking:    { label: 'FactChecker',        pct: 0.88, icon: '✅' },
+  human_review:     { label: 'Human Review',      pct: 0.92, icon: '✋' },
   moderating:       { label: 'Moderator',          pct: 0.95, icon: '⚖️' },
   complete:         { label: 'Complete',           pct: 1.00, icon: '🎉' },
   error:            { label: 'Error',              pct: 0,    icon: '❌' },
@@ -66,6 +67,10 @@ const initialState = {
   // Final result (set on 'verdict' event)
   result: null,
 
+  // HITL state
+  pendingReview: null,
+  threadId: null,
+
   // Error info
   error: null,
 
@@ -80,7 +85,7 @@ export const useDebateStore = create((set, get) => ({
 
   setClaim: (claim) => set({ claim }),
 
-  startRun: () => set({
+  startRun: (id) => set({
     isRunning: true,
     streamConnected: false,
     activeStage: 'idle',
@@ -93,6 +98,8 @@ export const useDebateStore = create((set, get) => ({
     lastHeartbeat: null,
     result: null,
     error: null,
+    pendingReview: null,
+    threadId: id,
   }),
 
   setStreamConnected: (connected) => set({ streamConnected: connected }),
@@ -177,4 +184,7 @@ export const useDebateStore = create((set, get) => ({
     ...initialState,
     history: get().history, // preserve session history across resets
   }),
+
+  setPendingReview: (reviewData) => set({ pendingReview: reviewData }),
+  clearPendingReview: () => set({ pendingReview: null }),
 }));
