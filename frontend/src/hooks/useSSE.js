@@ -38,6 +38,7 @@ export function useSSE(claim, runId) {
     setError,
     setHeartbeat,
     setSubClaims,
+    setPendingReview,
   } = useDebateStore.getState();
 
   // ── Flush buffered text chunks to Zustand every 80ms ───────────────────────
@@ -154,6 +155,19 @@ export function useSSE(claim, runId) {
       }
     });
 
+    // ── human_review_required event — Wait for human intervention ────────────
+    es.addEventListener('human_review_required', (e) => {
+      try {
+        stopFlushTimer();
+        setPendingReview(JSON.parse(e.data));
+        closedOnPurpose.current = true;
+        es.close();
+        esRef.current = null;
+      } catch (_) {
+        setError({ type: 'PARSE_ERROR', message: 'Could not parse human review request.' });
+      }
+    });
+
     // ── error event — backend-emitted structured error ───────────────────────
     es.addEventListener('error', (e) => {
       try {
@@ -205,7 +219,7 @@ export function useSSE(claim, runId) {
   // ── Lifecycle — reconnects ONLY when runId changes (user clicks Verify) ────
   useEffect(() => {
     if (runId && claim) {
-      startRun();
+      startRun(runId);
       connect();
     }
     return () => {
