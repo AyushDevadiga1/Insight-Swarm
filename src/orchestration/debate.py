@@ -1,6 +1,7 @@
 """
 src/orchestration/debate.py — All batches applied. Final production version.
 Single definition of every method. No duplicates.
+Novelty modules (ArgumentationAnalyzer + AdaptiveConfidenceCalibrator) wired into pipeline.
 """
 import sys, logging, json, re
 from pathlib import Path
@@ -104,7 +105,6 @@ class DebateOrchestrator:
         if len(state.pro_arguments) > 5:
             state.pro_arguments = state.pro_arguments[-5:]
             state.con_arguments = state.con_arguments[-5:]
-            # Keep sources list in sync so FactChecker can pair by index
             state.pro_sources = state.pro_sources[-5:]
             state.con_sources = state.con_sources[-5:]
         return state
@@ -122,7 +122,6 @@ class DebateOrchestrator:
                 if state.metrics is None: state.metrics = {}
                 state.metrics["consensus"] = {"verdict":verdict,"reasoning":reasoning,"score":conf}
                 logger.info("Hardcoded consensus: %s", verdict)
-                # Populate synthetic debate entries so the UI debate tab is not blank
                 if not state.pro_arguments:
                     state.pro_arguments = [f"[Settled science — debate skipped] {reasoning}"]
                 if not state.con_arguments:
@@ -149,7 +148,6 @@ class DebateOrchestrator:
                 state.confidence = response.confidence
                 state.moderator_reasoning = f"Consensus Pre-Check: {response.reasoning}"
                 logger.info("Consensus found: %s", state.verdict)
-                # Populate synthetic debate entries so UI debate tab is not blank
                 if not state.pro_arguments:
                     state.pro_arguments = [f"[Consensus settled — debate skipped] {response.reasoning}"]
                 if not state.con_arguments:
@@ -245,7 +243,6 @@ class DebateOrchestrator:
         self._set_stage("FACT_CHECK", "Verifying sources...")
         logger.info("FactChecker verifying sources...")
         
-        # Step 1: Strip hallucinated URLs not present in the evidence
         allowed_urls = set()
         for pool in [state.evidence_sources, state.pro_evidence, state.con_evidence]:
             if pool:
@@ -265,7 +262,7 @@ class DebateOrchestrator:
                 cleaned.append(valid)
             return cleaned
 
-        if allowed_urls:  # Only enforce if we actually retrieved evidence
+        if allowed_urls:
             state.pro_sources = strip_hallucinations(state.pro_sources)
             state.con_sources = strip_hallucinations(state.con_sources)
             
@@ -293,7 +290,72 @@ class DebateOrchestrator:
             state.verdict             = response.verdict
             state.confidence          = response.confidence
             state.moderator_reasoning = response.reasoning
-            state.metrics             = response.metrics
+            state.metrics             = response.metrics or {}
+
+            # ── NOVELTY 1: ArgumentationAnalyzer ─────────────────────────────
+            # Deep argument quality analysis — fallacy detection, citation
+            # quality, rhetorical pattern scoring. Runs non-fatally.
+            try:
+                from src.novelty.argumentation_analysis import get_argumentation_analyzer
+                analyzer = get_argumentation_analyzer()
+
+                pro_analyses = []
+                for i, arg in enumerate(state.pro_arguments):
+                    srcs = state.pro_sources[i] if i < len(state.pro_sources) else []
+                    # Skip API failure placeholders
+                    if "[API_FAILURE]" not in arg:
+                        pro_analyses.append(analyzer.analyze_argument(arg, srcs, "PRO"))
+
+                con_analyses = []
+                for i, arg in enumerate(state.con_arguments):
+                    srcs = state.con_sources[i] if i < len(state.con_sources) else []
+                    if "[API_FAILURE]" not in arg:
+                        con_analyses.append(analyzer.analyze_argument(arg, srcs, "CON"))
+
+                if pro_analyses and con_analyses:
+                    debate_quality = analyzer.compare_debate_quality(pro_analyses, con_analyses)
+                    state.metrics["argumentation_analysis"] = {
+                        "pro_avg_quality":  debate_quality.get("pro_average_quality", 0.0),
+                        "con_avg_quality":  debate_quality.get("con_average_quality", 0.0),
+                        "quality_gap":      debate_quality.get("quality_gap", 0.0),
+                        "pro_fallacy_count": debate_quality.get("pro_total_fallacies", 0),
+                        "con_fallacy_count": debate_quality.get("con_total_fallacies", 0),
+                        "debate_quality":   debate_quality.get("debate_quality", "low"),
+                        "higher_quality_side": debate_quality.get("higher_quality_side", "PRO"),
+                    }
+                    logger.info("ArgumentationAnalyzer: pro=%.2f con=%.2f fallacies_p=%d fallacies_c=%d",
+                                debate_quality.get("pro_average_quality", 0),
+                                debate_quality.get("con_average_quality", 0),
+                                debate_quality.get("pro_total_fallacies", 0),
+                                debate_quality.get("con_total_fallacies", 0))
+            except Exception as _e:
+                logger.warning("ArgumentationAnalyzer failed (non-fatal): %s", _e)
+
+            # ── NOVELTY 2: AdaptiveConfidenceCalibrator ───────────────────────
+            # Detects underconfidence and boosts confidence when evidence is
+            # strong. Computes ECE-compatible calibration metadata.
+            raw_confidence = state.confidence
+            try:
+                from src.novelty.confidence_calibration import get_calibrator
+                calibrator = get_calibrator()
+                calibrated_conf, calibration_meta = calibrator.calibrate(
+                    raw_confidence      = raw_confidence,
+                    verdict             = state.verdict,
+                    claim               = state.claim,
+                    verification_results= state.verification_results or [],
+                    pro_args            = state.pro_arguments,
+                    con_args            = state.con_arguments,
+                    pro_sources         = state.pro_sources,
+                    con_sources         = state.con_sources,
+                )
+                state.confidence = calibrated_conf
+                state.metrics["calibration"] = calibration_meta
+                logger.info("ConfidenceCalibrator: %.3f → %.3f (%s)",
+                            raw_confidence, calibrated_conf,
+                            calibration_meta.get("adjustment_type", "none"))
+            except Exception as _e:
+                logger.warning("ConfidenceCalibrator failed (non-fatal): %s", _e)
+
         except RateLimitError as e:
             logger.error("Moderator rate limited.")
             state.verdict    = "RATE_LIMITED"
