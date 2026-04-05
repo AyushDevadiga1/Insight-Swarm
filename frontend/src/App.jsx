@@ -1,9 +1,9 @@
 /**
- * App.jsx — v3 redesign
+ * App.jsx — v3 redesign + HITL integration
  * 3-panel shell: Sidebar | Main (Home/Debate/Verdict) | StagePanel
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { useApiHealth } from './hooks/useApiHealth';
 import { useSSE } from './hooks/useSSE';
 import { useDebateStore } from './store/useDebateStore';
@@ -21,7 +21,6 @@ import ClaimInput from './components/input/ClaimInput';
 // Common
 import ErrorBanner from './components/common/ErrorBanner';
 import SubClaimBanner from './components/common/SubClaimBanner';
-import HITLReviewPanel from './components/pipeline/HITLReviewPanel';
 
 // Results
 import VerdictCard from './components/results/VerdictCard';
@@ -31,10 +30,14 @@ import FallacyPanel from './components/results/FallacyPanel';
 import SourceTable from './components/results/SourceTable';
 import FeedbackPanel from './components/results/FeedbackPanel';
 
+// HITL
+import HITLPanel from './components/hitl/HITLPanel';
+
 export default function App() {
   const {
     claim, isRunning, result, error,
-    sourceResults, agentMessages, setClaim, reset, history,
+    sourceResults, agentMessages, setClaim, reset,
+    history, pendingReview, setResult,
   } = useDebateStore();
 
   // Active tab: 'home' | 'debate' | 'verdict'
@@ -62,12 +65,25 @@ export default function App() {
     }
   }, [result, isRunning]);
 
+  // Auto-switch to verdict tab when HITL review is pending
+  React.useEffect(() => {
+    if (pendingReview) {
+      setActiveTab('verdict');
+    }
+  }, [pendingReview]);
+
+  // Called by HITLPanel after resume — treat the returned data as the final result
+  const handleHITLResume = (finalResult) => {
+    setResult(finalResult);
+    setActiveTab('verdict');
+  };
+
   const displaySources = result?.verification_results ?? sourceResults;
 
   const tabs = [
     { id: 'home',    label: 'Home' },
     { id: 'debate',  label: 'Debate' },
-    { id: 'verdict', label: 'Verdict', disabled: !result && !isRunning },
+    { id: 'verdict', label: 'Verdict', disabled: !result && !isRunning && !pendingReview },
   ];
 
   return (
@@ -88,6 +104,17 @@ export default function App() {
               style={tab.disabled ? { opacity: 0.35, cursor: 'default' } : {}}
             >
               {tab.label}
+              {tab.id === 'verdict' && pendingReview && (
+                <span style={{
+                  display: 'inline-block',
+                  width: 6, height: 6,
+                  background: 'var(--mod)',
+                  borderRadius: '50%',
+                  marginLeft: 6,
+                  verticalAlign: 'middle',
+                  animation: 'pulse-glow 1.3s ease-in-out infinite',
+                }} />
+              )}
             </div>
           ))}
         </nav>
@@ -121,6 +148,12 @@ export default function App() {
             {/* ── VERDICT ── */}
             {activeTab === 'verdict' && (
               <div className="verdict-section animate-fade-up">
+
+                {/* HITL panel — shown when review is pending, above results */}
+                {pendingReview && (
+                  <HITLPanel onResume={handleHITLResume} />
+                )}
+
                 {result ? (
                   <>
                     <div className="verdict-mod-header">
@@ -138,11 +171,11 @@ export default function App() {
                       <span>Multi-Agent Verification</span>
                     </footer>
                   </>
-                ) : (
+                ) : !pendingReview ? (
                   <div style={{ color: 'var(--text-3)', fontSize: '13px', marginTop: '40px' }}>
                     No verdict yet — run a verification first.
                   </div>
-                )}
+                ) : null}
               </div>
             )}
 
@@ -152,9 +185,6 @@ export default function App() {
           <StagePanel />
         </div>
       </div>
-      
-      {/* Human In The Loop Overlay */}
-      <HITLReviewPanel />
     </div>
   );
 }
