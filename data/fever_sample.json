@@ -1,0 +1,302 @@
+[
+  {
+    "claim": "Photosynthesis is the process by which plants make food from sunlight.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The Nile River is the largest river by discharge volume.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "The speed of light in a vacuum is approximately 299,792 km/s.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "Michelangelo painted the Mona Lisa.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Neil Armstrong was the first human to walk on the Moon.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The periodic table was developed by Marie Curie.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Oxygen makes up approximately 21% of Earth's atmosphere.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "Abraham Lincoln was the 16th President of the United States.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The periodic table was developed by Dmitri Mendeleev.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The human heart has two chambers.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "RNA is the primary carrier of genetic information in all organisms.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "The Berlin Wall fell in 1989.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The Olympic Games originated in ancient Greece.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "K2 is the highest mountain above sea level.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "DNA carries genetic information in living organisms.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The Olympic Games originated in ancient Rome.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Water boils at 50 degrees Celsius at sea level.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "The human brain contains approximately 10 billion neurons.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "The Eiffel Tower is located in Paris.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The human heart has four chambers.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The Great Wall of China was built in a single dynasty.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "The Cold War ended in 1945.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "The Atlantic Ocean is the largest ocean on Earth.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "The Amazon River is the largest river by discharge volume.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "Penicillin was discovered by Alexander Fleming.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The Berlin Wall fell in 1979.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "The Eiffel Tower is located in London.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Nitrogen makes up approximately 21% of Earth's atmosphere.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Abraham Lincoln was the 10th President of the United States.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Leonardo da Vinci painted the Mona Lisa.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The human body has 100 bones in adults.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Penicillin was discovered by Louis Pasteur.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Buzz Aldrin was the first human to walk on the Moon.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Photosynthesis is the process by which animals digest food.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Mount Everest is the highest mountain above sea level.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The Pacific Ocean is the largest ocean on Earth.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "Albert Einstein was born in Germany.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The human body has 206 bones in adults.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "Isaac Newton wrote Hamlet.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Albert Einstein was born in France.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Stephen King is the author of the Harry Potter series.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Charles Darwin proposed the theory of evolution by natural selection.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The speed of light is approximately 100,000 km/s.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "Water boils at 100 degrees Celsius at sea level.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "J.K. Rowling is the author of the Harry Potter series.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "Gregor Mendel proposed the theory of evolution by natural selection.",
+    "fever_label": "REFUTES",
+    "expected_verdict": "FALSE",
+    "evidence": []
+  },
+  {
+    "claim": "William Shakespeare wrote Hamlet.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The human brain contains approximately 86 billion neurons.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The Great Wall of China was built over many centuries.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  },
+  {
+    "claim": "The Cold War ended in 1991.",
+    "fever_label": "SUPPORTS",
+    "expected_verdict": "TRUE",
+    "evidence": []
+  }
+]
