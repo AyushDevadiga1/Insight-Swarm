@@ -18,9 +18,16 @@ export default defineConfig({
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
-      '/api/status': {
+      // All /api/* routes → backend (covers /api/status, /api/debate/resume/:id)
+      '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
+      },
+      // WebSocket for HITL
+      '/ws': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        ws: true,
       },
       // SSE endpoint — disable buffering so events flow immediately
       '/stream': {
@@ -28,7 +35,6 @@ export default defineConfig({
         changeOrigin: true,
         configure: (proxy) => {
           proxy.on('proxyRes', (_proxyRes, _req, res) => {
-            // Tell Nginx/Vite not to buffer this response
             res.setHeader('Cache-Control', 'no-cache')
             res.setHeader('X-Accel-Buffering', 'no')
           })
@@ -37,4 +43,3 @@ export default defineConfig({
     }
   }
 })
-
