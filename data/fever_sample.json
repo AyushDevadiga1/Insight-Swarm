@@ -1,302 +1,99 @@
 [
-  {
-    "claim": "Photosynthesis is the process by which plants make food from sunlight.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The Nile River is the largest river by discharge volume.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "The speed of light in a vacuum is approximately 299,792 km/s.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "Michelangelo painted the Mona Lisa.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Neil Armstrong was the first human to walk on the Moon.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The periodic table was developed by Marie Curie.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Oxygen makes up approximately 21% of Earth's atmosphere.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "Abraham Lincoln was the 16th President of the United States.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The periodic table was developed by Dmitri Mendeleev.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The human heart has two chambers.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "RNA is the primary carrier of genetic information in all organisms.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "The Berlin Wall fell in 1989.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The Olympic Games originated in ancient Greece.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "K2 is the highest mountain above sea level.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "DNA carries genetic information in living organisms.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The Olympic Games originated in ancient Rome.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Water boils at 50 degrees Celsius at sea level.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "The human brain contains approximately 10 billion neurons.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "The Eiffel Tower is located in Paris.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The human heart has four chambers.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The Great Wall of China was built in a single dynasty.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "The Cold War ended in 1945.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "The Atlantic Ocean is the largest ocean on Earth.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "The Amazon River is the largest river by discharge volume.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "Penicillin was discovered by Alexander Fleming.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The Berlin Wall fell in 1979.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "The Eiffel Tower is located in London.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Nitrogen makes up approximately 21% of Earth's atmosphere.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Abraham Lincoln was the 10th President of the United States.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Leonardo da Vinci painted the Mona Lisa.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The human body has 100 bones in adults.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Penicillin was discovered by Louis Pasteur.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Buzz Aldrin was the first human to walk on the Moon.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Photosynthesis is the process by which animals digest food.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Mount Everest is the highest mountain above sea level.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The Pacific Ocean is the largest ocean on Earth.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "Albert Einstein was born in Germany.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The human body has 206 bones in adults.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "Isaac Newton wrote Hamlet.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Albert Einstein was born in France.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Stephen King is the author of the Harry Potter series.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Charles Darwin proposed the theory of evolution by natural selection.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The speed of light is approximately 100,000 km/s.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "Water boils at 100 degrees Celsius at sea level.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "J.K. Rowling is the author of the Harry Potter series.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "Gregor Mendel proposed the theory of evolution by natural selection.",
-    "fever_label": "REFUTES",
-    "expected_verdict": "FALSE",
-    "evidence": []
-  },
-  {
-    "claim": "William Shakespeare wrote Hamlet.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The human brain contains approximately 86 billion neurons.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The Great Wall of China was built over many centuries.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  },
-  {
-    "claim": "The Cold War ended in 1991.",
-    "fever_label": "SUPPORTS",
-    "expected_verdict": "TRUE",
-    "evidence": []
-  }
+  {"claim": "Moderate alcohol consumption reduces the risk of heart disease.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Coffee consumption increases the risk of developing Parkinson's disease.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Regular exercise can help reduce symptoms of depression.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Eating breakfast is essential for weight loss.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "The human immune system can develop lasting immunity after recovering from COVID-19.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Screen time before bed has no effect on sleep quality.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Mediterranean diet reduces risk of cardiovascular disease.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Vitamin C supplements prevent the common cold.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Social media use is linked to increased rates of anxiety in teenagers.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Organic food is significantly more nutritious than conventionally grown food.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Sleep deprivation impairs cognitive performance similarly to alcohol intoxication.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Antibiotics are effective against viral infections.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Mindfulness meditation can reduce chronic pain perception.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Sugar directly causes hyperactivity in children.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Air pollution is associated with increased risk of dementia.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Humans only use 10 percent of their brain capacity.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Climate change is causing more frequent and intense hurricanes.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "The Great Wall of China is visible from space with the naked eye.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Renewable energy sources now account for a growing share of global electricity generation.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Electric vehicles produce zero emissions over their entire lifecycle.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Deforestation is a significant contributor to global greenhouse gas emissions.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Nuclear power plants frequently cause radiation-related deaths in nearby populations.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Ocean acidification is threatening coral reef ecosystems worldwide.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Wind turbines are a major cause of bird deaths compared to other human structures.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Permafrost thawing in the Arctic releases methane, accelerating climate change.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Machine learning models are free from all forms of bias.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Large language models can generate text that is factually incorrect.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Artificial intelligence has already surpassed human intelligence in all domains.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Deepfake technology can be used to create convincing fake videos of real people.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Quantum computers can currently break all existing encryption systems.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Social media algorithms can influence political opinions and voting behavior.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "5G networks cause COVID-19 or other diseases.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "The dark web is primarily used for illegal activities.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Blockchain technology makes all financial transactions completely anonymous.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Gene editing technologies like CRISPR can correct genetic disorders.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "mRNA vaccines permanently alter human DNA.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Antibiotic resistance is a growing global public health crisis.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Homeopathic treatments are clinically proven to be more effective than placebos.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Exercise reduces the risk of developing type 2 diabetes.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Eating fat causes obesity regardless of total caloric intake.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Income inequality has increased in most developed countries over the past four decades.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Universal basic income has been proven to reduce work productivity in all trials.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Countries with higher education spending tend to have better economic outcomes.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Raising the minimum wage always leads to significant job losses.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Access to legal abortion reduces crime rates according to some economic research.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Immigration has no measurable effect on wages of native workers.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Early childhood education programs have lasting positive effects on life outcomes.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "The death penalty is an effective deterrent to violent crime.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Stricter gun control laws are associated with lower rates of gun violence in some countries.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "The human body can fully detoxify itself without commercial detox products.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "You need to drink eight glasses of water per day for optimal health.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Probiotic supplements improve gut health for people with irritable bowel syndrome.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Cold weather directly causes the common cold.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Fasting can have metabolic health benefits beyond simple calorie restriction.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Shaving causes hair to grow back thicker and darker.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Cognitive behavioral therapy is effective for treating anxiety disorders.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Most people are either completely left-brained or right-brained in their thinking style.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Poverty is associated with worse mental and physical health outcomes.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Violent video games directly cause violent behavior in players.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Bilingualism may delay the onset of dementia symptoms.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Classical music played to infants permanently increases their intelligence.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Sleep plays a critical role in memory consolidation.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Lie detector tests are highly reliable and used as definitive evidence in courts.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "The placebo effect can produce measurable physiological changes.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Multitasking allows people to perform multiple tasks simultaneously without quality loss.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Gut bacteria influence mental health and mood.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "We only dream during REM sleep.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Physical activity improves academic performance in children.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Handwriting is obsolete and has no cognitive benefits over typing.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Music therapy has documented benefits for patients with neurological disorders.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Introversion is a mental disorder that should be treated.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Trauma can cause long-term structural changes in the brain.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "All stress is harmful and should be eliminated.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "The opioid crisis in the United States was partly driven by pharmaceutical companies.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Chiropractic adjustments can cure cancer or organ disease.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Financial stress is a significant contributing factor to relationship breakdowns.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Money can never buy happiness regardless of income level.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Exposure to diverse social environments increases empathy and reduces prejudice.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Most scientific studies are reproducible without significant variation.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Peer review significantly improves the quality and reliability of published research.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Anecdotal evidence is as reliable as controlled clinical trials for medical decisions.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Confirmation bias causes people to favor information that confirms their existing beliefs.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "The Dunning-Kruger effect proves that all experts are overconfident in their abilities.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Microplastics have been found in human blood and organs.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Genetically modified crops are inherently dangerous to human health.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Misinformation spreads faster on social media than accurate information.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Fact-checking organizations are always politically neutral and unbiased.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Economic recessions are typically associated with increased suicide rates.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Free markets always produce the most efficient and equitable outcomes.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Urbanization is associated with improved access to healthcare and education.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "All countries with high GDP per capita have low levels of corruption.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Foreign aid is associated with improved development outcomes in recipient countries in some contexts.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Nationalism always leads to improved economic and social outcomes.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Digital literacy skills are increasingly important for economic participation.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Automation will eliminate the majority of jobs in the next decade.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []},
+  {"claim": "Remote work has been shown to maintain or improve productivity for many knowledge workers.", "fever_label": "SUPPORTS", "expected_verdict": "TRUE", "evidence": []},
+  {"claim": "Open-plan offices improve collaboration and productivity for all workers.", "fever_label": "REFUTES", "expected_verdict": "FALSE", "evidence": []}
 ]
