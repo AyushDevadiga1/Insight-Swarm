@@ -1,0 +1,21 @@
+
+/* ── reasoning-toggle-label (used by ReasoningPanel.jsx) ── */
+.reasoning-toggle-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+/* ── reasoning-toggle-right (used by ReasoningPanel.jsx) ── */
+.reasoning-toggle-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ── reasoning-toggle-hint ── */
+.reasoning-toggle-hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-3);
+}
