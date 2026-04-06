@@ -24,6 +24,8 @@ from src.utils.tavily_retriever import get_tavily_retriever
 from src.utils.claim_decomposer import ClaimDecomposer
 from src.utils.summarizer import Summarizer
 from src.llm.client import FreeLLMClient, RateLimitError
+from src.novelty import get_complexity_estimator, get_explainability_engine
+
 from src.utils.url_helper import URLNormalizer
 
 logger = logging.getLogger(__name__)
@@ -366,6 +368,15 @@ class DebateOrchestrator:
         return state
 
     def _verdict_node(self, state: DebateState) -> DebateState:
+
+        # NOVELTY: Generate XAI Explanation
+        from src.novelty import get_explainability_engine
+        explainer = get_explainability_engine()
+        explanation = explainer.generate_explanation(state.to_dict(), level="standard")
+        if state.metrics is None:
+            state.metrics = {}
+        state.metrics["explanation"] = explanation
+        
         self._set_stage("COMPLETE", f"Verdict: {state.verdict}")
         logger.info("Final verdict: %s (confidence: %s)", state.verdict, state.confidence)
         return state
@@ -497,6 +508,17 @@ class DebateOrchestrator:
             self._set_stage("COMPLETE", "Loaded from cache")
             return state
 
+        
+        # NOVELTY: Claim Complexity Estimation
+        from src.novelty import get_complexity_estimator
+        estimator = get_complexity_estimator()
+        complexity_profile = estimator.estimate_complexity(claim)
+        logger.info(f"Claim complexity: {complexity_profile['complexity_tier']} - adjusting debate parameters")
+        
+        # Adjust debate rounds based on complexity
+        adjusted_params = estimator.adjust_debate_parameters(3, 5, complexity_profile)
+        num_rounds_adjusted = adjusted_params["adjusted_rounds"]
+        
         self._set_stage("DECOMPOSING", "Analyzing claim structure...")
         sub_claims   = self.claim_decomposer.decompose(claim)
         if len(sub_claims) > 1:
@@ -519,6 +541,17 @@ class DebateOrchestrator:
             yield "cache_hit", state
             return
 
+        
+        # NOVELTY: Claim Complexity Estimation
+        from src.novelty import get_complexity_estimator
+        estimator = get_complexity_estimator()
+        complexity_profile = estimator.estimate_complexity(claim)
+        logger.info(f"Claim complexity: {complexity_profile['complexity_tier']} - adjusting debate parameters")
+        
+        # Adjust debate rounds based on complexity
+        adjusted_params = estimator.adjust_debate_parameters(3, 5, complexity_profile)
+        num_rounds_adjusted = adjusted_params["adjusted_rounds"]
+        
         self._set_stage("DECOMPOSING", "Analyzing claim structure...")
         sub_claims   = self.claim_decomposer.decompose(claim)
         if len(sub_claims) > 1:
