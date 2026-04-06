@@ -6,6 +6,8 @@ from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.core.models import ModeratorVerdict
 from src.llm.client import FreeLLMClient, RateLimitError
 import logging
+from src.novelty import get_calibrator, get_argumentation_analyzer
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +82,31 @@ class Moderator(BaseAgent):
             if len(reasoning) > 1500:
                 reasoning = reasoning[:1497] + "..."
 
-            return AgentResponse(
+            
+        # NOVELTY: Adaptive Confidence Calibration
+        from src.novelty import get_calibrator
+        calibrator = get_calibrator()
+        calibrated_conf, calibration_meta = calibrator.calibrate(
+            raw_confidence=final_confidence,
+            verdict=result.verdict,
+            claim=state.claim,
+            verification_results=results or [],
+            pro_args=state.pro_arguments or [],
+            con_args=state.con_arguments or [],
+            pro_sources=state.pro_sources or [],
+            con_sources=state.con_sources or []
+        )
+        
+        # Use calibrated confidence
+        final_confidence = calibrated_conf
+        final_metrics["calibration"] = calibration_meta
+        
+        return AgentResponse(
                 agent="MODERATOR",
                 round=state.round,
                 argument=reasoning[:500] + "..." if len(reasoning) > 500 else reasoning,
                 sources=[],
-                confidence=float(composite),
+                confidence=final_confidence,
                 verdict=result.verdict,
                 reasoning=reasoning,
                 metrics=final_metrics,
@@ -107,6 +128,25 @@ class Moderator(BaseAgent):
             verdict, argument, confidence = "RATE_LIMITED", "All LLM quotas exhausted — verification cannot proceed.", 0.0
         else:
             verdict, argument, confidence = "SYSTEM_ERROR", "A technical interruption occurred in the moderation protocol.", 0.0
+        
+        # NOVELTY: Adaptive Confidence Calibration
+        from src.novelty import get_calibrator
+        calibrator = get_calibrator()
+        calibrated_conf, calibration_meta = calibrator.calibrate(
+            raw_confidence=final_confidence,
+            verdict=result.verdict,
+            claim=state.claim,
+            verification_results=results or [],
+            pro_args=state.pro_arguments or [],
+            con_args=state.con_arguments or [],
+            pro_sources=state.pro_sources or [],
+            con_sources=state.con_sources or []
+        )
+        
+        # Use calibrated confidence
+        final_confidence = calibrated_conf
+        final_metrics["calibration"] = calibration_meta
+        
         return AgentResponse(
             agent="MODERATOR", round=state.round, argument=argument,
             sources=[], confidence=confidence, verdict=verdict,
