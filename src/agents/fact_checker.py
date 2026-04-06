@@ -2,6 +2,8 @@
 src/agents/fact_checker.py — Final production version. All batches applied.
 """
 import logging, random, re, threading, time, atexit as _atexit
+from src.novelty import get_contradiction_detector
+
 from typing import List, Optional, Tuple, Any
 from urllib.parse import urlparse
 
@@ -114,13 +116,19 @@ class FactChecker(BaseAgent):
         pro_rate = (pro_verified / len(pro_results)) if pro_results else 0.0
         con_rate = (con_verified / len(con_results)) if con_results else 0.0
 
+        
+        # NOVELTY: Evidence Contradiction Detection
+        from src.novelty import get_contradiction_detector
+        detector = get_contradiction_detector()
+        contradiction_analysis = detector.detect_contradictions(results, state.claim)
+        
         return AgentResponse(
             agent="FACT_CHECKER",
             round=state.round,
             argument=f"Source verification complete. PRO: {pro_verified}/{len(pro_results)} verified. CON: {con_verified}/{len(con_results)} verified.",
             sources=[r.url for r in results],
             confidence=round(overall_confidence, 3),
-            metrics={"verification_results": [r.to_dict() for r in results], "pro_rate": pro_rate, "con_rate": con_rate},
+            metrics={"verification_results": [r.to_dict() for r in results], "pro_rate": pro_rate, "con_rate": con_rate, "contradictions": contradiction_analysis},
         )
 
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
