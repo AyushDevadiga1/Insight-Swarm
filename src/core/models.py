@@ -1,5 +1,6 @@
 """
-src/core/models.py — All batches applied. Final production version.
+src/core/models.py — Final production version.
+Added: human_verdict_override field for HITL server.py resume endpoint.
 """
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import List, Dict, Any, Optional, Literal
@@ -27,7 +28,7 @@ class SourceVerification(BaseModel):
 
 
 class AgentArgumentResponse(BaseModel):
-    """Slim schema for Pro/Con LLM calls — excludes Literal fields the LLM can't reliably fill."""
+    """Slim schema for Pro/Con LLM calls."""
     argument:   str
     sources:    list  = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -117,6 +118,8 @@ class DebateState(BaseModel):
     con_model_used:       Optional[str]  = None
     moderator_model_used: Optional[str]  = None
     system_status:        Optional[str]  = None
+    # HITL: set by /api/debate/resume when a human overrides the verdict
+    human_verdict_override: Optional[str] = None
 
     def __getitem__(self, item: str):        return getattr(self, item)
     def __setitem__(self, key: str, value):
