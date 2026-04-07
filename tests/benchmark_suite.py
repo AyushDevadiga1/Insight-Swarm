@@ -36,6 +36,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 from dataclasses import dataclass, asdict
+from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -178,6 +179,12 @@ class SingleAgentBaseline:
     Zero-shot single-LLM classifier — no debate, no evidence retrieval.
     Represents the 'LLM only' approach this paper argues against.
     """
+
+    # BUG FIX: call_structured requires a Pydantic BaseModel, not bare dict.
+    class _PredictSchema(BaseModel):
+        verdict:    str   = Field(default="INSUFFICIENT EVIDENCE")
+        confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
     def __init__(self, llm_client=None):
         if llm_client is None:
             from src.llm.client import FreeLLMClient
@@ -192,10 +199,14 @@ class SingleAgentBaseline:
             f'{{ "verdict": "TRUE"|"FALSE"|"PARTIALLY TRUE", "confidence": 0.0-1.0 }}'
         )
         try:
-            result = self.client.call_structured(prompt, dict, temperature=0.1,
-                                                  preferred_provider="groq")
-            verdict = str(result.get("verdict", "INSUFFICIENT EVIDENCE")).upper().strip()
-            conf    = float(result.get("confidence", 0.5))
+            result = self.client.call_structured(
+                prompt,
+                self._PredictSchema,
+                temperature=0.1,
+                preferred_provider="groq",
+            )
+            verdict = str(result.verdict).upper().strip()
+            conf    = float(result.confidence)
             return verdict, conf
         except Exception:
             return "INSUFFICIENT EVIDENCE", 0.0
