@@ -26,6 +26,13 @@ class SourceVerification(BaseModel):
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
 
+    def __getitem__(self, item: str):
+        return getattr(self, item)
+        
+    def get(self, key: str, default=None):
+        val = getattr(self, key, _MISSING)
+        return default if val is _MISSING else val
+
 
 class AgentArgumentResponse(BaseModel):
     """Slim schema for Pro/Con LLM calls."""
