@@ -192,11 +192,47 @@ class FreeLLMClient:
             raise ValueError("LLM returned empty or invalid response")
 
     def _clean_json_response(self, response: str) -> str:
-        if not response: return response
+        """Strip markdown fences and trailing garbage, returning only the first
+        complete JSON object or array.  Fixes 'trailing characters' Pydantic
+        errors from Cerebras / OpenRouter LLMs that append explanation text."""
+        if not response:
+            return response
         response = response.strip()
+
+        # 1. Try to unwrap a ```json ... ``` code-fence first
         if "```" in response:
             m = re.search(r"```(?:json)?\s*(.*?)\s*```", response, re.DOTALL)
-            if m: return m.group(1).strip()
+            if m:
+                response = m.group(1).strip()
+
+        # 2. Brace-balance: extract the first complete { } or [ ] block
+        for open_ch, close_ch in (('{', '}'), ('[', ']')):
+            start = response.find(open_ch)
+            if start == -1:
+                continue
+            depth = 0
+            in_str = False
+            escape = False
+            for idx, ch in enumerate(response[start:], start):
+                if escape:
+                    escape = False
+                    continue
+                if ch == '\\' and in_str:
+                    escape = True
+                    continue
+                if ch == '"' and not escape:
+                    in_str = not in_str
+                    continue
+                if in_str:
+                    continue
+                if ch == open_ch:
+                    depth += 1
+                elif ch == close_ch:
+                    depth -= 1
+                    if depth == 0:
+                        return response[start:idx + 1]
+
+        # 3. Fall through — return as-is and let pydantic raise a clean error
         return response
 
     # ── call_structured ───────────────────────────────────────────────────────
