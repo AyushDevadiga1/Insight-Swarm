@@ -200,12 +200,12 @@ class AdaptiveConfidenceCalibrator:
         # Metadata for transparency
         metadata = {
             "claim_type": claim_type,
-            "source_quality_score": round(source_quality, 3),
-            "debate_asymmetry": round(debate_asymmetry, 3),
+            "source_quality_score": float(round(source_quality, 3)),
+            "debate_asymmetry": float(round(debate_asymmetry, 3)),
             "underconfidence_detected": is_underconfident,
-            "raw_confidence": round(raw_confidence, 3),
-            "calibrated_confidence": round(calibrated, 3),
-            "adjustment": round(calibrated - raw_confidence, 3),
+            "raw_confidence": float(round(raw_confidence, 3)),
+            "calibrated_confidence": float(round(calibrated, 3)),
+            "adjustment": float(round(calibrated - raw_confidence, 3)),
             "adjustment_type": adjustment_type,
         }
         
@@ -264,8 +264,8 @@ class AdaptiveConfidenceCalibrator:
         return {
             "ece": round(ece, 4),
             "samples": len(history),
-            "mean_confidence": round(np.mean([c for c, _ in history]), 3),
-            "accuracy": round(np.mean([1 if correct else 0 for _, correct in history]), 3),
+            "mean_confidence": round(float(np.mean([c for c, _ in history])), 3),
+            "accuracy": round(float(np.mean([1 if correct else 0 for _, correct in history])), 3),
         }
 
 
