@@ -1,13 +1,16 @@
 """
 src/agents/moderator.py — All batches applied. Final production version.
+BUG FIX (D23):
+  - Removed double-calibration: debate.py's _moderator_node already calls
+    get_calibrator after moderator.generate() returns. Calling it again inside
+    generate() produced two calibration entries and inflated confidence.
+  - Removed unused import: get_argumentation_analyzer was imported but never used.
 """
 from typing import Optional
 from src.agents.base import BaseAgent, AgentResponse, DebateState
 from src.core.models import ModeratorVerdict
 from src.llm.client import FreeLLMClient, RateLimitError
 import logging
-from src.novelty import get_calibrator, get_argumentation_analyzer
-
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,7 @@ class Moderator(BaseAgent):
             )
             self.call_count += 1
 
+            # ── Extract argument_quality from LLM-provided metrics ───────────
             arg_quality  = 0.5
             metrics_dict = result.metrics or {}
             raw_aq = metrics_dict.get("argument_quality")
@@ -43,17 +47,20 @@ class Moderator(BaseAgent):
                 except (TypeError, ValueError):
                     pass
 
-            results = state.verification_results or []
-            pro_rate = self._calculate_weighted_score(results, "PRO")
-            con_rate = self._calculate_weighted_score(results, "CON")
+            # ── Trust-weighted verification rates ────────────────────────────
+            results      = state.verification_results or []
+            pro_rate     = self._calculate_weighted_score(results, "PRO")
+            con_rate     = self._calculate_weighted_score(results, "CON")
             avg_ver_rate = (pro_rate + con_rate) / 2
 
-            trust_scores = []
-            for r in (state.verification_results or []):
-                if isinstance(r, dict) and r.get("status") == "VERIFIED":
-                    trust_scores.append(float(r.get("trust_score", 0.5)))
+            trust_scores = [
+                float(r.get("trust_score", 0.5))
+                for r in results
+                if isinstance(r, dict) and r.get("status") == "VERIFIED"
+            ]
             avg_trust = sum(trust_scores) / len(trust_scores) if trust_scores else 0.5
 
+            # ── Consensus alignment score ─────────────────────────────────────
             consensus_score = 0.5
             if state.metrics and "consensus" in state.metrics:
                 cd = state.metrics["consensus"]
@@ -64,11 +71,16 @@ class Moderator(BaseAgent):
                 else:
                     consensus_score = 0.2
 
+            # ── Composite confidence (note: calibration applied by debate.py) ─
             composite = max(0.0, min(1.0,
-                arg_quality * 0.3 + avg_ver_rate * 0.3 + avg_trust * 0.2 + consensus_score * 0.2
+                arg_quality   * 0.3 +
+                avg_ver_rate  * 0.3 +
+                avg_trust     * 0.2 +
+                consensus_score * 0.2
             ))
 
-            final_metrics = result.metrics or {}
+            # ── Build final metrics dict ──────────────────────────────────────
+            final_metrics = dict(result.metrics or {})
             final_metrics["confidence_breakdown"] = {
                 "argument_quality_weight": 0.3, "argument_quality_score": arg_quality,
                 "verification_weight":     0.3, "verification_score":     avg_ver_rate,
@@ -82,31 +94,12 @@ class Moderator(BaseAgent):
             if len(reasoning) > 1500:
                 reasoning = reasoning[:1497] + "..."
 
-            
-        # NOVELTY: Adaptive Confidence Calibration
-        from src.novelty import get_calibrator
-        calibrator = get_calibrator()
-        calibrated_conf, calibration_meta = calibrator.calibrate(
-            raw_confidence=final_confidence,
-            verdict=result.verdict,
-            claim=state.claim,
-            verification_results=results or [],
-            pro_args=state.pro_arguments or [],
-            con_args=state.con_arguments or [],
-            pro_sources=state.pro_sources or [],
-            con_sources=state.con_sources or []
-        )
-        
-        # Use calibrated confidence
-        final_confidence = calibrated_conf
-        final_metrics["calibration"] = calibration_meta
-        
-        return AgentResponse(
+            return AgentResponse(
                 agent="MODERATOR",
                 round=state.round,
                 argument=reasoning[:500] + "..." if len(reasoning) > 500 else reasoning,
                 sources=[],
-                confidence=final_confidence,
+                confidence=float(composite),
                 verdict=result.verdict,
                 reasoning=reasoning,
                 metrics=final_metrics,
@@ -117,36 +110,21 @@ class Moderator(BaseAgent):
             state.moderator_reasoning = str(e)
             return self._fallback_verdict(state)
         except Exception as e:
-            logger.error("Moderator failed: %s", e)
+            logger.error("Moderator failed: %s", e, exc_info=True)
             state.moderator_reasoning = str(e)
             return self._fallback_verdict(state)
 
     def _fallback_verdict(self, state: DebateState) -> AgentResponse:
         logger.warning("Moderator fallback triggered.")
         reason = state.moderator_reasoning or "Unknown error"
-        if any(kw in reason.upper() for kw in ("QUOTA_EXHAUSTED","429","RATE LIMIT","RATE_LIMIT")):
-            verdict, argument, confidence = "RATE_LIMITED", "All LLM quotas exhausted — verification cannot proceed.", 0.0
+        if any(kw in reason.upper() for kw in ("QUOTA_EXHAUSTED", "429", "RATE LIMIT", "RATE_LIMIT")):
+            verdict    = "RATE_LIMITED"
+            argument   = "All LLM quotas exhausted — verification cannot proceed."
+            confidence = 0.0
         else:
-            verdict, argument, confidence = "SYSTEM_ERROR", "A technical interruption occurred in the moderation protocol.", 0.0
-        
-        # NOVELTY: Adaptive Confidence Calibration
-        from src.novelty import get_calibrator
-        calibrator = get_calibrator()
-        calibrated_conf, calibration_meta = calibrator.calibrate(
-            raw_confidence=final_confidence,
-            verdict=result.verdict,
-            claim=state.claim,
-            verification_results=results or [],
-            pro_args=state.pro_arguments or [],
-            con_args=state.con_arguments or [],
-            pro_sources=state.pro_sources or [],
-            con_sources=state.con_sources or []
-        )
-        
-        # Use calibrated confidence
-        final_confidence = calibrated_conf
-        final_metrics["calibration"] = calibration_meta
-        
+            verdict    = "SYSTEM_ERROR"
+            argument   = "A technical interruption occurred in the moderation protocol."
+            confidence = 0.0
         return AgentResponse(
             agent="MODERATOR", round=state.round, argument=argument,
             sources=[], confidence=confidence, verdict=verdict,
@@ -155,28 +133,25 @@ class Moderator(BaseAgent):
         )
 
     def _calculate_weighted_score(self, results: list, agent: str) -> float:
-        """Calculate trust-weighted verification score."""
-        agent_results = [r for r in results if isinstance(r, dict) and r.get("agent_source") == agent]
+        """Trust-weighted verification score for one side (PRO or CON)."""
+        agent_results = [
+            r for r in results
+            if isinstance(r, dict) and r.get("agent_source") == agent
+        ]
         if not agent_results:
             return 0.0
-        
-        total_weight = 0.0
-        verified_weight = 0.0
-        
-        for result in agent_results:
-            trust = float(result.get("trust_score", 0.5))
-            confidence = float(result.get("confidence", 0.5))
-            is_verified = result.get("status") == "VERIFIED"
-            
-            weight = trust * confidence
-            total_weight += weight
-            if is_verified:
-                verified_weight += weight
-        
-        return verified_weight / total_weight if total_weight > 0 else 0.0
+        total_w = verified_w = 0.0
+        for r in agent_results:
+            trust = float(r.get("trust_score", 0.5))
+            conf  = float(r.get("confidence", 0.5))
+            w     = trust * conf
+            total_w += w
+            if r.get("status") == "VERIFIED":
+                verified_w += w
+        return verified_w / total_w if total_w > 0 else 0.0
 
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
-        results = state.verification_results or []
+        results      = state.verification_results or []
         pro_ver_rate = self._calculate_weighted_score(results, "PRO")
         con_ver_rate = self._calculate_weighted_score(results, "CON")
         has_sources  = bool(
@@ -188,14 +163,30 @@ class Moderator(BaseAgent):
         if state.summary:
             pro_final = (state.pro_arguments[-1] if state.pro_arguments else "No argument.")[:_MAX_ARG_CHARS]
             con_final = (state.con_arguments[-1] if state.con_arguments else "No argument.")[:_MAX_ARG_CHARS]
-            pro_args  = f"[EARLIER ROUNDS SUMMARY]\n{state.summary}\n\n[FINAL PRO ARGUMENT — Round {len(state.pro_arguments)}]\n{pro_final}"
-            con_args  = f"[See summary above for earlier rounds]\n\n[FINAL CON ARGUMENT — Round {len(state.con_arguments)}]\n{con_final}"
+            pro_args = (
+                f"[EARLIER ROUNDS SUMMARY]\n{state.summary}\n\n"
+                f"[FINAL PRO ARGUMENT — Round {len(state.pro_arguments)}]\n{pro_final}"
+            )
+            con_args = (
+                f"[See summary above for earlier rounds]\n\n"
+                f"[FINAL CON ARGUMENT — Round {len(state.con_arguments)}]\n{con_final}"
+            )
         else:
-            pro_args = "\n\n".join(f"Round {i+1}: {arg[:_MAX_ARG_CHARS]}" for i, arg in enumerate(state.pro_arguments)) or "No Pro arguments recorded."
-            con_args = "\n\n".join(f"Round {i+1}: {arg[:_MAX_ARG_CHARS]}" for i, arg in enumerate(state.con_arguments)) or "No Con arguments recorded."
+            pro_args = (
+                "\n\n".join(
+                    f"Round {i+1}: {arg[:_MAX_ARG_CHARS]}"
+                    for i, arg in enumerate(state.pro_arguments)
+                ) or "No Pro arguments recorded."
+            )
+            con_args = (
+                "\n\n".join(
+                    f"Round {i+1}: {arg[:_MAX_ARG_CHARS]}"
+                    for i, arg in enumerate(state.con_arguments)
+                ) or "No Con arguments recorded."
+            )
 
         verification_section = ""
-        if len(results) > 0:
+        if results:
             verification_section = (
                 f"\nSOURCE VERIFICATION SUMMARY:\n"
                 f"- ProAgent Weighted Score (trust-adjusted): {pro_ver_rate:.1%}\n"
@@ -238,7 +229,7 @@ reasoning with: "SAFETY NOTE: Consult a medical professional before acting on he
 
 STRUCTURED OUTPUT — include in your metrics dictionary:
 - "argument_quality": float 0.0-1.0 (logical strength of arguments overall)
-- "pro_fallacies": list of strings (flag max 2 logical fallacies used by ProAgent, e.g., ["Strawman: misrepresented X"], empty if none)
+- "pro_fallacies": list of strings (flag max 2 logical fallacies used by ProAgent, empty if none)
 - "con_fallacies": list of strings (flag max 2 logical fallacies used by ConAgent, empty if none)
 - "credibility_score": float 0.0-1.0 (evidence credibility)
 """
