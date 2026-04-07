@@ -79,8 +79,9 @@ def main():
         print(f"\n🔍 Analysing: \"{claim}\"")
         print("⏳ Running 3-round debate (30-90 seconds)...\n")
         try:
-            result = orchestrator.run(claim)
-            print_result(result)
+            result = orchestrator.run(claim, num_rounds=3)
+            result_dict = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+            print_result(result_dict)
         except KeyboardInterrupt:
             print("\n\n⚠️  Interrupted.\n")
         except Exception as e:
