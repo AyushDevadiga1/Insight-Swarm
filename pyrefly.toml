@@ -1,0 +1,16 @@
+# pyrefly.toml — Pyrefly (Meta) type-checker configuration
+# Adds the project root as a search path so `from src.X import Y` resolves correctly.
+
+[python]
+python_version = "3.13"
+
+[check]
+# Project root is the import root — mirrors sys.path.insert(0, ROOT) used at runtime
+search_path = ["."]
+
+# Exclude generated/vendored directories
+exclude = [
+  ".venv/**",
+  "**/__pycache__/**",
+  "**/*.pyc",
+]
