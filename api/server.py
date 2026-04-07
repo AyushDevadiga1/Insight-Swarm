@@ -105,6 +105,8 @@ class FeedbackRequest(BaseModel):
 
 def _state_to_dict(state: Any) -> Dict[str, Any]:
     """Convert DebateState (Pydantic model or dict) to a plain dict."""
+    if hasattr(state, "model_dump"):
+        return state.model_dump()
     if hasattr(state, "dict"):
         return state.dict()
     if hasattr(state, "__dict__"):
