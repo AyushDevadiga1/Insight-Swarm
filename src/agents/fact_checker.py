@@ -117,8 +117,7 @@ class FactChecker(BaseAgent):
         con_rate = (con_verified / len(con_results)) if con_results else 0.0
 
         
-        # NOVELTY: Evidence Contradiction Detection
-        from src.novelty import get_contradiction_detector
+        # NOVELTY: Evidence Contradiction Detection (detector imported at module top)
         detector = get_contradiction_detector()
         contradiction_analysis = detector.detect_contradictions(results, state.claim)
         
