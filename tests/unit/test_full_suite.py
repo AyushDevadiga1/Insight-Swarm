@@ -141,7 +141,7 @@ class TestProAgent:
         )
         agent = ProAgent(mock_client)
         agent.generate(state)
-        prompt_used = mock_client.call_structured.call_args[0][0]
+        prompt_used = mock_client.call_structured.call_args.kwargs.get('prompt')
         assert "Con R1 — this specific phrase" in prompt_used
 
     def test_api_failure_returns_fallback_response(self, mock_client, base_state):
@@ -187,7 +187,7 @@ class TestProAgent:
         )
         agent = ProAgent(mock_client)
         agent.generate(state)
-        prompt = mock_client.call_structured.call_args[0][0]
+        prompt = mock_client.call_structured.call_args.kwargs.get('prompt')
         assert "UniqueTitle999" in prompt
 
     def test_verification_feedback_injected_in_later_rounds(self, mock_client):
@@ -199,7 +199,7 @@ class TestProAgent:
         )
         agent = ProAgent(mock_client)
         agent.generate(state)
-        prompt = mock_client.call_structured.call_args[0][0]
+        prompt = mock_client.call_structured.call_args.kwargs.get('prompt')
         assert "WARNING: https://bad.com failed verification" in prompt
 
 
@@ -236,7 +236,7 @@ class TestConAgent:
         )
         agent = ConAgent(mock_client)
         agent.generate(state)
-        prompt = mock_client.call_structured.call_args[0][0]
+        prompt = mock_client.call_structured.call_args.kwargs.get('prompt')
         assert "ProArgument_UniqueString_XYZ" in prompt
 
     def test_api_failure_returns_fallback_not_raise(self, mock_client, base_state):
@@ -376,7 +376,7 @@ class TestModerator:
         )
         moderator = Moderator(moderator_client)
         moderator.generate(state)
-        prompt = moderator_client.call_structured.call_args[0][0]
+        prompt = moderator_client.call_structured.call_args.kwargs.get('prompt')
         assert "UNIQUE_SUMMARY_STRING_XYZ123" in prompt
 
     def test_full_args_used_when_no_summary(self, moderator_client):
@@ -389,7 +389,7 @@ class TestModerator:
         )
         moderator = Moderator(moderator_client)
         moderator.generate(state)
-        prompt = moderator_client.call_structured.call_args[0][0]
+        prompt = moderator_client.call_structured.call_args.kwargs.get('prompt')
         assert "SPECIFIC_PRO_ROUND1" in prompt
 
     def test_health_claim_adds_safety_note_instruction(self, moderator_client):
@@ -402,7 +402,7 @@ class TestModerator:
         )
         moderator = Moderator(moderator_client)
         moderator.generate(state)
-        prompt = moderator_client.call_structured.call_args[0][0]
+        prompt = moderator_client.call_structured.call_args.kwargs.get('prompt')
         assert "SAFETY NOTE" in prompt
 
     def test_verification_rates_in_prompt(self, moderator_client):
@@ -412,7 +412,7 @@ class TestModerator:
             pro_verification_rate=0.88, con_verification_rate=0.72,
         )
         Moderator(moderator_client).generate(state)
-        prompt = moderator_client.call_structured.call_args[0][0]
+        prompt = moderator_client.call_structured.call_args.kwargs.get('prompt')
         assert "88.0%" in prompt or "88%" in prompt
         assert "72.0%" in prompt or "72%" in prompt
 
@@ -1249,7 +1249,7 @@ class TestSummarizer:
             con_arguments=["UNIQUE_CON_STRING"],
         )
         s.summarize_history(state)
-        prompt = client.call.call_args[0][0]
+        prompt = client.call.call_args.kwargs.get('prompt')
         assert "UNIQUE_PRO_STRING" in prompt
         assert "UNIQUE_CON_STRING" in prompt
 
