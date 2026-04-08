@@ -1,39 +1,20 @@
-import os
-import requests
-from dotenv import load_dotenv
+"""
+tests/test_api_keys.py — RENAMED from old Cerebras-only script.
 
-load_dotenv()
-api_key = os.getenv("CEREBRAS_API_KEY")
+This file is intentionally minimal. The real API key test suite lives at:
+    scripts/test_api_keys.py
 
-def ask_cerebras(prompt):
-    # Ensure this URL is exactly correct
-    url = "https://api.cerebras.ai/v1/chat/completions"
-    
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+Keeping this file here (but as a non-test module) caused a pytest collection
+error due to a module name collision with scripts/test_api_keys.py.
 
-    payload = {
-        "model": "llama3.1-8b", 
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
-    }
+Resolution: this file no longer defines any test_ functions.
+To run the API key test suite, use:
+    python scripts/test_api_keys.py
+    python scripts/test_api_keys.py --format-only
+    python scripts/test_api_keys.py --verbose
+"""
 
-    try:
-        response = requests.post(url, headers=headers, json=payload)
-        
-        if response.status_code == 200:
-            data = response.json()
-            # Note the [0] index for choices
-            return data['choices'][0]['message']['content']
-        else:
-            print(f"❌ Error {response.status_code}: {response.text}")
-            return None
-    except Exception as e:
-        print(f"❌ Script Error: {e}")
-        return None
-
-
-print(ask_cerebras("Explain agents in 5 words."))
+# This file is intentionally left without test functions.
+# The old content (a bare Cerebras API call script with no test functions)
+# was causing pytest to try to collect it as a test module, resulting in:
+#   ERROR: import file mismatch — scripts/test_api_keys.py vs tests/test_api_keys.py
