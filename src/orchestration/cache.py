@@ -125,17 +125,26 @@ class SemanticCache:
 
             if not rows: return None
 
-            # OPTIMIZATION: In a high-traffic app, 'rows' should be cached in memory 
-            # and converted to a numpy matrix once, then updated only on write.
-            try:
-                embeddings = np.array([np.frombuffer(r[1], dtype=np.float32) for r in rows])
-            except ValueError:
-                return None # Handle corrupt/malformed embeddings
+            # ISSUE-009 FIX: Build embedding matrix once and cache it at instance level.
+            # Previously the entire byte buffer → numpy conversion ran on every query (O(N) per call).
+            # We invalidate the cache by row count; a write appends a row, changing the count.
+            row_count = len(rows)
+            if (not hasattr(self, '_embedding_matrix_cache')
+                    or self._embedding_matrix_row_count != row_count):
+                try:
+                    self._embedding_matrix_cache = np.array(
+                        [np.frombuffer(r[1], dtype=np.float32) for r in rows]
+                    )
+                    self._embedding_matrix_row_count = row_count
+                except ValueError:
+                    return None  # Handle corrupt/malformed embeddings
+
+            embeddings = self._embedding_matrix_cache
 
             # Normalize query and matrix for cosine similarity via dot product
             query_norm = query_embedding / (np.linalg.norm(query_embedding) + 1e-9)
             embeddings_norm = embeddings / (np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-9)
-            
+
             similarities = np.dot(embeddings_norm, query_norm)
             best_idx = np.argmax(similarities)
             best_sim = similarities[best_idx]
@@ -154,6 +163,7 @@ class SemanticCache:
         except Exception as e:
             logger.error("Cache read error: %s", e)
             return None
+
 
     def set_verdict(self, claim: str, verdict_data: Dict[str, Any]):
         try:
