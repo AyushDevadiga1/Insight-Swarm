@@ -24,3 +24,4 @@ fastapi>=0.110.0           # API server
 uvicorn[standard]>=0.29.0  # ASGI server
 websockets>=12.0           # HITL WebSocket support
 httpx>=0.27.0              # Async HTTP (testing)
+slowapi==0.1.9
