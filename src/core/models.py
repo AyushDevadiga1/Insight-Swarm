@@ -1,6 +1,7 @@
 """
 src/core/models.py — Final production version.
-Added: human_verdict_override field for HITL server.py resume endpoint.
+ADDED: human_verdict_override field (HITL).
+ADDED: parse_obj() classmethod alias for Pydantic v1 compat — used in tests.
 """
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import List, Dict, Any, Optional, Literal
@@ -25,13 +26,6 @@ class SourceVerification(BaseModel):
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
-
-    def __getitem__(self, item: str):
-        return getattr(self, item)
-        
-    def get(self, key: str, default=None):
-        val = getattr(self, key, _MISSING)
-        return default if val is _MISSING else val
 
 
 class AgentArgumentResponse(BaseModel):
@@ -144,4 +138,10 @@ class DebateState(BaseModel):
 
     @classmethod
     def from_dict(cls, data: dict) -> "DebateState":
+        return cls.model_validate(data)
+
+    @classmethod
+    def parse_obj(cls, data: dict) -> "DebateState":
+        """Pydantic v1 compatibility alias for model_validate().
+        Kept for tests written against the v1 API."""
         return cls.model_validate(data)
