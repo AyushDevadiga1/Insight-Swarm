@@ -35,8 +35,12 @@ from src.orchestration.debate import DebateOrchestrator
 from src.core.models import DebateState
 from src.orchestration.cache import record_feedback
 from src.llm.client import RateLimitError
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect, Depends
 from api.websocket_hitl import hitl_manager
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 logger = logging.getLogger("insightswarm.api")
 logging.basicConfig(level=logging.INFO)
@@ -78,15 +82,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Singleton orchestrator (heavy to initialise, reuse across requests) ───────
-_orchestrator: Optional[DebateOrchestrator] = None
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# ── Request / response models ─────────────────────────────────────────────────
 
 def get_orchestrator() -> DebateOrchestrator:
-    global _orchestrator
-    if _orchestrator is None:
-        _orchestrator = DebateOrchestrator()
-    return _orchestrator
+    """Instantiate a new thread-safe orchestrator per request."""
+    return DebateOrchestrator()
 
 
 # ── Request / response models ─────────────────────────────────────────────────
@@ -199,7 +203,8 @@ async def api_status() -> Dict[str, Any]:
 
 
 @app.get("/stream")
-async def stream_debate(claim: str, request: Request, thread_id: str = None):
+@limiter.limit("10/minute")
+async def stream_debate(request: Request, claim: str, thread_id: str = None, orch: DebateOrchestrator = Depends(get_orchestrator)):
     """SSE endpoint for real-time debate progress."""
     import asyncio, threading, queue as _queue
     
@@ -220,7 +225,6 @@ async def stream_debate(claim: str, request: Request, thread_id: str = None):
         def run():
             start_time = time.time()
             try:
-                orch = get_orchestrator()
                 
                 class SSETracker:
                     def set_stage(self, stage, message=""):
@@ -344,7 +348,8 @@ async def stream_debate(claim: str, request: Request, thread_id: str = None):
 
 
 @app.post("/verify")
-def verify(req: VerifyRequest) -> Dict[str, Any]:
+@limiter.limit("10/minute")
+def verify(request: Request, req: VerifyRequest, orchestrator: DebateOrchestrator = Depends(get_orchestrator)) -> Dict[str, Any]:
     claim = req.claim.strip()
 
     # ── Validate ──────────────────────────────────────────────────────────────
@@ -355,7 +360,6 @@ def verify(req: VerifyRequest) -> Dict[str, Any]:
     # ── Run debate ────────────────────────────────────────────────────────────
     thread_id = str(uuid.uuid4())
     try:
-        orchestrator = get_orchestrator()
         state = orchestrator.run(claim, thread_id)
         raw = _state_to_dict(state)
         return _normalise(raw)
@@ -395,9 +399,8 @@ class ResumeRequest(BaseModel):
     verdict_override: Optional[str] = None
 
 @app.post("/api/debate/resume/{thread_id}")
-def resume_debate(thread_id: str, human_input: ResumeRequest) -> Dict[str, Any]:
+def resume_debate(thread_id: str, human_input: ResumeRequest, orchestrator: DebateOrchestrator = Depends(get_orchestrator)) -> Dict[str, Any]:
     """Resume debate after human intervention."""
-    orchestrator = get_orchestrator()
     config = {"configurable": {"thread_id": thread_id}}
     
     current_state = orchestrator.graph.get_state(config)
