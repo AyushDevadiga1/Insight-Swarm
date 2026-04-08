@@ -9,7 +9,32 @@ try:
 except ImportError:
     TavilyClient = None  # type: ignore
 
+import re
+
 logger = logging.getLogger(__name__)
+
+# ISSUE-007 FIX: Block private/loopback URLs before any fetch to prevent SSRF.
+# These patterns cover: loopback, RFC-1918 private ranges, link-local, and cloud metadata endpoints.
+_BLOCKED_URL_PATTERNS = re.compile(
+    r'https?://('
+    r'localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0'
+    r'|10\.\d+\.\d+\.\d+'
+    r'|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+'
+    r'|192\.168\.\d+\.\d+'
+    r'|169\.254\.\d+\.\d+'   # AWS/Azure link-local metadata
+    r'|::1|\[::1\]'           # IPv6 loopback
+    r')',
+    re.IGNORECASE,
+)
+
+def _is_safe_url(url: str) -> bool:
+    """Return False if the URL resolves to a private/loopback address."""
+    if not url:
+        return False
+    if _BLOCKED_URL_PATTERNS.match(url):
+        logger.warning("SSRF guard: blocked private URL: %s", url)
+        return False
+    return True
 
 
 class TavilyEvidenceRetriever:
@@ -42,9 +67,13 @@ class TavilyEvidenceRetriever:
                                           search_depth="advanced", max_results=max_results)
 
             def _fmt(results):
-                return [{"title": r.get("title",""), "url": r.get("url",""),
-                         "content": r.get("content","")[:600], "score": r.get("score",0.0)}
-                        for r in results.get("results",[])]
+                return [
+                    {"title": r.get("title",""), "url": r.get("url",""),
+                     "content": r.get("content","")[:600], "score": r.get("score",0.0)}
+                    for r in results.get("results",[])
+                    # ISSUE-007 FIX: filter any private/internal URLs before returning
+                    if _is_safe_url(r.get("url",""))
+                ]
 
             data = {"pro": _fmt(pro_resp), "con": _fmt(con_resp)}
             logger.info("Dual-sided search: %d Pro / %d Con sources", len(data["pro"]), len(data["con"]))
