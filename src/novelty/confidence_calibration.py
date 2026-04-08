@@ -32,7 +32,7 @@ Uses Platt scaling with temperature parameter adjusted per claim type.
 
 import numpy as np
 import logging
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -163,7 +163,7 @@ class AdaptiveConfidenceCalibrator:
         calibrated = raw_confidence + boost_factor * (1 - raw_confidence)
         
         # Cap at 0.95 to avoid overconfidence
-        return min(0.95, calibrated)
+        return float(min(0.95, calibrated))
     
     def calibrate(self, raw_confidence: float, verdict: str, claim: str,
                   verification_results: List[Dict], pro_args: List[str],
@@ -214,14 +214,14 @@ class AdaptiveConfidenceCalibrator:
             f"(type: {adjustment_type}, source_quality: {source_quality:.2f})"
         )
         
-        return calibrated, metadata
+        return float(calibrated), metadata
     
     def update_history(self, claim_type: str, predicted_confidence: float, 
                        was_correct: bool):
         """Update calibration history for future improvements."""
         self.calibration_history[claim_type].append((predicted_confidence, was_correct))
     
-    def get_calibration_stats(self, claim_type: str = None) -> Dict[str, float]:
+    def get_calibration_stats(self, claim_type: Optional[str] = None) -> Dict[str, float]:
         """
         Calculate Expected Calibration Error (ECE) - research metric.
         
