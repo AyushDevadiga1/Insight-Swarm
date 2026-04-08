@@ -80,8 +80,9 @@ class DebateOrchestrator:
         try:
             from src.ui.progress_tracker import Stage
             self.tracker.set_stage(Stage(stage_name), message)
-        except Exception:
-            pass
+        except Exception as _e:
+            # ISSUE-010 FIX: log instead of silently swallowing — tracker errors must not mask audit trails
+            logger.debug("Progress tracker update failed (non-fatal): %s", _e)
 
     def _build_graph(self) -> Any:
         workflow = StateGraph(DebateState)
@@ -549,8 +550,9 @@ class DebateOrchestrator:
                             num_rounds = num_rounds_to_use
                     else:
                         num_rounds = num_rounds_to_use
-                except Exception:
-                    pass
+                except Exception as _tty_e:
+                    # ISSUE-010 FIX: stdin.isatty() can fail in some environments; log and continue
+                    logger.debug("TTY stdin check failed (non-fatal): %s", _tty_e)
         except Exception as _ce:
             logger.warning("ClaimComplexityEstimator failed (non-fatal): %s", _ce)
 
