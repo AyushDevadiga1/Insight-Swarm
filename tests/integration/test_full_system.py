@@ -25,13 +25,18 @@ class MockLLMClient:
         self.cerebras_available = True
         self.openrouter_available = True
         
-    def call_structured(self, prompt, output_schema, **kwargs):
+    def call_structured(self, *args, **kwargs):
+        output_schema = kwargs.get('output_schema')
+        if len(args) > 1: output_schema = args[1]
+        elif len(args) > 0 and 'output_schema' not in kwargs:
+            pass # prompt is args[0]
+            
         if output_schema == ConsensusResponse:
             return ConsensusResponse(verdict="DEBATE", reasoning="Mixed opinions", confidence=0.5)
         
         # Generic AgentResponse
         return AgentResponse(
-            agent="MOCK",
+            agent="PRO",
             round=1,
             argument="This is a mock argument with enough length to pass validation.",
             sources=["https://example.com/source"],
