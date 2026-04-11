@@ -13,7 +13,7 @@
 
 A **production-grade, research-quality** automated fact-checking system where four specialised AI agents debate claims, verify sources in real-time, and converge on a calibrated verdict — with optional human intervention at any stage. Built entirely on free-tier APIs with zero infrastructure cost.
 
-**Bharat College of Engineering, University of Mumbai**
+**Bharat College of Engineering, University of Mumbai**  
 Guided by **Prof. Shital Gujar**, Dept. of CSE (AI & ML)
 
 ---
@@ -79,367 +79,38 @@ You submit a claim. InsightSwarm:
 
 The system is organised into four logical layers. Each layer has a single responsibility and communicates with the layers above and below it through well-defined interfaces.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           LAYER 1 — PRESENTATION                            │
-│                                                                             │
-│   React 18 + Vite frontend  │  Zustand state  │  SSE EventSource stream    │
-│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
-│   │  DebateArena │  │ StagePanel   │  │ HITLPanel    │  │ MetricsGrid   │  │
-│   │  (live feed) │  │ (pipeline)   │  │ (overrides)  │  │ (calibration) │  │
-│   └──────────────┘  └──────────────┘  └──────────────┘  └───────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    ▲  SSE / REST
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          LAYER 2 — API GATEWAY                              │
-│                                                                             │
-│   FastAPI  │  slowapi rate-limiting (10 req/min)  │  CORS  │  Auth         │
-│   ┌──────────────────┐  ┌──────────────────┐  ┌───────────────────────┐    │
-│   │  POST /verify    │  │  GET /stream     │  │  POST /debate/resume  │    │
-│   │  (submit claim)  │  │  (SSE events)    │  │  (HITL resume)        │    │
-│   └──────────────────┘  └──────────────────┘  └───────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    ▲  Python calls
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        LAYER 3 — ORCHESTRATION ENGINE                       │
-│                                                                             │
-│   LangGraph StateGraph  │  DebateOrchestrator  │  MemorySaver checkpoint   │
-│                                                                             │
-│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────────┐  │
-│   │ Consensus│ │ProAgent  │ │ConAgent  │ │FactCheck │ │   Moderator    │  │
-│   │  Check   │ │ (Groq)   │ │ (Gemini) │ │  (Groq)  │ │   (Gemini)     │  │
-│   └──────────┘ └──────────┘ └──────────┘ └──────────┘ └────────────────┘  │
-│                                                                             │
-│   ┌─────────────────────┐  ┌──────────────────────┐  ┌──────────────────┐  │
-│   │ ClaimComplexityEst. │  │ ArgumentationAnalyzer│  │ ConfCalibrator   │  │
-│   └─────────────────────┘  └──────────────────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    ▲  API calls
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       LAYER 4 — INFRASTRUCTURE                              │
-│                                                                             │
-│  ┌──────────────────┐  ┌────────────────┐  ┌──────────────────────────┐    │
-│  │  FreeLLMClient   │  │ Tavily Search  │  │  SQLite (semantic cache) │    │
-│  │  (4-provider     │  │  + Google CSE  │  │  all-MiniLM-L6-v2 embeds │    │
-│  │   rotation)      │  │  failover      │  │  cosine similarity 0.85  │    │
-│  └──────────────────┘  └────────────────┘  └──────────────────────────┘    │
-│                                                                             │
-│  Groq → Gemini → Cerebras → OpenRouter  (circuit-breaker + exponential)    │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+<img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODYwIiBoZWlnaHQ9IjUyMCIgdmlld0JveD0iMCAwIDg2MCA1MjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgZm9udC1mYW1pbHk9IidTZWdvZSBVSScsc3lzdGVtLXVpLHNhbnMtc2VyaWYiPgogIDxkZWZzPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJiZyIgeDE9IjAiIHkxPSIwIiB4Mj0iMCIgeTI9IjEiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiMwZDExMTciLz48c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMxNjFiMjIiLz48L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJsMSIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjAiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiMxZDRlZDgiLz48c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMzYjgyZjYiLz48L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJsMiIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjAiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiMwNjVmNDYiLz48c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiMwNTk2NjkiLz48L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJsMyIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjAiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM3YzNhZWQiLz48c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiM4YjVjZjYiLz48L2xpbmVhckdyYWRpZW50PgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJsNCIgeDE9IjAiIHkxPSIwIiB4Mj0iMSIgeTI9IjAiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM5MjQwMGUiLz48c3RvcCBvZmZzZXQ9IjEwMCUiIHN0b3AtY29sb3I9IiNkOTc3MDYiLz48L2xpbmVhckdyYWRpZW50PgogICAgPGZpbHRlciBpZD0iZ2xvdyI+PGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iMyIgcmVzdWx0PSJibHVyIi8+PGZlTWVyZ2U+PGZlTWVyZ2VOb2RlIGluPSJibHVyIi8+PGZlTWVyZ2VOb2RlIGluPSJTb3VyY2VHcmFwaGljIi8+PC9mZU1lcmdlPjwvZmlsdGVyPgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iODYwIiBoZWlnaHQ9IjUyMCIgZmlsbD0idXJsKCNiZykiIHJ4PSIxMiIvPgogIDwhLS0gVGl0bGUgLS0+CiAgPHRleHQgeD0iNDMwIiB5PSIzNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2YwZjZmZiIgZm9udC1zaXplPSIxNSIgZm9udC13ZWlnaHQ9IjcwMCIgbGV0dGVyLXNwYWNpbmc9IjIiPkhJR0gtTEVWRUwgU1lTVEVNIEFSQ0hJVEVDVFVSRTwvdGV4dD4KICA8bGluZSB4MT0iNjAiIHkxPSI0MiIgeDI9IjgwMCIgeTI9IjQyIiBzdHJva2U9IiMzMDM2M2QiIHN0cm9rZS13aWR0aD0iMSIvPgoKICA8IS0tIExheWVyIGxhYmVscyBvbiBsZWZ0IC0tPgogIDx0ZXh0IHg9IjI0IiB5PSIxMjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4Yjk0OWUiIGZvbnQtc2l6ZT0iMTAiIGZvbnQtd2VpZ2h0PSI2MDAiIHRyYW5zZm9ybT0icm90YXRlKC05MCwyNCwxMjApIj5MQVlFUiAxPC90ZXh0PgogIDx0ZXh0IHg9IjI0IiB5PSIyMzUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4Yjk0OWUiIGZvbnQtc2l6ZT0iMTAiIGZvbnQtd2VpZ2h0PSI2MDAiIHRyYW5zZm9ybT0icm90YXRlKC05MCwyNCwyMzUpIj5MQVlFUiAyPC90ZXh0PgogIDx0ZXh0IHg9IjI0IiB5PSIzNjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4Yjk0OWUiIGZvbnQtc2l6ZT0iMTAiIGZvbnQtd2VpZ2h0PSI2MDAiIHRyYW5zZm9ybT0icm90YXRlKC05MCwyNCwzNjApIj5MQVlFUiAzPC90ZXh0PgogIDx0ZXh0IHg9IjI0IiB5PSI0NzAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4Yjk0OWUiIGZvbnQtc2l6ZT0iMTAiIGZvbnQtd2VpZ2h0PSI2MDAiIHRyYW5zZm9ybT0icm90YXRlKC05MCwyNCw0NzApIj5MQVlFUiA0PC90ZXh0PgoKICA8IS0tIEwxIFByZXNlbnRhdGlvbiAtLT4KICA8cmVjdCB4PSI0NiIgeT0iNTQiIHdpZHRoPSI4MDAiIGhlaWdodD0iMTEwIiByeD0iOCIgZmlsbD0iIzBkMjA0NSIgc3Ryb2tlPSIjMWQ0ZWQ4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDxyZWN0IHg9IjQ2IiB5PSI1NCIgd2lkdGg9IjgwMCIgaGVpZ2h0PSI2IiByeD0iOCIgZmlsbD0idXJsKCNsMSkiLz4KICA8dGV4dCB4PSI0MzAiIHk9Ijc4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTNjNWZkIiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNzAwIiBsZXR0ZXItc3BhY2luZz0iMSI+UFJFU0VOVEFUSU9OIOKAlCBSZWFjdCAxOCArIFZpdGUgKyBadXN0YW5kICsgU1NFIEV2ZW50U291cmNlPC90ZXh0PgogIDxyZWN0IHg9IjYyIiB5PSI4OCIgd2lkdGg9IjE3MiIgaGVpZ2h0PSI2NCIgcng9IjYiIGZpbGw9IiMwZjJkNWMiIHN0cm9rZT0iIzI1NjNlYiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHRleHQgeD0iMTQ4IiB5PSIxMTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2MGE1ZmEiIGZvbnQtc2l6ZT0iMTEiIGZvbnQtd2VpZ2h0PSI2MDAiPkRlYmF0ZUFyZW5hPC90ZXh0PgogIDx0ZXh0IHg9IjE0OCIgeT0iMTI4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTNjNWZkIiBmb250LXNpemU9IjkiPmxpdmUgU1NFIGRlYmF0ZSBmZWVkPC90ZXh0PgogIDxyZWN0IHg9IjI0NiIgeT0iODgiIHdpZHRoPSIxNzIiIGhlaWdodD0iNjQiIHJ4PSI2IiBmaWxsPSIjMGYyZDVjIiBzdHJva2U9IiMyNTYzZWIiIHN0cm9rZS13aWR0aD0iMSIvPgogIDx0ZXh0IHg9IjMzMiIgeT0iMTEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNjBhNWZhIiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNjAwIj5TdGFnZVBhbmVsPC90ZXh0PgogIDx0ZXh0IHg9IjMzMiIgeT0iMTI4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTNjNWZkIiBmb250LXNpemU9IjkiPnBpcGVsaW5lIHByb2dyZXNzIHRyYWNrZXI8L3RleHQ+CiAgPHJlY3QgeD0iNDMwIiB5PSI4OCIgd2lkdGg9IjE3MiIgaGVpZ2h0PSI2NCIgcng9IjYiIGZpbGw9IiMwZjJkNWMiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1MTYiIHk9IjEwOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZiYmYyNCIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9IjYwMCI+SElUTFBhbmVsIOKaoDwvdGV4dD4KICA8dGV4dCB4PSI1MTYiIHk9IjEyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZjZDM0ZCIgZm9udC1zaXplPSI5Ij5odW1hbiBvdmVycmlkZSBVSTwvdGV4dD4KICA8dGV4dCB4PSI1MTYiIHk9IjEzOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZjZDM0ZCIgZm9udC1zaXplPSI5Ij5hbWJlciBwdWxzZSBvbiB0cmlnZ2VyPC90ZXh0PgogIDxyZWN0IHg9IjYxNCIgeT0iODgiIHdpZHRoPSIyMTYiIGhlaWdodD0iNjQiIHJ4PSI2IiBmaWxsPSIjMGYyZDVjIiBzdHJva2U9IiMyNTYzZWIiIHN0cm9rZS13aWR0aD0iMSIvPgogIDx0ZXh0IHg9IjcyMiIgeT0iMTEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNjBhNWZhIiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNjAwIj5NZXRyaWNzR3JpZDwvdGV4dD4KICA8dGV4dCB4PSI3MjIiIHk9IjEyOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzkzYzVmZCIgZm9udC1zaXplPSI5Ij5hcmd1bWVudGF0aW9uICsgY2FsaWJyYXRpb248L3RleHQ+CgogIDwhLS0gQXJyb3cgMeKGkjIgLS0+CiAgPGxpbmUgeDE9IjQzMCIgeTE9IjE2NCIgeDI9IjQzMCIgeTI9IjE3OCIgc3Ryb2tlPSIjNGI1NTYzIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXJyKSIvPgogIDx0ZXh0IHg9IjQ5MCIgeT0iMTc0IiBmaWxsPSIjNmI3MjgwIiBmb250LXNpemU9IjkiPlNTRSAvIFJFU1Q8L3RleHQ+CiAgPGRlZnM+PG1hcmtlciBpZD0iYXJyIiBtYXJrZXJXaWR0aD0iNiIgbWFya2VySGVpZ2h0PSI2IiByZWZYPSIzIiByZWZZPSIzIiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDAsNiBMNiwzIHoiIGZpbGw9IiM0YjU1NjMiLz48L21hcmtlcj48L2RlZnM+CgogIDwhLS0gTDIgQVBJIEdhdGV3YXkgLS0+CiAgPHJlY3QgeD0iNDYiIHk9IjE4MCIgd2lkdGg9IjgwMCIgaGVpZ2h0PSIxMTAiIHJ4PSI4IiBmaWxsPSIjMDUyZTFjIiBzdHJva2U9IiMwNTk2NjkiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHJlY3QgeD0iNDYiIHk9IjE4MCIgd2lkdGg9IjgwMCIgaGVpZ2h0PSI2IiByeD0iOCIgZmlsbD0idXJsKCNsMikiLz4KICA8dGV4dCB4PSI0MzAiIHk9IjIwNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZlZTdiNyIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9IjcwMCIgbGV0dGVyLXNwYWNpbmc9IjEiPkFQSSBHQVRFV0FZIOKAlCBGYXN0QVBJIMK3IHNsb3dhcGkgMTAgcmVxL21pbiDCtyBDT1JTPC90ZXh0PgogIDxyZWN0IHg9IjYyIiB5PSIyMTQiIHdpZHRoPSIyNDAiIGhlaWdodD0iNjQiIHJ4PSI2IiBmaWxsPSIjMDUyZTFjIiBzdHJva2U9IiMxMGI5ODEiIHN0cm9rZS13aWR0aD0iMSIvPgogIDx0ZXh0IHg9IjE4MiIgeT0iMjM4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMzRkMzk5IiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNjAwIj5QT1NUIC92ZXJpZnk8L3RleHQ+CiAgPHRleHQgeD0iMTgyIiB5PSIyNTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2ZWU3YjciIGZvbnQtc2l6ZT0iOSI+c3VibWl0IGNsYWltLCByZXR1cm5zIHRocmVhZF9pZDwvdGV4dD4KICA8cmVjdCB4PSIzMTYiIHk9IjIxNCIgd2lkdGg9IjI0MCIgaGVpZ2h0PSI2NCIgcng9IjYiIGZpbGw9IiMwNTJlMWMiIHN0cm9rZT0iIzEwYjk4MSIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHRleHQgeD0iNDM2IiB5PSIyMzgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMzNGQzOTkiIGZvbnQtc2l6ZT0iMTEiIGZvbnQtd2VpZ2h0PSI2MDAiPkdFVCAvc3RyZWFtIChTU0UpPC90ZXh0PgogIDx0ZXh0IHg9IjQzNiIgeT0iMjU0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNmVlN2I3IiBmb250LXNpemU9IjkiPnByb2dyZXNzIMK3IHZlcmRpY3QgwrcgaHVtYW5fcmV2aWV3PC90ZXh0PgogIDxyZWN0IHg9IjU3MCIgeT0iMjE0IiB3aWR0aD0iMjYwIiBoZWlnaHQ9IjY0IiByeD0iNiIgZmlsbD0iIzA1MmUxYyIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjcwMCIgeT0iMjM4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmJiZjI0IiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNjAwIj5QT1NUIC9kZWJhdGUvcmVzdW1lPC90ZXh0PgogIDx0ZXh0IHg9IjcwMCIgeT0iMjU0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNkMzRkIiBmb250LXNpemU9IjkiPkhJVEwgcmVzdW1lIHdpdGggb3ZlcnJpZGVzPC90ZXh0PgoKICA8IS0tIEFycm93IDLihpIzIC0tPgogIDxsaW5lIHgxPSI0MzAiIHkxPSIyOTAiIHgyPSI0MzAiIHkyPSIzMDQiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2FycikiLz4KICA8dGV4dCB4PSI0NDgiIHk9IjMwMCIgZmlsbD0iIzZiNzI4MCIgZm9udC1zaXplPSI5Ij5QeXRob248L3RleHQ+CgogIDwhLS0gTDMgT3JjaGVzdHJhdGlvbiAtLT4KICA8cmVjdCB4PSI0NiIgeT0iMzA2IiB3aWR0aD0iODAwIiBoZWlnaHQ9IjEyNiIgcng9IjgiIGZpbGw9IiMxYTBhM2QiIHN0cm9rZT0iIzdjM2FlZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8cmVjdCB4PSI0NiIgeT0iMzA2IiB3aWR0aD0iODAwIiBoZWlnaHQ9IjYiIHJ4PSI4IiBmaWxsPSJ1cmwoI2wzKSIvPgogIDx0ZXh0IHg9IjQzMCIgeT0iMzMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzRiNWZkIiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNzAwIiBsZXR0ZXItc3BhY2luZz0iMSI+T1JDSEVTVFJBVElPTiBFTkdJTkUg4oCUIExhbmdHcmFwaCBTdGF0ZUdyYXBoIMK3IE1lbW9yeVNhdmVyPC90ZXh0PgogIDwhLS0gYWdlbnRzIC0tPgogIDxyZWN0IHg9IjYyIiB5PSIzNDAiIHdpZHRoPSIxMDgiIGhlaWdodD0iODAiIHJ4PSI2IiBmaWxsPSIjMWUwYTRhIiBzdHJva2U9IiM3YzNhZWQiIHN0cm9rZS13aWR0aD0iMSIvPgogIDx0ZXh0IHg9IjExNiIgeT0iMzYyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTc4YmZhIiBmb250LXNpemU9IjEwIiBmb250LXdlaWdodD0iNzAwIj5Db25zZW5zdXM8L3RleHQ+CiAgPHRleHQgeD0iMTE2IiB5PSIzNzYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNjNGI1ZmQiIGZvbnQtc2l6ZT0iOSI+Q2hlY2s8L3RleHQ+CiAgPHRleHQgeD0iMTE2IiB5PSIzOTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2YjcyODAiIGZvbnQtc2l6ZT0iOCI+Y29uZiZndDswLjkw4oaSc2tpcDwvdGV4dD4KICA8cmVjdCB4PSIxODIiIHk9IjM0MCIgd2lkdGg9IjEwOCIgaGVpZ2h0PSI4MCIgcng9IjYiIGZpbGw9IiMxZTBhNGEiIHN0cm9rZT0iIzI1NjNlYiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHRleHQgeD0iMjM2IiB5PSIzNjIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2MGE1ZmEiIGZvbnQtc2l6ZT0iMTAiIGZvbnQtd2VpZ2h0PSI3MDAiPvCfm6EgUHJvQWdlbnQ8L3RleHQ+CiAgPHRleHQgeD0iMjM2IiB5PSIzNzYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5M2M1ZmQiIGZvbnQtc2l6ZT0iOSI+R3JvcSBMbGFtYSAzLjM8L3RleHQ+CiAgPHRleHQgeD0iMjM2IiB5PSIzOTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2YjcyODAiIGZvbnQtc2l6ZT0iOCI+YXJndWVzIFRSVUU8L3RleHQ+CiAgPHJlY3QgeD0iMzAyIiB5PSIzNDAiIHdpZHRoPSIxMDgiIGhlaWdodD0iODAiIHJ4PSI2IiBmaWxsPSIjMWUwYTRhIiBzdHJva2U9IiNkYzI2MjYiIHN0cm9rZS13aWR0aD0iMSIvPgogIDx0ZXh0IHg9IjM1NiIgeT0iMzYyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjg3MTcxIiBmb250LXNpemU9IjEwIiBmb250LXdlaWdodD0iNzAwIj7impQgQ29uQWdlbnQ8L3RleHQ+CiAgPHRleHQgeD0iMzU2IiB5PSIzNzYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmY2E1YTUiIGZvbnQtc2l6ZT0iOSI+R2VtaW5pIDIuNTwvdGV4dD4KICA8dGV4dCB4PSIzNTYiIHk9IjM5MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZiNzI4MCIgZm9udC1zaXplPSI4Ij5hcmd1ZXMgRkFMU0U8L3RleHQ+CiAgPHJlY3QgeD0iNDIyIiB5PSIzNDAiIHdpZHRoPSIxMDgiIGhlaWdodD0iODAiIHJ4PSI2IiBmaWxsPSIjMWUwYTRhIiBzdHJva2U9IiMwODkxYjIiIHN0cm9rZS13aWR0aD0iMSIvPgogIDx0ZXh0IHg9IjQ3NiIgeT0iMzYyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMjJkM2VlIiBmb250LXNpemU9IjEwIiBmb250LXdlaWdodD0iNzAwIj5GYWN0Q2hlY2tlcjwvdGV4dD4KICA8dGV4dCB4PSI0NzYiIHk9IjM3NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzY3ZThmOSIgZm9udC1zaXplPSI5Ij5Hcm9xIMK3IFVSTCB2ZXJpZnk8L3RleHQ+CiAgPHRleHQgeD0iNDc2IiB5PSIzOTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2YjcyODAiIGZvbnQtc2l6ZT0iOCI+VHlwZSBJK0lJIGRldGVjdDwvdGV4dD4KICA8cmVjdCB4PSI1NDIiIHk9IjM0MCIgd2lkdGg9IjEwOCIgaGVpZ2h0PSI4MCIgcng9IjYiIGZpbGw9IiMxZTBhNGEiIHN0cm9rZT0iIzA1OTY2OSIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHRleHQgeD0iNTk2IiB5PSIzNjIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMzNGQzOTkiIGZvbnQtc2l6ZT0iMTAiIGZvbnQtd2VpZ2h0PSI3MDAiPk1vZGVyYXRvcjwvdGV4dD4KICA8dGV4dCB4PSI1OTYiIHk9IjM3NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZlZTdiNyIgZm9udC1zaXplPSI5Ij5HZW1pbmkgMi41PC90ZXh0PgogIDx0ZXh0IHg9IjU5NiIgeT0iMzkyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNmI3MjgwIiBmb250LXNpemU9IjgiPmNvbXBvc2l0ZSB2ZXJkaWN0PC90ZXh0PgogIDwhLS0gbm92ZWx0eSBwaWxscyAtLT4KICA8cmVjdCB4PSI2NjIiIHk9IjM0MCIgd2lkdGg9IjE3MiIgaGVpZ2h0PSIzNiIgcng9IjYiIGZpbGw9IiMxZTBhNGEiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHRleHQgeD0iNzQ4IiB5PSIzNTYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmYmJmMjQiIGZvbnQtc2l6ZT0iOSIgZm9udC13ZWlnaHQ9IjYwMCI+Q2xhaW1Db21wbGV4aXR5RXN0aW1hdG9yPC90ZXh0PgogIDx0ZXh0IHg9Ijc0OCIgeT0iMzY4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNkMzRkIiBmb250LXNpemU9IjgiPisgQXJndW1lbnRhdGlvbkFuYWx5emVyPC90ZXh0PgogIDxyZWN0IHg9IjY2MiIgeT0iMzg0IiB3aWR0aD0iMTcyIiBoZWlnaHQ9IjM2IiByeD0iNiIgZmlsbD0iIzFlMGE0YSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEiLz4KICA8dGV4dCB4PSI3NDgiIHk9IjQwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZiYmYyNCIgZm9udC1zaXplPSI5IiBmb250LXdlaWdodD0iNjAwIj5BZGFwdGl2ZUNvbmZDYWxpYnJhdG9yPC90ZXh0PgogIDx0ZXh0IHg9Ijc0OCIgeT0iNDEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNkMzRkIiBmb250LXNpemU9IjgiPisgRXhwbGFpbmFiaWxpdHlFbmdpbmU8L3RleHQ+CgogIDwhLS0gQXJyb3cgM+KGkjQgLS0+CiAgPGxpbmUgeDE9IjQzMCIgeTE9IjQzMiIgeDI9IjQzMCIgeTI9IjQ0NiIgc3Ryb2tlPSIjNGI1NTYzIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXJyKSIvPgoKICA8IS0tIEw0IEluZnJhc3RydWN0dXJlIC0tPgogIDxyZWN0IHg9IjQ2IiB5PSI0NDgiIHdpZHRoPSI4MDAiIGhlaWdodD0iNjAiIHJ4PSI4IiBmaWxsPSIjMWMwYTAwIiBzdHJva2U9IiNkOTc3MDYiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHJlY3QgeD0iNDYiIHk9IjQ0OCIgd2lkdGg9IjgwMCIgaGVpZ2h0PSI2IiByeD0iOCIgZmlsbD0idXJsKCNsNCkiLz4KICA8dGV4dCB4PSIyNDgiIHk9IjQ3MyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZiYmYyNCIgZm9udC1zaXplPSIxMCIgZm9udC13ZWlnaHQ9IjcwMCI+RnJlZUxMTUNsaWVudDwvdGV4dD4KICA8dGV4dCB4PSIyNDgiIHk9IjQ4NyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZjZDM0ZCIgZm9udC1zaXplPSI4Ij5Hcm9x4oaSR2VtaW5p4oaSQ2VyZWJyYXPihpJPcGVuUm91dGVyPC90ZXh0PgogIDx0ZXh0IHg9IjQ4MCIgeT0iNDczIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmJiZjI0IiBmb250LXNpemU9IjEwIiBmb250LXdlaWdodD0iNzAwIj5UYXZpbHkgU2VhcmNoICsgR29vZ2xlIENTRSBmYWlsb3ZlcjwvdGV4dD4KICA8dGV4dCB4PSI0ODAiIHk9IjQ4NyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZjZDM0ZCIgZm9udC1zaXplPSI4Ij5hZHZlcnNhcmlhbCBQUk8rQ09OIGV2aWRlbmNlIHJldHJpZXZhbDwvdGV4dD4KICA8dGV4dCB4PSI3MTgiIHk9IjQ3MyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZiYmYyNCIgZm9udC1zaXplPSIxMCIgZm9udC13ZWlnaHQ9IjcwMCI+U1FMaXRlIFNlbWFudGljIENhY2hlPC90ZXh0PgogIDx0ZXh0IHg9IjcxOCIgeT0iNDg3IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNkMzRkIiBmb250LXNpemU9IjgiPmFsbC1NaW5pTE0tTDYtdjIgwrcgY29zaW5lIOKJpSAwLjg1PC90ZXh0Pgo8L3N2Zz4=" alt="High-Level Architecture — 4 Layers" width="100%" style="border-radius:10px;margin:12px 0;"/>
 
 ---
 
 ## System Architecture Diagram
 
-```
-                        ┌─────────────────────┐
-                        │      USER CLAIM      │
-                        └──────────┬──────────┘
-                                   │
-                                   ▼
-                     ┌─────────────────────────┐
-                     │    FastAPI Backend        │
-                     │  POST /verify            │
-                     │  GET  /stream (SSE)      │
-                     │  POST /debate/resume     │
-                     └──────────┬──────────────┘
-                                │
-                                ▼
-              ┌─────────────────────────────────────┐
-              │         DebateOrchestrator           │
-              │                                      │
-              │   ┌─────────────────────────────┐   │
-              │   │  SemanticCache (SQLite)      │   │
-              │   │  cosine sim ≥ 0.85 → HIT    │   │
-              │   └─────────────┬───────────────┘   │
-              │                 │ MISS               │
-              │                 ▼                    │
-              │   ┌─────────────────────────────┐   │
-              │   │  ClaimComplexityEstimator    │   │
-              │   │  → num_rounds, min_sources   │   │
-              │   └─────────────┬───────────────┘   │
-              │                 ▼                    │
-              │   ┌─────────────────────────────┐   │
-              │   │  ClaimDecomposer             │   │
-              │   │  → atomic sub-claims         │   │
-              │   └─────────────┬───────────────┘   │
-              │                 ▼                    │
-              │   ┌─────────────────────────────┐   │
-              │   │  Tavily Search (adversarial) │   │
-              │   │  PRO evidence + CON evidence │   │
-              │   └─────────────┬───────────────┘   │
-              └─────────────────┼────────────────────┘
-                                │
-                                ▼
-        ┌───────────────────────────────────────────────────┐
-        │               LangGraph StateGraph                │
-        │                                                    │
-        │  ┌─────────────────────────────────────────────┐  │
-        │  │            DebateState (Pydantic v2)        │  │
-        │  │  claim, round, pro_arguments, con_arguments │  │
-        │  │  verification_results, metrics, confidence  │  │
-        │  └─────────────────────────────────────────────┘  │
-        │                                                    │
-        │  [START]                                           │
-        │     │                                              │
-        │     ▼                                              │
-        │  ┌─────────────────┐    confidence > 0.90         │
-        │  │ consensus_check │──────────────────────────┐   │
-        │  └────────┬────────┘                          │   │
-        │           │ needs debate                      │   │
-        │           ▼                                   │   │
-        │  ┌──────────────────────────────────────┐     │   │
-        │  │  ┌──────────┐  ×N  ┌──────────────┐ │     │   │
-        │  │  │ pro_agent│─────▶│  con_agent   │ │     │   │
-        │  │  │  (Groq)  │      │   (Gemini)   │ │     │   │
-        │  │  └──────────┘      └──────┬───────┘ │     │   │
-        │  │   ▲ summarizer feeds      │          │     │   │
-        │  │   └──────────────────────┘ loop end │     │   │
-        │  └──────────────────────────────────────┘     │   │
-        │           │                                   │   │
-        │           ▼                                   │   │
-        │  ┌──────────────────┐                         │   │
-        │  │  fact_checker    │ strips Type I & II      │   │
-        │  │  (Groq)          │ hallucinations           │   │
-        │  └────────┬─────────┘                         │   │
-        │           │ rate < 30%?  ──▶ [revision loop]  │   │
-        │           │ rate ≥ 30%                        │   │
-        │           ▼                                   │   │
-        │  ╔════════════════════╗  ← HITL INTERRUPT     │   │
-        │  ║   human_review     ║  (graph pauses,       │   │
-        │  ║  (SSE emitted)     ║   SSE fires)          │   │
-        │  ╚════════════════════╝                        │   │
-        │           │ resume via /api/debate/resume      │   │
-        │           ▼                        ◀──────────┘   │
-        │  ┌────────────────────────────────────────────┐   │
-        │  │               moderator (Gemini)           │   │
-        │  │  S = 0.30×Qarg + 0.30×Vrate               │   │
-        │  │      + 0.20×Tdomain + 0.20×Ccons          │   │
-        │  │  + ArgumentationAnalyzer (10 fallacies)    │   │
-        │  │  + AdaptiveConfidenceCalibrator            │   │
-        │  └────────────────────┬───────────────────────┘   │
-        │                       │                            │
-        │                       ▼                            │
-        │  ┌──────────────────────────────────────────────┐ │
-        │  │          verdict (ExplainabilityEngine)      │ │
-        │  │  → TRUE / FALSE / PARTIALLY TRUE /           │ │
-        │  │    INSUFFICIENT EVIDENCE                     │ │
-        │  └──────────────────────────────────────────────┘ │
-        │                       │                            │
-        │                    [END]                           │
-        └───────────────────────┬───────────────────────────┘
-                                │ SSE stream
-                                ▼
-                   ┌─────────────────────────┐
-                   │    React 18 Frontend     │
-                   │  Vite + Zustand + SSE    │
-                   └─────────────────────────┘
-```
+<img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODYwIiBoZWlnaHQ9IjY4MCIgdmlld0JveD0iMCAwIDg2MCA2ODAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgZm9udC1mYW1pbHk9IidTZWdvZSBVSScsc3lzdGVtLXVpLHNhbnMtc2VyaWYiPgogIDxkZWZzPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJmYmciIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMGQxMTE3Ii8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMTYxYjIyIi8+PC9saW5lYXJHcmFkaWVudD4KICAgIDxtYXJrZXIgaWQ9ImZhIiBtYXJrZXJXaWR0aD0iOCIgbWFya2VySGVpZ2h0PSI4IiByZWZYPSI0IiByZWZZPSI0IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDAsOCBMOCw0IHoiIGZpbGw9IiM0YjU1NjMiLz48L21hcmtlcj4KICAgIDxtYXJrZXIgaWQ9ImZhMiIgbWFya2VyV2lkdGg9IjgiIG1hcmtlckhlaWdodD0iOCIgcmVmWD0iNCIgcmVmWT0iNCIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNMCwwIEwwLDggTDgsNCB6IiBmaWxsPSIjZjU5ZTBiIi8+PC9tYXJrZXI+CiAgICA8bWFya2VyIGlkPSJmYTMiIG1hcmtlcldpZHRoPSI4IiBtYXJrZXJIZWlnaHQ9IjgiIHJlZlg9IjQiIHJlZlk9IjQiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMMCw4IEw4LDQgeiIgZmlsbD0iIzEwYjk4MSIvPjwvbWFya2VyPgogICAgPGZpbHRlciBpZD0iZ2xvdzIiPjxmZUdhdXNzaWFuQmx1ciBzdGREZXZpYXRpb249IjQiIHJlc3VsdD0iYmx1ciIvPjxmZU1lcmdlPjxmZU1lcmdlTm9kZSBpbj0iYmx1ciIvPjxmZU1lcmdlTm9kZSBpbj0iU291cmNlR3JhcGhpYyIvPjwvZmVNZXJnZT48L2ZpbHRlcj4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9Ijg2MCIgaGVpZ2h0PSI2ODAiIGZpbGw9InVybCgjZmJnKSIgcng9IjEyIi8+CiAgPHRleHQgeD0iNDMwIiB5PSIzMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2YwZjZmZiIgZm9udC1zaXplPSIxNSIgZm9udC13ZWlnaHQ9IjcwMCIgbGV0dGVyLXNwYWNpbmc9IjIiPkxBTkdHUkFQSCBFWEVDVVRJT04gRkxPVzwvdGV4dD4KICA8bGluZSB4MT0iNjAiIHkxPSI0MCIgeDI9IjgwMCIgeTI9IjQwIiBzdHJva2U9IiMzMDM2M2QiIHN0cm9rZS13aWR0aD0iMSIvPgoKICA8IS0tIFNUQVJUIC0tPgogIDxlbGxpcHNlIGN4PSI0MzAiIGN5PSI2OCIgcng9IjQ4IiByeT0iMTgiIGZpbGw9IiMxZjZmZWIiIGZpbHRlcj0idXJsKCNnbG93MikiLz4KICA8dGV4dCB4PSI0MzAiIHk9IjcyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJ3aGl0ZSIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9IjcwMCI+U1RBUlQ8L3RleHQ+CgogIDwhLS0gQXJyb3cgU1RBUlQg4oaSIENvbnNlbnN1cyAtLT4KICA8bGluZSB4MT0iNDMwIiB5MT0iODYiIHgyPSI0MzAiIHkyPSIxMDgiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2ZhKSIvPgoKICA8IS0tIENvbnNlbnN1cyBDaGVjayBub2RlIC0tPgogIDxyZWN0IHg9IjI5MCIgeT0iMTA4IiB3aWR0aD0iMjgwIiBoZWlnaHQ9IjUyIiByeD0iOCIgZmlsbD0iIzBkMjA0NSIgc3Ryb2tlPSIjMjU2M2ViIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjQzMCIgeT0iMTMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNjBhNWZhIiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNzAwIj5jb25zZW5zdXNfY2hlY2s8L3RleHQ+CiAgPHRleHQgeD0iNDMwIiB5PSIxNDgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5M2M1ZmQiIGZvbnQtc2l6ZT0iOSI+c2V0dGxlZCBzY2llbmNlIGRldGVjdGlvbiDCtyBjb25mICZndDsgMC45MD88L3RleHQ+CgogIDwhLS0gU2tpcCBwYXRoIChjb25maWRlbmNlID4gMC45MCkgLS0+CiAgPHBhdGggZD0iTTU3MCwxMzQgUTcyMCwxMzQgNzIwLDMxMCIgc3Ryb2tlPSIjMTBiOTgxIiBzdHJva2Utd2lkdGg9IjEuNSIgZmlsbD0ibm9uZSIgc3Ryb2tlLWRhc2hhcnJheT0iNSwzIiBtYXJrZXItZW5kPSJ1cmwoI2ZhMykiLz4KICA8dGV4dCB4PSI2ODAiIHk9IjIxMCIgZmlsbD0iIzM0ZDM5OSIgZm9udC1zaXplPSI5IiBmb250LXN0eWxlPSJpdGFsaWMiPmNvbmYgJmd0OyAwLjkwPC90ZXh0PgogIDx0ZXh0IHg9IjY4MCIgeT0iMjIyIiBmaWxsPSIjMzRkMzk5IiBmb250LXNpemU9IjkiIGZvbnQtc3R5bGU9Iml0YWxpYyI+4oaSIHNraXAgZGViYXRlPC90ZXh0PgoKICA8IS0tIEFycm93IOKGkiBzdW1tYXJpemVyIC0tPgogIDxsaW5lIHgxPSI0MzAiIHkxPSIxNjAiIHgyPSI0MzAiIHkyPSIxODQiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2ZhKSIvPgogIDx0ZXh0IHg9IjQ1MiIgeT0iMTc4IiBmaWxsPSIjNmI3MjgwIiBmb250LXNpemU9IjkiPm5lZWRzIGRlYmF0ZTwvdGV4dD4KCiAgPCEtLSBTdW1tYXJpemVyIC0tPgogIDxyZWN0IHg9IjMxMCIgeT0iMTg0IiB3aWR0aD0iMjQwIiBoZWlnaHQ9IjQ0IiByeD0iOCIgZmlsbD0iIzFhMWEyZSIgc3Ryb2tlPSIjN2MzYWVkIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjQzMCIgeT0iMjA0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTc4YmZhIiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNzAwIj5zdW1tYXJpemVyPC90ZXh0PgogIDx0ZXh0IHg9IjQzMCIgeT0iMjIwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzRiNWZkIiBmb250LXNpemU9IjkiPnJvbGxpbmcgaGlzdG9yeSBjYXAgwrcgc3VtbWFyeSBhZnRlciByb3VuZCAyPC90ZXh0PgoKICA8IS0tIERlYmF0ZSBsb29wIGJveCAtLT4KICA8cmVjdCB4PSIxMDAiIHk9IjIzOCIgd2lkdGg9IjUyMCIgaGVpZ2h0PSIxMzAiIHJ4PSIxMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMzc0MTUxIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iNiwzIi8+CiAgPHRleHQgeD0iMTI4IiB5PSIyNTYiIGZpbGw9IiM2YjcyODAiIGZvbnQtc2l6ZT0iOSIgZm9udC1zdHlsZT0iaXRhbGljIj5ERUJBVEUgTE9PUCDDlyBudW1fcm91bmRzPC90ZXh0PgoKICA8IS0tIFByb0FnZW50IC0tPgogIDxsaW5lIHgxPSI0MzAiIHkxPSIyMjgiIHgyPSI0MzAiIHkyPSIyNjQiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2ZhKSIvPgogIDxyZWN0IHg9IjEzMCIgeT0iMjY0IiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjUyIiByeD0iOCIgZmlsbD0iIzBmMmQ1YyIgc3Ryb2tlPSIjMjU2M2ViIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSIyNDAiIHk9IjI4NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzYwYTVmYSIgZm9udC1zaXplPSIxMiIgZm9udC13ZWlnaHQ9IjcwMCI+8J+boSBwcm9fYWdlbnQ8L3RleHQ+CiAgPHRleHQgeD0iMjQwIiB5PSIzMDIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5M2M1ZmQiIGZvbnQtc2l6ZT0iOSI+R3JvcSBMbGFtYSAzLjMgNzBCIMK3IHJvbGUtbG9ja2VkIFRSVUU8L3RleHQ+CgogIDwhLS0gQ29uQWdlbnQgLS0+CiAgPHJlY3QgeD0iNTEwIiB5PSIyNjQiIHdpZHRoPSIyMjAiIGhlaWdodD0iNTIiIHJ4PSI4IiBmaWxsPSIjMmQwZjBmIiBzdHJva2U9IiNkYzI2MjYiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9IjYyMCIgeT0iMjg2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjg3MTcxIiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNzAwIj7impQgY29uX2FnZW50PC90ZXh0PgogIDx0ZXh0IHg9IjYyMCIgeT0iMzAyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNhNWE1IiBmb250LXNpemU9IjkiPkdlbWluaSAyLjUgRmxhc2ggwrcgcm9sZS1sb2NrZWQgRkFMU0U8L3RleHQ+CgogIDwhLS0gQXJyb3cgcHJv4oaSY29uIC0tPgogIDxsaW5lIHgxPSIzNTAiIHkxPSIyOTAiIHgyPSI1MTAiIHkyPSIyOTAiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2ZhKSIvPgoKICA8IS0tIExvb3AgYXJyb3cgLS0+CiAgPHBhdGggZD0iTTUxMCwzMTYgUTQzMCwzNTAgMzUwLDMxNiIgc3Ryb2tlPSIjNmI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgZmlsbD0ibm9uZSIgc3Ryb2tlLWRhc2hhcnJheT0iNCwzIiBtYXJrZXItZW5kPSJ1cmwoI2ZhKSIvPgogIDx0ZXh0IHg9IjQzMCIgeT0iMzU2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNmI3MjgwIiBmb250LXNpemU9IjkiPnJvdW5kICZsdDsgbnVtX3JvdW5kcyDihpIgY29udGludWU8L3RleHQ+CgogIDwhLS0gQXJyb3cg4oaSIEZhY3RDaGVja2VyIC0tPgogIDxsaW5lIHgxPSI0MzAiIHkxPSIzNjgiIHgyPSI0MzAiIHkyPSIzOTIiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2ZhKSIvPgogIDx0ZXh0IHg9IjUzMCIgeT0iMzg0IiBmaWxsPSIjNmI3MjgwIiBmb250LXNpemU9IjkiPnJvdW5kID09IG51bV9yb3VuZHM8L3RleHQ+CgogIDwhLS0gRmFjdENoZWNrZXIgLS0+CiAgPHJlY3QgeD0iMjgwIiB5PSIzOTIiIHdpZHRoPSIzMDAiIGhlaWdodD0iNjAiIHJ4PSI4IiBmaWxsPSIjMDYyNjMwIiBzdHJva2U9IiMwODkxYjIiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9IjQzMCIgeT0iNDE2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMjJkM2VlIiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNzAwIj5mYWN0X2NoZWNrZXI8L3RleHQ+CiAgPHRleHQgeD0iNDMwIiB5PSI0MzIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2N2U4ZjkiIGZvbnQtc2l6ZT0iOSI+VVJMIGZldGNoIMK3IGNvc2luZSBzaW0g4omlIDAuODIgwrcgdHJ1c3Qgc2NvcmVzPC90ZXh0PgogIDx0ZXh0IHg9IjQzMCIgeT0iNDQ2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNjdlOGY5IiBmb250LXNpemU9IjkiPnBheXdhbGwgwrcgdGVtcG9yYWwgwrcgVHlwZSBJK0lJIGhhbGx1Y2luYXRpb248L3RleHQ+CgogIDwhLS0gUmV0cnkgcGF0aCAtLT4KICA8cGF0aCBkPSJNMjgwLDQyMiBRMTYwLDQyMiAxNjAsNDgwIFExNjAsNTMwIDI4MCw1MzAiIHN0cm9rZT0iI2Q5NzcwNiIgc3Ryb2tlLXdpZHRoPSIxLjUiIGZpbGw9Im5vbmUiIHN0cm9rZS1kYXNoYXJyYXk9IjQsMyIgbWFya2VyLWVuZD0idXJsKCNmYTIpIi8+CiAgPHRleHQgeD0iODAiIHk9IjQ3OCIgZmlsbD0iI2Q5NzcwNiIgZm9udC1zaXplPSI5Ij5yYXRlICZsdDsgMzAlPC90ZXh0PgogIDx0ZXh0IHg9IjgwIiB5PSI0OTAiIGZpbGw9IiNkOTc3MDYiIGZvbnQtc2l6ZT0iOSI+4oaSIHJldmlzaW9uPC90ZXh0PgogIDx0ZXh0IHg9IjgwIiB5PSI1MDIiIGZpbGw9IiNkOTc3MDYiIGZvbnQtc2l6ZT0iOSI+bG9vcCAow5cxKTwvdGV4dD4KCiAgPCEtLSBBcnJvdyDihpIgSElUTCAtLT4KICA8bGluZSB4MT0iNDMwIiB5MT0iNDUyIiB4Mj0iNDMwIiB5Mj0iNDc2IiBzdHJva2U9IiM0YjU1NjMiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNmYSkiLz4KCiAgPCEtLSBISVRMIG5vZGUgLS0+CiAgPHJlY3QgeD0iMjUwIiB5PSI0NzYiIHdpZHRoPSIzNjAiIGhlaWdodD0iNjAiIHJ4PSI4IiBmaWxsPSIjMWMxYTAwIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMi41Ii8+CiAgPHRleHQgeD0iNDMwIiB5PSI0OTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmYmJmMjQiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI3MDAiPuKaoCBodW1hbl9yZXZpZXcgKElOVEVSUlVQVCk8L3RleHQ+CiAgPHRleHQgeD0iNDMwIiB5PSI1MTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmY2QzNGQiIGZvbnQtc2l6ZT0iOSI+U1NFIGZpcmVzIGh1bWFuX3Jldmlld19yZXF1aXJlZCDCtyBISVRMUGFuZWwgc2hvd248L3RleHQ+CiAgPHRleHQgeD0iNDMwIiB5PSI1MjYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmY2QzNGQiIGZvbnQtc2l6ZT0iOSI+UE9TVCAvYXBpL2RlYmF0ZS9yZXN1bWUve3RocmVhZF9pZH0g4oaSIGdyYXBoIHJlc3VtZXM8L3RleHQ+CgogIDwhLS0gQXJyb3cg4oaSIE1vZGVyYXRvciAtLT4KICA8bGluZSB4MT0iNDMwIiB5MT0iNTM2IiB4Mj0iNDMwIiB5Mj0iNTYwIiBzdHJva2U9IiM0YjU1NjMiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNmYSkiLz4KICA8IS0tIEFsc28gZ3JlZW4gc2tpcCBwYXRoIGFycml2ZXMgaGVyZSAtLT4KICA8bGluZSB4MT0iNzIwIiB5MT0iNDAwIiB4Mj0iNzIwIiB5Mj0iNTgwIiBzdHJva2U9IiMxMGI5ODEiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtZGFzaGFycmF5PSI1LDMiLz4KICA8bGluZSB4MT0iNzIwIiB5MT0iNTgwIiB4Mj0iNTkwIiB5Mj0iNTgwIiBzdHJva2U9IiMxMGI5ODEiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtZGFzaGFycmF5PSI1LDMiIG1hcmtlci1lbmQ9InVybCgjZmEzKSIvPgoKICA8IS0tIE1vZGVyYXRvciAtLT4KICA8cmVjdCB4PSIyNjAiIHk9IjU2MCIgd2lkdGg9IjM0MCIgaGVpZ2h0PSI2NCIgcng9IjgiIGZpbGw9IiMwNTJlMWMiIHN0cm9rZT0iIzA1OTY2OSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNDMwIiB5PSI1ODIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMzNGQzOTkiIGZvbnQtc2l6ZT0iMTIiIGZvbnQtd2VpZ2h0PSI3MDAiPm1vZGVyYXRvcjwvdGV4dD4KICA8dGV4dCB4PSI0MzAiIHk9IjU5OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZlZTdiNyIgZm9udC1zaXplPSI5Ij5TID0gMC4zMMOXUWFyZyArIDAuMzDDl1ZyYXRlICsgMC4yMMOXVGRvbWFpbiArIDAuMjDDl0Njb25zPC90ZXh0PgogIDx0ZXh0IHg9IjQzMCIgeT0iNjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNmVlN2I3IiBmb250LXNpemU9IjkiPkFyZ3VtZW50YXRpb25BbmFseXplciDCtyBBZGFwdGl2ZUNvbmZpZGVuY2VDYWxpYnJhdG9yPC90ZXh0PgoKICA8IS0tIEFycm93IOKGkiBWZXJkaWN0IC0tPgogIDxsaW5lIHgxPSI0MzAiIHkxPSI2MjQiIHgyPSI0MzAiIHkyPSI2NDYiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2ZhKSIvPgoKICA8IS0tIFZlcmRpY3QgKyBFTkQgLS0+CiAgPHJlY3QgeD0iMzAwIiB5PSI2NDYiIHdpZHRoPSIyNjAiIGhlaWdodD0iMjQiIHJ4PSI2IiBmaWxsPSIjMWEwYTNkIiBzdHJva2U9IiM3YzNhZWQiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNDMwIiB5PSI2NjIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNhNzhiZmEiIGZvbnQtc2l6ZT0iMTAiIGZvbnQtd2VpZ2h0PSI3MDAiPnZlcmRpY3Qg4oaSIEV4cGxhaW5hYmlsaXR5RW5naW5lIOKGkiBjYWNoZSDihpIgRU5EPC90ZXh0Pgo8L3N2Zz4=" alt="LangGraph Execution Flow" width="100%" style="border-radius:10px;margin:12px 0;"/>
 
 ---
 
 ## LangGraph Execution Flow
 
-```
-START
-  │
-  ├──▶ consensus_check
-  │         │
-  │    conf > 0.90? ──YES──▶ moderator ──▶ verdict ──▶ END
-  │         │ NO
-  │         ▼
-  │    summarizer  (history cap + rolling summary after round 2)
-  │         │
-  │    ┌────┴─────────────────────────────────┐
-  │    │   DEBATE LOOP (× num_rounds)          │
-  │    │                                       │
-  │    │   pro_agent (Groq Llama 3.3 70B)      │
-  │    │       │ role-locked to argue TRUE      │
-  │    │       │ retrieves PRO evidence         │
-  │    │       ▼                                │
-  │    │   con_agent (Gemini 2.5 Flash)         │
-  │    │       │ role-locked to argue FALSE     │
-  │    │       │ challenges prior pro argument  │
-  │    │       ▼                                │
-  │    │   _should_continue?                   │
-  │    │       │ round < num_rounds ──▶ loop   │
-  │    └────────────────────────────────────────┘
-  │         │ round == num_rounds
-  │         ▼
-  │    fact_checker (Groq)
-  │         │ fetches all cited URLs
-  │         │ semantic similarity matching (≥ 0.82)
-  │         │ paywall detection
-  │         │ temporal alignment
-  │         │ domain trust scoring
-  │         │
-  │    _should_retry?
-  │         │ rate < 30% AND retry_count < 1 ──▶ revision ──▶ fact_checker
-  │         │ rate ≥ 30% OR retry exhausted
-  │         ▼
-  │    ╔═════════════════════╗
-  │    ║   human_review      ║  ◀── INTERRUPT (interrupt_before)
-  │    ║   (graph pauses)    ║      SSE fires human_review_required
-  │    ╚═════════════════════╝      HITLPanel shown in React
-  │         │ POST /api/debate/resume/{thread_id}
-  │         │ (with optional source overrides + verdict override)
-  │         ▼
-  │    moderator (Gemini 2.5 Flash)
-  │         │ trust-weighted composite score
-  │         │ + ArgumentationAnalyzer
-  │         │ + AdaptiveConfidenceCalibrator
-  │         ▼
-  │    verdict
-  │         │ ExplainabilityEngine (XAI)
-  │         │ → writes to semantic cache
-  │         ▼
-  │       END
-```
+The LangGraph StateGraph compiles to a deterministic execution pipeline with a formal interrupt mechanism for human oversight. The graph supports both `run()` (blocking) and `stream()` (SSE) modes.
+
+**Node sequence:**
+
+| Node | Provider | Responsibility |
+|---|---|---|
+| `consensus_check` | Gemini | Settled-science short-circuit (conf > 0.90 → skip debate) |
+| `summarizer` | — | Rolling history cap; generates summary after round 2 |
+| `pro_agent` | Groq Llama 3.3 | Role-locked TRUE argument + source citation per round |
+| `con_agent` | Gemini 2.5 | Role-locked FALSE argument; must challenge prior PRO argument directly |
+| `fact_checker` | Groq | URL batch verify; Type I+II hallucination; domain trust tiers |
+| `human_review` | — | **INTERRUPT** — graph pauses; SSE fires; HITLPanel shown |
+| `moderator` | Gemini 2.5 | Composite score + ArgumentationAnalyzer + Calibrator |
+| `verdict` | — | ExplainabilityEngine + cache write + SSE verdict event |
 
 ---
 
 ## Data Flow Diagram
 
-```
-                        USER
-                          │
-                  Submit claim text
-                          │
-                          ▼
-              ┌───────────────────────┐
-              │   FastAPI Server      │
-              │   POST /verify        │
-              └───────────┬───────────┘
-                          │
-              ┌───────────▼───────────┐
-              │   Semantic Cache      │  ◀─── SQLite + all-MiniLM-L6-v2
-              │   cosine sim ≥ 0.85   │       embeddings stored per claim
-              └─────┬─────────────────┘
-            MISS    │        HIT
-                    │         │
-                    │         └──────────────────▶ cached verdict
-                    ▼                              returned in < 1s
-        ┌─────────────────────────┐
-        │  ClaimComplexityEstimator│
-        │  semantic + domain +    │
-        │  temporal + evidence    │
-        │  → complexity_tier      │
-        │  → num_rounds (2-4)     │
-        │  → min_sources (3-7)    │
-        └───────────┬─────────────┘
-                    ▼
-        ┌─────────────────────────┐
-        │    ClaimDecomposer      │
-        │  (complex claim?)       │
-        │  YES → [s1, s2, s3]    │
-        │  NO  → [original]       │
-        └───────────┬─────────────┘
-                    ▼
-        ┌─────────────────────────┐
-        │   Tavily Search API     │
-        │  search_adversarial()   │
-        │  → pro_evidence[]       │
-        │  → con_evidence[]       │
-        │                         │
-        │  Failover: Google CSE   │
-        │  (on HTTP 429 / 403)    │
-        └───────────┬─────────────┘
-                    │
-         ┌──────────┴──────────┐
-         │                     │
-         ▼                     ▼
-    pro_evidence          con_evidence
-    (passed to ProAgent)  (passed to ConAgent)
-         │                     │
-         ▼                     ▼
-   ┌──────────┐          ┌──────────┐
-   │ ProAgent │          │ ConAgent │
-   │ argues   │ ◀──────▶ │ argues   │
-   │  TRUE    │  debate  │  FALSE   │
-   └────┬─────┘  loop    └─────┬────┘
-        │                      │
-        │  pro_arguments[]     │  con_arguments[]
-        │  pro_sources[]       │  con_sources[]
-        └──────────┬───────────┘
-                   ▼
-         ┌───────────────────┐
-         │   FactChecker     │
-         │                   │
-         │  For each URL:    │
-         │  1. HTTP fetch    │
-         │  2. BeautifulSoup │
-         │  3. Cosine sim    │
-         │     vs claim text │
-         │  4. Paywall check │
-         │  5. Temporal align│
-         │  6. Domain trust  │
-         │                   │
-         │  Status assigned: │
-         │  VERIFIED         │
-         │  NOT_FOUND        │
-         │  CONTENT_MISMATCH │
-         │  TIMEOUT          │
-         │  PAYWALL_RESTRICTED│
-         │  INVALID_URL      │
-         └────────┬──────────┘
-                  │
-        pro_ver_rate + con_ver_rate
-                  │
-         rate < 30%?
-         YES ──▶ revision loop (max 1×)
-         NO  ──▶
-                  │
-         ╔════════▼═══════╗
-         ║ HITL INTERRUPT ║  (if rate still low after revision)
-         ║                ║  SSE: human_review_required
-         ║ HITLPanel:     ║  Human reviews per-URL statuses
-         ║ override source║  and optionally sets verdict_override
-         ╚════════╤═══════╝
-                  │ POST /api/debate/resume
-                  ▼
-         ┌──────────────────────────────────────────┐
-         │               Moderator                  │
-         │                                          │
-         │  S = 0.30 × Qarg                         │
-         │    + 0.30 × Vrate                        │
-         │    + 0.20 × Tdomain                      │
-         │    + 0.20 × Ccons                        │
-         │                                          │
-         │  ArgumentationAnalyzer:                  │
-         │    detect 10 fallacy types per argument  │
-         │    citation quality + rhetoric scoring   │
-         │    → quality_score per argument          │
-         │                                          │
-         │  AdaptiveConfidenceCalibrator:           │
-         │    Qsrc = geomean(trust_scores)          │
-         │    Asym = |pro_len - con_len| / total    │
-         │    E = 0.60×Qsrc + 0.40×Asym            │
-         │    boost = min(0.25, (E-0.60)×0.50)     │
-         │    conf_final = raw + boost×(1-raw)      │
-         │                                          │
-         │  Verdict: TRUE / FALSE /                 │
-         │           PARTIALLY TRUE /               │
-         │           INSUFFICIENT EVIDENCE          │
-         └──────────────────┬───────────────────────┘
-                            │
-                            ▼
-                   ExplainabilityEngine
-                   (feature importance, decision path,
-                    counterfactuals, transparency score)
-                            │
-                            ▼
-                   Write to SemanticCache
-                            │
-                    ◀── SSE: verdict event ──▶
-                            │
-                         USER sees:
-                  verdict + confidence +
-                  debate transcript +
-                  per-URL verification table +
-                  argumentation quality panel +
-                  calibration metadata
-```
+<img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODYwIiBoZWlnaHQ9IjYwMCIgdmlld0JveD0iMCAwIDg2MCA2MDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgZm9udC1mYW1pbHk9IidTZWdvZSBVSScsc3lzdGVtLXVpLHNhbnMtc2VyaWYiPgogIDxkZWZzPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJkYmciIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMGQxMTE3Ii8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMTYxYjIyIi8+PC9saW5lYXJHcmFkaWVudD4KICAgIDxtYXJrZXIgaWQ9ImRhIiBtYXJrZXJXaWR0aD0iNyIgbWFya2VySGVpZ2h0PSI3IiByZWZYPSIzLjUiIHJlZlk9IjMuNSIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNMCwwIEwwLDcgTDcsMy41IHoiIGZpbGw9IiM0YjU1NjMiLz48L21hcmtlcj4KICAgIDxtYXJrZXIgaWQ9ImRhMiIgbWFya2VyV2lkdGg9IjciIG1hcmtlckhlaWdodD0iNyIgcmVmWD0iMy41IiByZWZZPSIzLjUiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMMCw3IEw3LDMuNSB6IiBmaWxsPSIjMTBiOTgxIi8+PC9tYXJrZXI+CiAgICA8bWFya2VyIGlkPSJkYTMiIG1hcmtlcldpZHRoPSI3IiBtYXJrZXJIZWlnaHQ9IjciIHJlZlg9IjMuNSIgcmVmWT0iMy41IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDAsNyBMNywzLjUgeiIgZmlsbD0iI2Y1OWUwYiIvPjwvbWFya2VyPgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iODYwIiBoZWlnaHQ9IjYwMCIgZmlsbD0idXJsKCNkYmcpIiByeD0iMTIiLz4KICA8dGV4dCB4PSI0MzAiIHk9IjMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjBmNmZmIiBmb250LXNpemU9IjE1IiBmb250LXdlaWdodD0iNzAwIiBsZXR0ZXItc3BhY2luZz0iMiI+REFUQSBGTE9XIERJQUdSQU08L3RleHQ+CiAgPGxpbmUgeDE9IjYwIiB5MT0iNDAiIHgyPSI4MDAiIHkyPSI0MCIgc3Ryb2tlPSIjMzAzNjNkIiBzdHJva2Utd2lkdGg9IjEiLz4KCiAgPCEtLSBVc2VyIC0tPgogIDxlbGxpcHNlIGN4PSI0MzAiIGN5PSI2OCIgcng9IjcyIiByeT0iMjAiIGZpbGw9IiMxZjNhNWYiIHN0cm9rZT0iIzNiODJmNiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI0MzAiIHk9IjcyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTNjNWZkIiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNzAwIj5VU0VSIOKAlCBTdWJtaXQgQ2xhaW08L3RleHQ+CgogIDwhLS0gQXJyb3cg4oaSIEZhc3RBUEkgLS0+CiAgPGxpbmUgeDE9IjQzMCIgeTE9Ijg4IiB4Mj0iNDMwIiB5Mj0iMTA4IiBzdHJva2U9IiM0YjU1NjMiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNkYSkiLz4KCiAgPCEtLSBGYXN0QVBJIC0tPgogIDxyZWN0IHg9IjI5MCIgeT0iMTA4IiB3aWR0aD0iMjgwIiBoZWlnaHQ9IjQwIiByeD0iOCIgZmlsbD0iIzA1MmUxYyIgc3Ryb2tlPSIjMDU5NjY5IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjQzMCIgeT0iMTMyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMzRkMzk5IiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNzAwIj5GYXN0QVBJIOKAlCBQT1NUIC92ZXJpZnkg4oaSIHRocmVhZF9pZDwvdGV4dD4KCiAgPCEtLSBDYWNoZSBjaGVjayAtLT4KICA8bGluZSB4MT0iNDMwIiB5MT0iMTQ4IiB4Mj0iNDMwIiB5Mj0iMTY2IiBzdHJva2U9IiM0YjU1NjMiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNkYSkiLz4KICA8cmVjdCB4PSIyOTAiIHk9IjE2NiIgd2lkdGg9IjI4MCIgaGVpZ2h0PSI0NCIgcng9IjgiIGZpbGw9IiMwZDIwNDUiIHN0cm9rZT0iIzI1NjNlYiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI0MzAiIHk9IjE4NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzYwYTVmYSIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9IjcwMCI+U2VtYW50aWNDYWNoZSAoU1FMaXRlKTwvdGV4dD4KICA8dGV4dCB4PSI0MzAiIHk9IjIwMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzkzYzVmZCIgZm9udC1zaXplPSI5Ij5hbGwtTWluaUxNLUw2LXYyIMK3IGNvc2luZSDiiaUgMC44NTwvdGV4dD4KCiAgPCEtLSBDYWNoZSBISVQgcGF0aCAtLT4KICA8cGF0aCBkPSJNNTcwLDE4OCBRNzAwLDE4OCA3MDAsNjgiIHN0cm9rZT0iIzEwYjk4MSIgc3Ryb2tlLXdpZHRoPSIxLjUiIGZpbGw9Im5vbmUiIHN0cm9rZS1kYXNoYXJyYXk9IjQsMyIgbWFya2VyLWVuZD0idXJsKCNkYTIpIi8+CiAgPHRleHQgeD0iNjYwIiB5PSIxNDAiIGZpbGw9IiMzNGQzOTkiIGZvbnQtc2l6ZT0iOSI+SElUIOKGkiAmbHQ7MXM8L3RleHQ+CgogIDwhLS0gTUlTUyBwYXRoIC0tPgogIDxsaW5lIHgxPSI0MzAiIHkxPSIyMTAiIHgyPSI0MzAiIHkyPSIyMzAiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2RhKSIvPgogIDx0ZXh0IHg9IjQ1MiIgeT0iMjI0IiBmaWxsPSIjNmI3MjgwIiBmb250LXNpemU9IjkiPk1JU1M8L3RleHQ+CgogIDwhLS0gQ29tcGxleGl0eSArIERlY29tcG9zZSByb3cgLS0+CiAgPHJlY3QgeD0iNjAiIHk9IjIzMCIgd2lkdGg9IjM2MCIgaGVpZ2h0PSI0NCIgcng9IjgiIGZpbGw9IiMxYTBhM2QiIHN0cm9rZT0iIzdjM2FlZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIyNDAiIHk9IjI1MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2E3OGJmYSIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9IjcwMCI+Q2xhaW1Db21wbGV4aXR5RXN0aW1hdG9yPC90ZXh0PgogIDx0ZXh0IHg9IjI0MCIgeT0iMjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzRiNWZkIiBmb250LXNpemU9IjkiPnNlbWFudGljIMK3IGRvbWFpbiDCtyB0ZW1wb3JhbCDCtyBldmlkZW5jZSDihpIgdGllciwgbnVtX3JvdW5kczwvdGV4dD4KICA8cmVjdCB4PSI0NDAiIHk9IjIzMCIgd2lkdGg9IjM2MCIgaGVpZ2h0PSI0NCIgcng9IjgiIGZpbGw9IiMxYTBhM2QiIHN0cm9rZT0iIzdjM2FlZCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI2MjAiIHk9IjI1MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2E3OGJmYSIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9IjcwMCI+Q2xhaW1EZWNvbXBvc2VyPC90ZXh0PgogIDx0ZXh0IHg9IjYyMCIgeT0iMjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzRiNWZkIiBmb250LXNpemU9IjkiPmNvbXBvdW5kIOKGkiBhdG9taWMgc3ViLWNsYWltcyAocGFyYWxsZWwgZGViYXRlKTwvdGV4dD4KICA8bGluZSB4MT0iNDMwIiB5MT0iMjUyIiB4Mj0iNDQwIiB5Mj0iMjUyIiBzdHJva2U9IiM2YjcyODAiIHN0cm9rZS13aWR0aD0iMS41Ii8+CgogIDxsaW5lIHgxPSI0MzAiIHkxPSIyNzQiIHgyPSI0MzAiIHkyPSIyOTQiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2RhKSIvPgoKICA8IS0tIFRhdmlseSAtLT4KICA8cmVjdCB4PSIyNjAiIHk9IjI5NCIgd2lkdGg9IjMyMCIgaGVpZ2h0PSI0NCIgcng9IjgiIGZpbGw9IiMxYzBhMDAiIHN0cm9rZT0iI2Q5NzcwNiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI0MjAiIHk9IjMxNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZiYmYyNCIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9IjcwMCI+VGF2aWx5IFNlYXJjaCDigJQgYWR2ZXJzYXJpYWwgcmV0cmlldmFsPC90ZXh0PgogIDx0ZXh0IHg9IjQyMCIgeT0iMzMwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNkMzRkIiBmb250LXNpemU9IjkiPnByb19ldmlkZW5jZVtdICsgY29uX2V2aWRlbmNlW10gc2ltdWx0YW5lb3VzbHk8L3RleHQ+CgogIDwhLS0gUFJPIC8gQ09OIHNwbGl0IC0tPgogIDxsaW5lIHgxPSI0MzAiIHkxPSIzMzgiIHgyPSI0MzAiIHkyPSIzNTIiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPGxpbmUgeDE9IjI0MCIgeTE9IjM1MiIgeDI9IjYyMCIgeTI9IjM1MiIgc3Ryb2tlPSIjNGI1NTYzIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDxsaW5lIHgxPSIyNDAiIHkxPSIzNTIiIHgyPSIyNDAiIHkyPSIzNjgiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjZGEpIi8+CiAgPGxpbmUgeDE9IjYyMCIgeTE9IjM1MiIgeDI9IjYyMCIgeTI9IjM2OCIgc3Ryb2tlPSIjNGI1NTYzIiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNkYSkiLz4KCiAgPHJlY3QgeD0iNjAiIHk9IjM2OCIgd2lkdGg9IjM2MCIgaGVpZ2h0PSI1MiIgcng9IjgiIGZpbGw9IiMwZjJkNWMiIHN0cm9rZT0iIzI1NjNlYiIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iMjQwIiB5PSIzOTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2MGE1ZmEiIGZvbnQtc2l6ZT0iMTIiIGZvbnQtd2VpZ2h0PSI3MDAiPvCfm6EgUHJvQWdlbnQgKEdyb3EpPC90ZXh0PgogIDx0ZXh0IHg9IjI0MCIgeT0iNDA2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTNjNWZkIiBmb250LXNpemU9IjkiPmdlbmVyYXRlcyBhcmd1bWVudCArIHNvdXJjZXMgcGVyIHJvdW5kPC90ZXh0PgogIDxyZWN0IHg9IjQ0MCIgeT0iMzY4IiB3aWR0aD0iMzYwIiBoZWlnaHQ9IjUyIiByeD0iOCIgZmlsbD0iIzJkMGYwZiIgc3Ryb2tlPSIjZGMyNjI2IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI2MjAiIHk9IjM5MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y4NzE3MSIgZm9udC1zaXplPSIxMiIgZm9udC13ZWlnaHQ9IjcwMCI+4pqUIENvbkFnZW50IChHZW1pbmkpPC90ZXh0PgogIDx0ZXh0IHg9IjYyMCIgeT0iNDA2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNhNWE1IiBmb250LXNpemU9IjkiPmNoYWxsZW5nZXMgcHJpb3IgwrcgY291bnRlci1ldmlkZW5jZTwvdGV4dD4KCiAgPCEtLSBNZXJnZSBhcnJvd3Mg4oaSIEZhY3RDaGVja2VyIC0tPgogIDxsaW5lIHgxPSIyNDAiIHkxPSI0MjAiIHgyPSIyNDAiIHkyPSI0MzgiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8bGluZSB4MT0iNjIwIiB5MT0iNDIwIiB4Mj0iNjIwIiB5Mj0iNDM4IiBzdHJva2U9IiM0YjU1NjMiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPGxpbmUgeDE9IjI0MCIgeTE9IjQzOCIgeDI9IjYyMCIgeTI9IjQzOCIgc3Ryb2tlPSIjNGI1NTYzIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDxsaW5lIHgxPSI0MzAiIHkxPSI0MzgiIHgyPSI0MzAiIHkyPSI0NTIiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2RhKSIvPgoKICA8IS0tIEZhY3RDaGVja2VyIC0tPgogIDxyZWN0IHg9IjE5MCIgeT0iNDUyIiB3aWR0aD0iNDgwIiBoZWlnaHQ9IjY0IiByeD0iOCIgZmlsbD0iIzA2MjYzMCIgc3Ryb2tlPSIjMDg5MWIyIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI0MzAiIHk9IjQ3MyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzIyZDNlZSIgZm9udC1zaXplPSIxMiIgZm9udC13ZWlnaHQ9IjcwMCI+RmFjdENoZWNrZXIg4oCUIFVSTCBWZXJpZmljYXRpb24gUGlwZWxpbmU8L3RleHQ+CiAgPHRleHQgeD0iNDMwIiB5PSI0ODkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2N2U4ZjkiIGZvbnQtc2l6ZT0iOSI+SFRUUCBmZXRjaCDCtyBCZWF1dGlmdWxTb3VwIMK3IGNvc2luZSBzaW0g4omlIDAuODIgwrcgcGF5d2FsbCDCtyB0ZW1wb3JhbCDCtyBkb21haW4gdHJ1c3Q8L3RleHQ+CiAgPHRleHQgeD0iNDMwIiB5PSI1MDUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2N2U4ZjkiIGZvbnQtc2l6ZT0iOSI+U3RhdHVzOiBWRVJJRklFRCDCtyBOT1RfRk9VTkQgwrcgQ09OVEVOVF9NSVNNQVRDSCDCtyBUSU1FT1VUIMK3IFBBWVdBTExfUkVTVFJJQ1RFRDwvdGV4dD4KCiAgPCEtLSBBcnJvdyDihpIgTW9kZXJhdG9yIC0tPgogIDxsaW5lIHgxPSI0MzAiIHkxPSI1MTYiIHgyPSI0MzAiIHkyPSI1MzYiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2RhKSIvPgoKICA8IS0tIE1vZGVyYXRvciAtLT4KICA8cmVjdCB4PSIxOTAiIHk9IjUzNiIgd2lkdGg9IjQ4MCIgaGVpZ2h0PSI0OCIgcng9IjgiIGZpbGw9IiMwNTJlMWMiIHN0cm9rZT0iIzA1OTY2OSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNDMwIiB5PSI1NTciIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMzNGQzOTkiIGZvbnQtc2l6ZT0iMTIiIGZvbnQtd2VpZ2h0PSI3MDAiPk1vZGVyYXRvciDihpIgQ2FsaWJyYXRpb24g4oaSIEV4cGxhaW5hYmlsaXR5RW5naW5lPC90ZXh0PgogIDx0ZXh0IHg9IjQzMCIgeT0iNTczIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNmVlN2I3IiBmb250LXNpemU9IjkiPlRSVUUgLyBGQUxTRSAvIFBBUlRJQUxMWSBUUlVFIC8gSU5TVUZGSUNJRU5UIEVWSURFTkNFICsgY29uZmlkZW5jZSArIFhBSSByZXBvcnQ8L3RleHQ+Cjwvc3ZnPg==" alt="Data Flow Diagram" width="100%" style="border-radius:10px;margin:12px 0;"/>
 
 ---
 
@@ -447,7 +118,7 @@ START
 
 ### Core Data Models
 
-```
+```python
 DebateState (Pydantic v2 BaseModel)
 ├── claim: str
 ├── round: int = 1
@@ -458,7 +129,7 @@ DebateState (Pydantic v2 BaseModel)
 ├── con_sources: List[List[str]]
 ├── pro_evidence: List[Dict]          # Tavily evidence for ProAgent
 ├── con_evidence: List[Dict]          # Tavily evidence for ConAgent
-├── evidence_sources: List[Dict]      # merged, used by FactChecker for URL allow-list
+├── evidence_sources: List[Dict]      # merged, used by FactChecker URL allow-list
 ├── verification_results: List[Dict]  # SourceVerification records
 ├── pro_verification_rate: float
 ├── con_verification_rate: float
@@ -478,156 +149,47 @@ SourceVerification (Pydantic v2 BaseModel)
 ├── status: Literal["VERIFIED","NOT_FOUND","INVALID_URL","TIMEOUT",
 │                   "CONTENT_MISMATCH","PAYWALL_RESTRICTED","ERROR"]
 ├── confidence: float         # 0.0–1.0
-├── similarity_score: float   # RapidFuzz / cosine similarity
+├── similarity_score: float   # cosine similarity
 ├── trust_score: float        # domain authority weight
 ├── trust_tier: str           # ACADEMIC / GOVERNMENT / NEWS / GENERAL / LOW
 ├── agent_source: Literal["PRO","CON"]
 ├── content_preview: Optional[str]
-├── matched_claim: Optional[str]
 └── error: Optional[str]
-
-AgentResponse (Pydantic v2 BaseModel)
-├── agent: Literal["PRO","CON","MODERATOR","FACT_CHECKER"]
-├── round: int
-├── argument: str
-├── sources: List[str]
-├── confidence: float
-├── verdict: Optional[str]
-├── reasoning: Optional[str]
-└── metrics: Optional[Dict]
-
-ModeratorVerdict (Pydantic v2 BaseModel)
-├── verdict: str           # auto-normalised via field_validator
-├── confidence: float
-├── reasoning: str
-└── metrics: Optional[Dict]
 ```
 
 ### LLM Client — Provider Rotation Logic
 
-```
+```python
 FreeLLMClient.call() / call_structured()
 │
 ├── _provider_order(preferred_provider)
 │     └── [preferred, groq, gemini, cerebras, openrouter]  (rotated)
 │
 ├── for each provider:
-│     ├── CircuitBreaker.is_allowed()?  NO → skip
-│     ├── APIKeyManager.has_working_keys()?  NO → skip
-│     ├── provider_cooldown not expired?  NO → skip
-│     ├── _check_rate_limit()  (per-minute sliding window)  EXCEEDED → skip
-│     │
-│     └── _dispatch_call()
-│           ├── Groq:       groq.chat.completions.create()
-│           ├── Gemini:     genai.Client.models.generate_content()
-│           ├── Cerebras:   requests.post to api.cerebras.ai
-│           └── OpenRouter: requests.post to openrouter.ai
+│     ├── CircuitBreaker.is_allowed()?        NO → skip
+│     ├── APIKeyManager.has_working_keys()?   NO → skip
+│     ├── provider_cooldown not expired?      NO → skip
+│     ├── _check_rate_limit()                 EXCEEDED → skip
+│     └── _dispatch_call() → success or fallback
 │
 │     On success → CircuitBreaker.record_success()
-│                  APIKeyManager.report_key_success()
-│                  return response text
+│     On rate limit → set_provider_cooldown(90s) → try next
+│     On other error → record_failure() → exponential backoff (cap 8s)
 │
-│     On rate limit → extract retry_after → set_provider_cooldown()
-│                     break (try next provider)
-│
-│     On other error → CircuitBreaker.record_failure()
-│                      APIKeyManager.report_key_failure()
-│                      exponential backoff (capped at 8s)
-│                      retry up to max_retries
-│
-└── All providers failed → raise RuntimeError
-
-APIKeyManager
-├── tri-state per key: ACTIVE / RATE_LIMITED / INVALID (zero-quota)
-├── RATE_LIMITED keys → cooldown 90s then auto-recover
-├── INVALID keys → permanently skipped (zero-quota config issue)
-└── report_key_success() / report_key_failure() thread-safe with Lock
-
-CircuitBreaker (per provider)
-├── failure_threshold: 3
-├── recovery_timeout: 60s
-├── CLOSED → OPEN after 3 consecutive failures
-├── OPEN → HALF_OPEN after recovery_timeout
-└── HALF_OPEN → CLOSED on success, OPEN on failure
+└── All providers failed → raise RuntimeError (surfaced gracefully to user)
 ```
 
 ---
 
 ## Agent Design
 
-```
-BaseAgent (ABC)
-├── generate(state: DebateState) → AgentResponse   [abstract]
-├── _build_prompt(state, round_num) → str          [abstract]
-├── _format_evidence(evidence_bundle) → str
-└── _sanitize_sources(sources) → List[str]
-
-ProAgent (BaseAgent)
-├── Role: argue claim is TRUE
-├── Provider: Groq (Llama 3.3 70B)
-├── Evidence: uses state.pro_evidence (pre-fetched Tavily results)
-├── Output schema: AgentArgumentResponse (Pydantic)
-└── Role-locking: system prompt forces TRUE argument regardless of LLM prior
-
-ConAgent (BaseAgent)
-├── Role: argue claim is FALSE
-├── Provider: Gemini 2.5 Flash
-├── Evidence: uses state.con_evidence
-├── Receives: last pro_argument (must challenge directly)
-└── Output schema: AgentArgumentResponse
-
-FactChecker (BaseAgent)
-├── Role: verify every cited URL
-├── Provider: Groq
-├── URL allow-list: only URLs in state.evidence_sources pass (strips Type I hallucinations)
-├── Content match: semantic cosine similarity (all-MiniLM-L6-v2) vs claim
-├── Threshold: 0.82 (below = CONTENT_MISMATCH, Type II hallucination)
-├── Domain trust tiers:
-│     ACADEMIC:    .edu, .ac.uk, pubmed, arxiv, springer → 0.90
-│     GOVERNMENT:  .gov, .gov.in, who.int, un.org       → 0.85
-│     NEWS:        reuters, apnews, bbc, guardian        → 0.75
-│     GENERAL:     wikipedia, major outlets              → 0.65
-│     LOW:         social media, anonymous blogs         → 0.30
-└── Thread pool: shared executor (prevents OOM from per-call executor creation)
-
-Moderator (BaseAgent)
-├── Role: synthesise final verdict
-├── Provider: Gemini 2.5 Flash
-├── Composite formula:
-│     S = 0.30×Qarg + 0.30×Vrate + 0.20×Tdomain + 0.20×Ccons
-├── Verdict normalisation: field_validator maps 30+ variant strings to canonical set
-│     e.g. "PARTLY TRUE" → "PARTIALLY TRUE", "UNVERIFIABLE" → "INSUFFICIENT EVIDENCE"
-├── Fallback on RateLimitError → RATE_LIMITED verdict (not a crash)
-└── Passes raw confidence to AdaptiveConfidenceCalibrator (called in debate.py)
-```
+<img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODYwIiBoZWlnaHQ9IjUyMCIgdmlld0JveD0iMCAwIDg2MCA1MjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgZm9udC1mYW1pbHk9IidTZWdvZSBVSScsc3lzdGVtLXVpLHNhbnMtc2VyaWYiPgogIDxkZWZzPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJhYmciIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMGQxMTE3Ii8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMTYxYjIyIi8+PC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9Ijg2MCIgaGVpZ2h0PSI1MjAiIGZpbGw9InVybCgjYWJnKSIgcng9IjEyIi8+CiAgPHRleHQgeD0iNDMwIiB5PSIzMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2YwZjZmZiIgZm9udC1zaXplPSIxNSIgZm9udC13ZWlnaHQ9IjcwMCIgbGV0dGVyLXNwYWNpbmc9IjIiPk1VTFRJLUFHRU5UIERFU0lHTjwvdGV4dD4KICA8bGluZSB4MT0iNjAiIHkxPSI0MCIgeDI9IjgwMCIgeTI9IjQwIiBzdHJva2U9IiMzMDM2M2QiIHN0cm9rZS13aWR0aD0iMSIvPgoKICA8IS0tIEJhc2VBZ2VudCAtLT4KICA8cmVjdCB4PSIyOTAiIHk9IjU0IiB3aWR0aD0iMjgwIiBoZWlnaHQ9IjcwIiByeD0iOCIgZmlsbD0iIzFhMWEyZSIgc3Ryb2tlPSIjN2MzYWVkIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI0MzAiIHk9Ijc2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTc4YmZhIiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNzAwIj5CYXNlQWdlbnQgKEFCQyk8L3RleHQ+CiAgPHRleHQgeD0iNDMwIiB5PSI5MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2M0YjVmZCIgZm9udC1zaXplPSI5Ij5nZW5lcmF0ZShzdGF0ZSkg4oaSIEFnZW50UmVzcG9uc2UgIFthYnN0cmFjdF08L3RleHQ+CiAgPHRleHQgeD0iNDMwIiB5PSIxMDYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNjNGI1ZmQiIGZvbnQtc2l6ZT0iOSI+X2J1aWxkX3Byb21wdCDCtyBfZm9ybWF0X2V2aWRlbmNlIMK3IF9zYW5pdGl6ZV9zb3VyY2VzPC90ZXh0PgoKICA8IS0tIEluaGVyaXRhbmNlIGxpbmVzIC0tPgogIDxsaW5lIHgxPSIyOTAiIHkxPSI4OSIgeDI9IjE4OCIgeTI9IjE2MCIgc3Ryb2tlPSIjNmI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iNCwyIi8+CiAgPGxpbmUgeDE9IjM2MCIgeTE9IjEyNCIgeDI9IjM2MCIgeTI9IjE2MCIgc3Ryb2tlPSIjNmI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iNCwyIi8+CiAgPGxpbmUgeDE9IjUwMCIgeTE9IjEyNCIgeDI9IjUwMCIgeTI9IjE2MCIgc3Ryb2tlPSIjNmI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iNCwyIi8+CiAgPGxpbmUgeDE9IjU3MCIgeTE9Ijg5IiB4Mj0iNjcyIiB5Mj0iMTYwIiBzdHJva2U9IiM2YjcyODAiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtZGFzaGFycmF5PSI0LDIiLz4KCiAgPCEtLSBQcm9BZ2VudCAtLT4KICA8cmVjdCB4PSI1NCIgeT0iMTYwIiB3aWR0aD0iMjI4IiBoZWlnaHQ9IjE1MCIgcng9IjgiIGZpbGw9IiMwZjJkNWMiIHN0cm9rZT0iIzI1NjNlYiIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iMTY4IiB5PSIxODIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2MGE1ZmEiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI3MDAiPvCfm6EgUHJvQWdlbnQ8L3RleHQ+CiAgPHRleHQgeD0iMTY4IiB5PSIyMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5M2M1ZmQiIGZvbnQtc2l6ZT0iOSI+R3JvcSBMbGFtYSAzLjMgNzBCPC90ZXh0PgogIDxsaW5lIHgxPSI3MiIgeTE9IjIwOCIgeDI9IjI2NCIgeTI9IjIwOCIgc3Ryb2tlPSIjMWQ0ZWQ4IiBzdHJva2Utd2lkdGg9IjEiIHN0cm9rZS1kYXNoYXJyYXk9IjMsMiIvPgogIDx0ZXh0IHg9IjE2OCIgeT0iMjI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTNjNWZkIiBmb250LXNpemU9IjkiPlJvbGUtbG9ja2VkOiBhcmd1ZSBUUlVFPC90ZXh0PgogIDx0ZXh0IHg9IjE2OCIgeT0iMjQwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTNjNWZkIiBmb250LXNpemU9IjkiPlVzZXM6IHN0YXRlLnByb19ldmlkZW5jZTwvdGV4dD4KICA8dGV4dCB4PSIxNjgiIHk9IjI1NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzkzYzVmZCIgZm9udC1zaXplPSI5Ij5PdXRwdXQ6IEFnZW50QXJndW1lbnRSZXNwb25zZTwvdGV4dD4KICA8dGV4dCB4PSIxNjgiIHk9IjI3MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZiNzI4MCIgZm9udC1zaXplPSI4Ij5zeXN0ZW0gcHJvbXB0IGZvcmNlcyBUUlVFPC90ZXh0PgogIDx0ZXh0IHg9IjE2OCIgeT0iMjg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNmI3MjgwIiBmb250LXNpemU9IjgiPnJlZ2FyZGxlc3Mgb2YgTExNIHRyYWluaW5nIHByaW9yPC90ZXh0PgoKICA8IS0tIENvbkFnZW50IC0tPgogIDxyZWN0IHg9IjI5NiIgeT0iMTYwIiB3aWR0aD0iMjI4IiBoZWlnaHQ9IjE1MCIgcng9IjgiIGZpbGw9IiMyZDBmMGYiIHN0cm9rZT0iI2RjMjYyNiIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNDEwIiB5PSIxODIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmODcxNzEiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI3MDAiPuKalCBDb25BZ2VudDwvdGV4dD4KICA8dGV4dCB4PSI0MTAiIHk9IjIwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZjYTVhNSIgZm9udC1zaXplPSI5Ij5HZW1pbmkgMi41IEZsYXNoPC90ZXh0PgogIDxsaW5lIHgxPSIzMTQiIHkxPSIyMDgiIHgyPSI1MDYiIHkyPSIyMDgiIHN0cm9rZT0iIzk5MWIxYiIgc3Ryb2tlLXdpZHRoPSIxIiBzdHJva2UtZGFzaGFycmF5PSIzLDIiLz4KICA8dGV4dCB4PSI0MTAiIHk9IjIyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZjYTVhNSIgZm9udC1zaXplPSI5Ij5Sb2xlLWxvY2tlZDogYXJndWUgRkFMU0U8L3RleHQ+CiAgPHRleHQgeD0iNDEwIiB5PSIyNDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmY2E1YTUiIGZvbnQtc2l6ZT0iOSI+VXNlczogc3RhdGUuY29uX2V2aWRlbmNlPC90ZXh0PgogIDx0ZXh0IHg9IjQxMCIgeT0iMjU2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNhNWE1IiBmb250LXNpemU9IjkiPlJlY2VpdmVzOiBsYXN0IHByb19hcmd1bWVudDwvdGV4dD4KICA8dGV4dCB4PSI0MTAiIHk9IjI3MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZiNzI4MCIgZm9udC1zaXplPSI4Ij5tdXN0IGNoYWxsZW5nZSBkaXJlY3RseTwvdGV4dD4KICA8dGV4dCB4PSI0MTAiIHk9IjI4OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZiNzI4MCIgZm9udC1zaXplPSI4Ij5yb3VuZHMgY2FwcGVkIGF0IG51bV9yb3VuZHM8L3RleHQ+CgogIDwhLS0gRmFjdENoZWNrZXIgLS0+CiAgPHJlY3QgeD0iNTM4IiB5PSIxNjAiIHdpZHRoPSIyNjgiIGhlaWdodD0iMTUwIiByeD0iOCIgZmlsbD0iIzA2MjYzMCIgc3Ryb2tlPSIjMDg5MWIyIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI2NzIiIHk9IjE4MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzIyZDNlZSIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjcwMCI+RmFjdENoZWNrZXI8L3RleHQ+CiAgPHRleHQgeD0iNjcyIiB5PSIyMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2N2U4ZjkiIGZvbnQtc2l6ZT0iOSI+R3JvcSDCtyBUaHJlYWQgcG9vbCAoNSB3b3JrZXJzKTwvdGV4dD4KICA8bGluZSB4MT0iNTU2IiB5MT0iMjA4IiB4Mj0iNzg4IiB5Mj0iMjA4IiBzdHJva2U9IiMwZTc0OTAiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWRhc2hhcnJheT0iMywyIi8+CiAgPHRleHQgeD0iNjcyIiB5PSIyMjIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2N2U4ZjkiIGZvbnQtc2l6ZT0iOSI+VVJMIGFsbG93LWxpc3QgZmlsdGVyIChUeXBlIEkpPC90ZXh0PgogIDx0ZXh0IHg9IjY3MiIgeT0iMjM2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNjdlOGY5IiBmb250LXNpemU9IjkiPkNvc2luZSBzaW0g4omlIDAuODIgKFR5cGUgSUkpPC90ZXh0PgogIDx0ZXh0IHg9IjY3MiIgeT0iMjUwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNjdlOGY5IiBmb250LXNpemU9IjkiPlBheXdhbGwgwrcgdGVtcG9yYWwgwrcgZG9tYWluIHRydXN0PC90ZXh0PgogIDx0ZXh0IHg9IjY3MiIgeT0iMjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNmI3MjgwIiBmb250LXNpemU9IjgiPkFDQURFTUlDIDAuOTAgwrcgR09WIDAuODU8L3RleHQ+CiAgPHRleHQgeD0iNjcyIiB5PSIyODAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2YjcyODAiIGZvbnQtc2l6ZT0iOCI+TkVXUyAwLjc1IMK3IEdFTkVSQUwgMC42NTwvdGV4dD4KICA8dGV4dCB4PSI2NzIiIHk9IjI5NCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZiNzI4MCIgZm9udC1zaXplPSI4Ij5TT0NJQUwvQkxPRyAwLjMwPC90ZXh0PgoKICA8IS0tIE1vZGVyYXRvciAoZnVsbCB3aWR0aCkgLS0+CiAgPHJlY3QgeD0iNTQiIHk9IjMzMCIgd2lkdGg9Ijc1MiIgaGVpZ2h0PSIxMDAiIHJ4PSI4IiBmaWxsPSIjMDUyZTFjIiBzdHJva2U9IiMwNTk2NjkiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9IjQzMCIgeT0iMzUyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMzRkMzk5IiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIj5Nb2RlcmF0b3I8L3RleHQ+CiAgPHRleHQgeD0iNDMwIiB5PSIzNzAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2ZWU3YjciIGZvbnQtc2l6ZT0iOSI+R2VtaW5pIDIuNSBGbGFzaCDCtyBDb21wb3NpdGUgZm9ybXVsYTogUyA9IDAuMzDDl1FhcmcgKyAwLjMww5dWcmF0ZSArIDAuMjDDl1Rkb21haW4gKyAwLjIww5dDY29uczwvdGV4dD4KICA8dGV4dCB4PSI0MzAiIHk9IjM4NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZlZTdiNyIgZm9udC1zaXplPSI5Ij5maWVsZF92YWxpZGF0b3Igbm9ybWFsaXNlcyAzMCsgdmVyZGljdCB2YXJpYW50IHN0cmluZ3Mg4oaSIGNhbm9uaWNhbCBzZXQgKFBBUlRJQUxMWSBUUlVFLCBJTlNVRkZJQ0lFTlQgRVZJREVOQ0UsIOKApik8L3RleHQ+CiAgPHRleHQgeD0iNDMwIiB5PSI0MDIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2ZWU3YjciIGZvbnQtc2l6ZT0iOSI+4oaSIFJhdGVMaW1pdEVycm9yIOKGkiBSQVRFX0xJTUlURUQgdmVyZGljdCAobmV2ZXIgY3Jhc2hlcykgwrcgcGFzc2VzIHJhd19jb25mIHRvIEFkYXB0aXZlQ29uZmlkZW5jZUNhbGlicmF0b3I8L3RleHQ+CgogIDwhLS0gTm92ZWx0eSByb3cgLS0+CiAgPHJlY3QgeD0iNTQiIHk9IjQ0OCIgd2lkdGg9IjM2MCIgaGVpZ2h0PSI1NiIgcng9IjgiIGZpbGw9IiMxYzBhMDAiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIyMzQiIHk9IjQ2OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZiYmYyNCIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9IjcwMCI+QWRhcHRpdmVDb25maWRlbmNlQ2FsaWJyYXRvcjwvdGV4dD4KICA8dGV4dCB4PSIyMzQiIHk9IjQ4NCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZjZDM0ZCIgZm9udC1zaXplPSI5Ij5nZW9tZWFuKHRydXN0X3Njb3JlcykgwrcgZGViYXRlIGFzeW1tZXRyeSBzaWduYWw8L3RleHQ+CiAgPHRleHQgeD0iMjM0IiB5PSI0OTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmY2QzNGQiIGZvbnQtc2l6ZT0iOSI+Ym9vc3QgPSBtaW4oMC4yNSwgKEXiiJIwLjYwKcOXMC41MCk8L3RleHQ+CiAgPHJlY3QgeD0iNDQ2IiB5PSI0NDgiIHdpZHRoPSIzNjAiIGhlaWdodD0iNTYiIHJ4PSI4IiBmaWxsPSIjMWMwYTAwIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNjI2IiB5PSI0NjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmYmJmMjQiIGZvbnQtc2l6ZT0iMTEiIGZvbnQtd2VpZ2h0PSI3MDAiPkFyZ3VtZW50YXRpb25BbmFseXplcjwvdGV4dD4KICA8dGV4dCB4PSI2MjYiIHk9IjQ4NCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZjZDM0ZCIgZm9udC1zaXplPSI5Ij4xMCBmYWxsYWN5IHR5cGVzIMK3IGNpdGF0aW9uIHF1YWxpdHkgwrcgcmhldG9yaWM8L3RleHQ+CiAgPHRleHQgeD0iNjI2IiB5PSI0OTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmY2QzNGQiIGZvbnQtc2l6ZT0iOSI+4oaSIHF1YWxpdHlfc2NvcmUgcGVyIGFyZ3VtZW50IHBlciByb3VuZDwvdGV4dD4KPC9zdmc+" alt="Multi-Agent Design" width="100%" style="border-radius:10px;margin:12px 0;"/>
 
 ---
 
 ## API Resilience Architecture
 
-```
-Groq (primary, 28 RPM)
-  │  ↓ rate limit / circuit open
-Gemini (secondary, 9 RPM)
-  │  ↓ rate limit / circuit open
-Cerebras (tertiary, 28 RPM)
-  │  ↓ rate limit / circuit open
-OpenRouter (quaternary, 18 RPM)
-  │  ↓ all exhausted
-RuntimeError (surfaced to user gracefully)
-
-Per-provider safeguards:
-  ├── Sliding window rate counter (calls in last 60s vs PROVIDER_RATE_LIMITS)
-  ├── 90-second cooldown on rate limit (configurable via env)
-  ├── Circuit breaker (CLOSED → OPEN after 3 failures, recovers in 60s)
-  ├── Tri-state APIKeyManager (ACTIVE / RATE_LIMITED / INVALID)
-  ├── tenacity retry with exponential backoff (capped at 8s)
-  └── API key redaction from error logs (regex strips gsk_*, AIza*, sk-or-* patterns)
-
-Tavily Search failover:
-  ├── Primary: Tavily API (dual-sided evidence retrieval)
-  └── Failover: Google Custom Search Engine (on HTTP 429 / 403)
-```
+<img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODYwIiBoZWlnaHQ9IjQwMCIgdmlld0JveD0iMCAwIDg2MCA0MDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgZm9udC1mYW1pbHk9IidTZWdvZSBVSScsc3lzdGVtLXVpLHNhbnMtc2VyaWYiPgogIDxkZWZzPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJyYmciIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj48c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjMGQxMTE3Ii8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMTYxYjIyIi8+PC9saW5lYXJHcmFkaWVudD4KICAgIDxtYXJrZXIgaWQ9InJhIiBtYXJrZXJXaWR0aD0iNyIgbWFya2VySGVpZ2h0PSI3IiByZWZYPSIzLjUiIHJlZlk9IjMuNSIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNMCwwIEwwLDcgTDcsMy41IHoiIGZpbGw9IiM0YjU1NjMiLz48L21hcmtlcj4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9Ijg2MCIgaGVpZ2h0PSI0MDAiIGZpbGw9InVybCgjcmJnKSIgcng9IjEyIi8+CiAgPHRleHQgeD0iNDMwIiB5PSIzMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2YwZjZmZiIgZm9udC1zaXplPSIxNSIgZm9udC13ZWlnaHQ9IjcwMCIgbGV0dGVyLXNwYWNpbmc9IjIiPkFQSSBSRVNJTElFTkNFIEFSQ0hJVEVDVFVSRTwvdGV4dD4KICA8bGluZSB4MT0iNjAiIHkxPSI0MCIgeDI9IjgwMCIgeTI9IjQwIiBzdHJva2U9IiMzMDM2M2QiIHN0cm9rZS13aWR0aD0iMSIvPgoKICA8IS0tIFByb3ZpZGVyIHdhdGVyZmFsbCAtLT4KICA8cmVjdCB4PSI1NCIgeT0iNjAiIHdpZHRoPSIzNjAiIGhlaWdodD0iNTYiIHJ4PSI4IiBmaWxsPSIjMGYyZDVjIiBzdHJva2U9IiMyNTYzZWIiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9IjIzNCIgeT0iODIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM2MGE1ZmEiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI3MDAiPkdyb3Eg4oCUIFBSSU1BUlk8L3RleHQ+CiAgPHRleHQgeD0iMjM0IiB5PSIxMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5M2M1ZmQiIGZvbnQtc2l6ZT0iOSI+TGxhbWEgMy4zIDcwQiDCtyAyOCBSUE0gbGltaXQgwrcgUHJvQWdlbnQgKyBGYWN0Q2hlY2tlcjwvdGV4dD4KICA8dGV4dCB4PSI0NDAiIHk9Ijg4IiBmaWxsPSIjNmI3MjgwIiBmb250LXNpemU9IjkiPnJhdGUgbGltaXQgLzwvdGV4dD4KICA8dGV4dCB4PSI0NDAiIHk9IjEwMCIgZmlsbD0iIzZiNzI4MCIgZm9udC1zaXplPSI5Ij5jaXJjdWl0IG9wZW48L3RleHQ+CiAgPGxpbmUgeDE9IjQzMCIgeTE9Ijg4IiB4Mj0iNTQiIHkyPSIxNDgiIHN0cm9rZT0iIzRiNTU2MyIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjcmEpIi8+CgogIDxyZWN0IHg9IjU0IiB5PSIxNDgiIHdpZHRoPSIzNjAiIGhlaWdodD0iNTYiIHJ4PSI4IiBmaWxsPSIjMDUyZTFjIiBzdHJva2U9IiMwNTk2NjkiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9IjIzNCIgeT0iMTcwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMzRkMzk5IiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIj5HZW1pbmkg4oCUIFNFQ09OREFSWTwvdGV4dD4KICA8dGV4dCB4PSIyMzQiIHk9IjE4OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZlZTdiNyIgZm9udC1zaXplPSI5Ij4yLjUgRmxhc2ggwrcgOSBSUE0gwrcgQ29uQWdlbnQgKyBNb2RlcmF0b3I8L3RleHQ+CiAgPGxpbmUgeDE9IjIzNCIgeTE9IjIwNCIgeDI9IjIzNCIgeTI9IjIzNiIgc3Ryb2tlPSIjNGI1NTYzIiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNyYSkiLz4KCiAgPHJlY3QgeD0iNTQiIHk9IjIzNiIgd2lkdGg9IjM2MCIgaGVpZ2h0PSI1NiIgcng9IjgiIGZpbGw9IiMxYzBhMDAiIHN0cm9rZT0iI2Q5NzcwNiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIyMzQiIHk9IjI1OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZiYmYyNCIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjcwMCI+Q2VyZWJyYXMg4oCUIFRFUlRJQVJZPC90ZXh0PgogIDx0ZXh0IHg9IjIzNCIgeT0iMjc2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNkMzRkIiBmb250LXNpemU9IjkiPkxsYW1hIDMuMSA4QiDCtyAyOCBSUE0gwrcgYXV0by1mYWlsb3ZlcjwvdGV4dD4KICA8bGluZSB4MT0iMjM0IiB5MT0iMjkyIiB4Mj0iMjM0IiB5Mj0iMzI0IiBzdHJva2U9IiM0YjU1NjMiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI3JhKSIvPgoKICA8cmVjdCB4PSI1NCIgeT0iMzI0IiB3aWR0aD0iMzYwIiBoZWlnaHQ9IjU2IiByeD0iOCIgZmlsbD0iIzFhMGEzZCIgc3Ryb2tlPSIjN2MzYWVkIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjIzNCIgeT0iMzQ2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTc4YmZhIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIj5PcGVuUm91dGVyIOKAlCBRVUFURVJOQVJZPC90ZXh0PgogIDx0ZXh0IHg9IjIzNCIgeT0iMzY0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzRiNWZkIiBmb250LXNpemU9IjkiPjE4IFJQTSDCtyBmaW5hbCBmYWxsYmFjayBiZWZvcmUgUnVudGltZUVycm9yPC90ZXh0PgoKICA8IS0tIFNhZmVndWFyZHMgcGFuZWwgLS0+CiAgPHJlY3QgeD0iNDYwIiB5PSI2MCIgd2lkdGg9IjM4MCIgaGVpZ2h0PSIzMjAiIHJ4PSIxMCIgZmlsbD0iIzBkMTExNyIgc3Ryb2tlPSIjMzAzNjNkIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjY1MCIgeT0iODYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmMGY2ZmYiIGZvbnQtc2l6ZT0iMTIiIGZvbnQtd2VpZ2h0PSI3MDAiPlBlci1Qcm92aWRlciBTYWZlZ3VhcmRzPC90ZXh0PgogIDxsaW5lIHgxPSI0NzYiIHkxPSI5NCIgeDI9IjgyNCIgeTI9Ijk0IiBzdHJva2U9IiMzMDM2M2QiIHN0cm9rZS13aWR0aD0iMSIvPgogIDwhLS0gaXRlbXMgLS0+CiAgPGNpcmNsZSBjeD0iNDg0IiBjeT0iMTE2IiByPSI0IiBmaWxsPSIjMjU2M2ViIi8+CiAgPHRleHQgeD0iNDk2IiB5PSIxMjAiIGZpbGw9IiM5M2M1ZmQiIGZvbnQtc2l6ZT0iMTAiPlNsaWRpbmcgd2luZG93IHJhdGUgY291bnRlciAoY2FsbHMgcGVyIDYwcyk8L3RleHQ+CiAgPGNpcmNsZSBjeD0iNDg0IiBjeT0iMTQ0IiByPSI0IiBmaWxsPSIjMDU5NjY5Ii8+CiAgPHRleHQgeD0iNDk2IiB5PSIxNDgiIGZpbGw9IiM2ZWU3YjciIGZvbnQtc2l6ZT0iMTAiPjkwLXNlY29uZCBjb29sZG93biBvbiByYXRlIGxpbWl0IGhpdDwvdGV4dD4KICA8Y2lyY2xlIGN4PSI0ODQiIGN5PSIxNzIiIHI9IjQiIGZpbGw9IiNkOTc3MDYiLz4KICA8dGV4dCB4PSI0OTYiIHk9IjE3NiIgZmlsbD0iI2ZjZDM0ZCIgZm9udC1zaXplPSIxMCI+Q2lyY3VpdCBicmVha2VyOiBDTE9TRUQg4oaSIE9QRU4gKDMgZmFpbHVyZXMpPC90ZXh0PgogIDx0ZXh0IHg9IjQ5NiIgeT0iMTkyIiBmaWxsPSIjZmNkMzRkIiBmb250LXNpemU9IjEwIj7ihpIgSEFMRl9PUEVOIGFmdGVyIDYwcyDihpIgQ0xPU0VEIG9uIHN1Y2Nlc3M8L3RleHQ+CiAgPGNpcmNsZSBjeD0iNDg0IiBjeT0iMjE2IiByPSI0IiBmaWxsPSIjN2MzYWVkIi8+CiAgPHRleHQgeD0iNDk2IiB5PSIyMjAiIGZpbGw9IiNjNGI1ZmQiIGZvbnQtc2l6ZT0iMTAiPlRyaS1zdGF0ZSBBUElLZXlNYW5hZ2VyOjwvdGV4dD4KICA8dGV4dCB4PSI0OTYiIHk9IjIzNiIgZmlsbD0iI2M0YjVmZCIgZm9udC1zaXplPSIxMCI+QUNUSVZFIC8gUkFURV9MSU1JVEVEICg5MHMpIC8gSU5WQUxJRCAoc2tpcCk8L3RleHQ+CiAgPGNpcmNsZSBjeD0iNDg0IiBjeT0iMjYwIiByPSI0IiBmaWxsPSIjMDg5MWIyIi8+CiAgPHRleHQgeD0iNDk2IiB5PSIyNjQiIGZpbGw9IiM2N2U4ZjkiIGZvbnQtc2l6ZT0iMTAiPnRlbmFjaXR5IGV4cG9uZW50aWFsIGJhY2tvZmYgKGNhcCA4cyk8L3RleHQ+CiAgPGNpcmNsZSBjeD0iNDg0IiBjeT0iMjg4IiByPSI0IiBmaWxsPSIjZGMyNjI2Ii8+CiAgPHRleHQgeD0iNDk2IiB5PSIyOTIiIGZpbGw9IiNmY2E1YTUiIGZvbnQtc2l6ZT0iMTAiPkFQSSBrZXkgcmVkYWN0aW9uIGZyb20gbG9nczwvdGV4dD4KICA8dGV4dCB4PSI0OTYiIHk9IjMwOCIgZmlsbD0iI2ZjYTVhNSIgZm9udC1zaXplPSIxMCI+Z3NrXyogwrcgQUl6YSogwrcgc2stb3ItKiBwYXR0ZXJucyBzdHJpcHBlZDwvdGV4dD4KICA8bGluZSB4MT0iNDc2IiB5MT0iMzIyIiB4Mj0iODI0IiB5Mj0iMzIyIiBzdHJva2U9IiMzMDM2M2QiIHN0cm9rZS13aWR0aD0iMSIvPgogIDx0ZXh0IHg9IjY1MCIgeT0iMzQyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjU5ZTBiIiBmb250LXNpemU9IjEwIiBmb250LXdlaWdodD0iNzAwIj5UYXZpbHkgU2VhcmNoIEZhaWxvdmVyPC90ZXh0PgogIDx0ZXh0IHg9IjY1MCIgeT0iMzYwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNkMzRkIiBmb250LXNpemU9IjkiPlByaW1hcnk6IFRhdmlseSBBUEkgwrcgYWR2ZXJzYXJpYWwgZHVhbC1zaWRlZCByZXRyaWV2YWw8L3RleHQ+CiAgPHRleHQgeD0iNjUwIiB5PSIzNzYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmY2QzNGQiIGZvbnQtc2l6ZT0iOSI+RmFpbG92ZXI6IEdvb2dsZSBDdXN0b20gU2VhcmNoIEVuZ2luZSAoSFRUUCA0MjkvNDAzKTwvdGV4dD4KPC9zdmc+" alt="API Resilience Architecture" width="100%" style="border-radius:10px;margin:12px 0;"/>
 
 ---
 
@@ -640,19 +202,19 @@ App.jsx (3-panel shell)
 ├── Sidebar.jsx
 │     ├── ClaimInput.jsx          (submit new claim)
 │     ├── HistoryList.jsx         (past claims)
-│     └── ProviderStatus.jsx      (fallback warnings via metrics.model_substitutions)
+│     └── ProviderStatus.jsx      (fallback warnings)
 │
 ├── Main Panel
 │     ├── BattleHeader.jsx        (🛡️ ProAgent vs ⚔️ ConAgent live scores)
 │     ├── DebateArena.jsx         (live debate transcript, SSE-driven)
-│     │     └── AgentBubble.jsx   (per-argument bubble with source hover cards)
+│     │     └── AgentBubble.jsx   (per-argument bubble + source hover cards)
 │     │           └── SourceHoverCard.jsx  (trust tier, verification status, URL)
 │     ├── SubClaimBanner.jsx      (shown when claim is decomposed)
 │     └── FallacyPanel.jsx        (detected fallacies per agent)
 │
 └── Right Panel (StagePanel.jsx)
-      ├── Pipeline stages (DECOMPOSING → SEARCHING → PRO → CON → FACT_CHECK →
-      │                    HUMAN_REVIEW → MODERATOR → COMPLETE)
+      ├── Pipeline stages (DECOMPOSING → SEARCHING → PRO → CON →
+      │                    FACT_CHECK → HUMAN_REVIEW → MODERATOR → COMPLETE)
       ├── HITLPanel.jsx           (per-source override dropdowns, amber pulse)
       │     └── triggers on human_review_required SSE event
       │     └── POST /api/debate/resume/{thread_id} on submit
@@ -662,21 +224,14 @@ App.jsx (3-panel shell)
       │     └── VerificationTable   (per-URL status badges)
       └── LoadingOrb.jsx          (cinematic loading animation)
 
-State Management (Zustand):
-  useDebateStore.js
-  ├── claim, threadId, status
-  ├── proArguments[], conArguments[]
-  ├── verificationResults[]
-  ├── verdict, confidence, metrics
-  ├── hitlRequired: bool
-  └── actions: submitClaim, resumeHITL, reset
+State Management (Zustand — useDebateStore.js):
+  claim · threadId · status · proArguments[] · conArguments[]
+  verificationResults[] · verdict · confidence · metrics · hitlRequired
 
-SSE Hook:
-  useSSE.js
-  ├── Stable UUID runId (prevents reconnect loops)
-  ├── EventSource → /api/stream/{thread_id}
-  ├── Events: progress, verdict, human_review_required, error, heartbeat
-  └── AbortController for clean unmount (no stale connection leaks)
+SSE Hook (useSSE.js):
+  Stable UUID runId · EventSource /api/stream/{thread_id}
+  Events: progress · verdict · human_review_required · error · heartbeat
+  AbortController for clean unmount (no stale connection leaks)
 ```
 
 ---
@@ -685,25 +240,23 @@ SSE Hook:
 
 ```
 SQLite (insightswarm.db)
-├── Semantic cache table
-│     ├── claim_embedding: BLOB   (all-MiniLM-L6-v2, 384-dim)
-│     ├── verdict: TEXT
-│     ├── confidence: REAL
-│     ├── full_result: JSON
-│     └── created_at: TIMESTAMP
+├── claim_cache table
+│     ├── claim_embedding: BLOB   (all-MiniLM-L6-v2, 384-dim float32)
+│     ├── verdict_data: TEXT      (full JSON result)
+│     ├── created_at, expires_at  (7-day TTL)
+│     └── WAL journal mode + NORMAL synchronous
 │
 └── Lookup algorithm:
       1. Encode incoming claim → 384-dim vector
-      2. Load all cached embeddings into NumPy array (vectorised, O(1) amortised)
-      3. Cosine similarity: new_vec · cached_vecs / (||new|| × ||cached||)
-      4. Best match ≥ 0.85 threshold → return cached result (< 1s)
+      2. Load all cached embeddings into NumPy matrix (O(1) amortised — matrix cached by row count)
+      3. Cosine similarity: normalise → dot product
+      4. Best match ≥ 0.85 → return cached result (< 1s)
       5. Below threshold → run full debate pipeline
 
-L1 In-Memory Cache (BoundedCache)
-├── Thread-safe LRU (OrderedDict + Lock)
-├── Max 100 entries
-├── Sits in front of SQLite (avoids disk I/O for hot entries)
-└── Evicts LRU on overflow
+L1 In-Memory LRU Cache (BoundedCache):
+  Thread-safe OrderedDict + Lock · max 100 entries
+  Sits in front of SQLite — avoids disk I/O for hot entries
+  Evicts LRU on overflow
 ```
 
 ---
@@ -711,70 +264,30 @@ L1 In-Memory Cache (BoundedCache)
 ## HITL Flow
 
 ```
-                    ┌─────────────────────────────────┐
-                    │      FactChecker completes       │
-                    │  pro_rate=0.18, con_rate=0.22    │
-                    └────────────────┬────────────────┘
-                                     │
-                         both < 30% threshold?
-                                     │ YES
-                                     ▼
-                    ┌─────────────────────────────────┐
-                    │   _should_retry() → "retry"     │
-                    │   revision loop (× 1 max)       │
-                    │   agents regenerate arguments   │
-                    │   fact_checker re-runs          │
-                    └────────────────┬────────────────┘
-                                     │
-                         still < 30% after retry?
-                                     │ YES
-                                     ▼
-                    ╔═════════════════════════════════╗
-                    ║      human_review NODE          ║
-                    ║  (LangGraph interrupt fires)    ║
-                    ║                                 ║
-                    ║  SSE event emitted:             ║
-                    ║  { type: "human_review_required"║
-                    ║    verification_results: [...] }║
-                    ╚══════════════════╤══════════════╝
-                                       │
-                           React frontend receives event
-                                       │
-                                       ▼
-                    ┌─────────────────────────────────┐
-                    │         HITLPanel renders        │
-                    │                                  │
-                    │  For each URL:                   │
-                    │  ┌─────────────────────────────┐ │
-                    │  │ url: reuters.com/article... │ │
-                    │  │ status: CONTENT_MISMATCH    │ │
-                    │  │ Override: [dropdown]        │ │
-                    │  │   VERIFIED / NOT_FOUND /    │ │
-                    │  │   CONTENT_MISMATCH /        │ │
-                    │  │   PAYWALL / INVALID_URL     │ │
-                    │  └─────────────────────────────┘ │
-                    │                                  │
-                    │  Optional verdict override:      │
-                    │  [TRUE / FALSE / PARTIALLY TRUE] │
-                    │                                  │
-                    │  [Submit Review] button          │
-                    └──────────────────┬───────────────┘
-                                       │ POST /api/debate/resume/{thread_id}
-                                       │ body: { source_overrides, verdict_override }
-                                       ▼
-                    ┌─────────────────────────────────┐
-                    │   Backend patches DebateState   │
-                    │   human_verdict_override set    │
-                    │   graph.invoke(None, config)    │
-                    │   resumes from checkpoint       │
-                    └──────────────────┬───────────────┘
-                                       │
-                                       ▼
-                    ┌─────────────────────────────────┐
-                    │    moderator node runs          │
-                    │    with corrected sources       │
-                    │    verdict SSE event fires      │
-                    └─────────────────────────────────┘
+FactChecker completes → pro_rate < 0.30 AND con_rate < 0.30
+        │
+        ▼ revision loop (agents regenerate, fact_checker re-runs, max 1×)
+        │
+        ▼ still < 0.30 after retry?
+        │
+╔═══════▼══════════════════════════════════╗
+║  human_review NODE  (LangGraph INTERRUPT) ║
+║  SSE: { type: "human_review_required",    ║
+║          verification_results: [...] }   ║
+╚═══════════════════════════╤══════════════╝
+                            │
+            HITLPanel renders in React
+            Per-URL override dropdowns
+            Optional verdict_override
+            [Submit Review] button
+                            │ POST /api/debate/resume/{thread_id}
+                            ▼
+            Backend patches DebateState
+            graph.invoke(None, config) resumes from checkpoint
+                            │
+                            ▼
+            moderator node runs with corrected sources
+            verdict SSE event fires → user sees result
 ```
 
 ---
@@ -844,69 +357,36 @@ InsightSwarm/
 │   │   ├── circuit_breaker.py     CircuitBreaker: CLOSED/OPEN/HALF_OPEN per provider
 │   │   └── fallback_handler.py    FallbackHandler: wraps graph execution with graceful fallback
 │   │
-│   ├── utils/
-│   │   ├── api_key_manager.py     APIKeyManager: tri-state key lifecycle (ACTIVE/RATE_LIMITED/INVALID)
-│   │   ├── claim_decomposer.py    ClaimDecomposer: splits compound claims into atomic sub-claims
-│   │   ├── summarizer.py          Summarizer: rolling debate history compression (after round 2)
-│   │   ├── tavily_retriever.py    TavilyRetriever: adversarial search + Google CSE failover
-│   │   ├── url_helper.py          URLNormalizer: sanitise, dedup, SSRF-filter URLs
-│   │   └── trust_scorer.py        TrustScorer: domain authority tier assignment
-│   │
-│   └── monitoring/
-│       └── api_status.py          Real-time provider health monitoring
+│   └── utils/
+│       ├── api_key_manager.py     APIKeyManager: tri-state key lifecycle
+│       ├── claim_decomposer.py    ClaimDecomposer: splits compound claims
+│       ├── summarizer.py          Summarizer: rolling debate history compression
+│       ├── tavily_retriever.py    TavilyRetriever: adversarial search + Google CSE failover
+│       ├── url_helper.py          URLNormalizer: sanitise, dedup, SSRF-filter
+│       └── trust_scorer.py        TrustScorer: domain authority tier assignment
 │
-├── frontend/
-│   └── src/
-│       ├── App.jsx                3-panel shell (Sidebar | DebateArena | StagePanel)
-│       ├── index.css              Aurora glassmorphism theme, Inter + Fira Code
-│       ├── components/
-│       │   ├── debate/
-│       │   │   ├── BattleHeader.jsx      🛡️ vs ⚔️ live score header
-│       │   │   ├── DebateArena.jsx       SSE-driven live debate transcript
-│       │   │   └── AgentBubble.jsx       Per-argument bubble + source hover cards
-│       │   ├── hitl/
-│       │   │   └── HITLPanel.jsx         Source override UI (amber pulse alert)
-│       │   ├── layout/
-│       │   │   └── Sidebar.jsx           Navigation + claim history + provider warnings
-│       │   ├── pipeline/
-│       │   │   ├── StagePanel.jsx        Pipeline stage tracker (right panel)
-│       │   │   ├── SubClaimBanner.jsx    Sub-claim display when decomposed
-│       │   │   └── FallacyPanel.jsx      Detected fallacy display
-│       │   └── results/
-│       │       └── MetricsGrid.jsx       Argumentation quality + calibration metadata
-│       ├── store/
-│       │   └── useDebateStore.js         Zustand global state
-│       └── hooks/
-│           ├── useSSE.js                 SSE connection with stable UUID + AbortController
-│           └── useApiStatusStore.js      Provider health polling
+├── frontend/src/
+│   ├── App.jsx                    3-panel shell
+│   ├── components/debate/         BattleHeader · DebateArena · AgentBubble
+│   ├── components/hitl/           HITLPanel (amber pulse alert)
+│   ├── components/pipeline/       StagePanel · SubClaimBanner · FallacyPanel
+│   ├── components/results/        MetricsGrid
+│   ├── store/useDebateStore.js    Zustand global state
+│   └── hooks/useSSE.js            SSE connection with stable UUID + AbortController
 │
 ├── tests/
 │   ├── unit/                      Unit tests (168 passing)
-│   ├── integration/               Integration tests
-│   │   ├── test_novelty_features.py     HITL, trust weighting, decomposition, circuit breakers
-│   │   └── test_real_api_health.py      Live provider diagnostics
-│   ├── load/
-│   │   └── test_concurrent_users.py     10-user concurrency suite
-│   ├── benchmark_suite.py         FEVER benchmark: precision/recall/F1/ECE vs baselines
+│   ├── integration/               HITL, trust weighting, decomposition, circuit breakers
+│   ├── load/                      10-user concurrency suite
+│   ├── benchmark_suite.py         FEVER benchmark: precision/recall/F1/ECE
 │   └── red_team_cases.py          Adversarial prompt injection + edge cases
 │
-├── scripts/
-│   ├── download_fever.py          Download 200-claim FEVER balanced dataset
-│   ├── run_benchmark_quick.py     10-claim sanity check (~5 min)
-│   ├── run_ablation.py            4-config ablation study (50 claims × 4 configs)
-│   └── generate_paper_metrics.py  Output LaTeX tables from benchmark_report.json
-│
-├── data/
-│   └── fever_sample.json          100-claim benchmark dataset (50 TRUE / 50 FALSE)
-│
-├── paper/                         Published IJRASET research paper + drafts
-├── progress/                      25-day development logs (D1–D25)
-├── outputs/                       Benchmark results (fever_results.json, ablation_results.json)
-│
+├── scripts/                       download_fever · run_benchmark_quick · run_ablation
+├── data/fever_sample.json         100-claim benchmark dataset
+├── paper/                         Published IJRASET paper + drafts
+├── outputs/                       Benchmark results JSON + LaTeX tables
 ├── .env                           API keys (gitignored)
-├── requirements.txt               Pinned Python dependencies
-├── pytest.ini                     Test configuration
-└── .github/workflows/ci.yml       GitHub Actions CI
+└── requirements.txt               Pinned Python dependencies
 ```
 
 ---
@@ -919,12 +399,8 @@ InsightSwarm/
 git clone https://github.com/AyushDevadiga1/Insight-Swarm.git
 cd InsightSwarm
 python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-source .venv/bin/activate
-
+.venv\Scripts\activate   # Windows
+# source .venv/bin/activate  # macOS/Linux
 pip install -r requirements.txt
 ```
 
@@ -943,14 +419,13 @@ OPENROUTER_API_KEY=sk-or-v1-...
 CEREBRAS_API_KEY=csk_...
 
 # Optional tuning
-SEMANTIC_CACHE_ENABLED=1
-RATE_LIMIT_GROQ=28
-RATE_LIMIT_GEMINI=9
 GROQ_MODEL=llama-3.3-70b-versatile
 GEMINI_MODEL=gemini-2.5-flash
+SEMANTIC_CACHE_ENABLED=1
 ```
 
-**Free keys:**
+**Free API keys:**
+
 | Provider | Link | Free Tier |
 |---|---|---|
 | Groq | https://console.groq.com | 14,400 req/day |
@@ -976,13 +451,13 @@ npm run dev
 
 ### 5. Submit a claim
 
-Open http://localhost:5173, type any factual claim and press Enter. Example claims:
+Open http://localhost:5173 and try:
 
 ```
 "Drinking coffee reduces the risk of type 2 diabetes"
 "The James Webb Space Telescope launched in 2021"
-"India has more than 1.4 billion people"
 "5G towers cause COVID-19"
+"India has more than 1.4 billion people"
 ```
 
 ---
@@ -999,50 +474,33 @@ Open http://localhost:5173, type any factual claim and press Enter. Example clai
 | `SEMANTIC_CACHE_ENABLED` | `1` | Enable/disable SQLite semantic cache |
 | `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model name |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name |
-| `CEREBRAS_MODEL` | `llama3.1-8b` | Cerebras model name |
-| `OPENROUTER_MODEL` | `meta-llama/llama-3.1-8b-instruct` | OpenRouter model |
-| `RATE_LIMIT_GROQ` | `28` | Groq calls per minute (buffer below 30) |
-| `RATE_LIMIT_GEMINI` | `9` | Gemini calls per minute (buffer below 10) |
+| `RATE_LIMIT_GROQ` | `28` | Groq calls per minute |
+| `RATE_LIMIT_GEMINI` | `9` | Gemini calls per minute |
 | `RATE_LIMIT_CEREBRAS` | `28` | Cerebras calls per minute |
 | `RATE_LIMIT_OPENROUTER` | `18` | OpenRouter calls per minute |
-| `ENABLE_OFFLINE_FALLBACK` | `false` | Return static message when all providers fail |
 
 ---
 
 ## Running Benchmarks
 
-The benchmark suite evaluates InsightSwarm against two baselines on a 100-claim FEVER-derived dataset.
-
 ```bash
 # Step 1: Download FEVER benchmark dataset
 python scripts/download_fever.py
-# → saves data/fever_sample.json (100 balanced claims)
 
 # Step 2: Quick sanity check (10 claims, ~5 min)
 python scripts/run_benchmark_quick.py
 
-# Step 3: Full benchmark (100 claims, ~90 min on free-tier APIs)
+# Step 3: Full benchmark (100 claims, ~90 min)
 python tests/benchmark_suite.py --n 100
 
-# Step 4: Ablation study (4 configs × 50 claims, ~45 min)
+# Step 4: Ablation study (4 configs × 50 claims)
 python scripts/run_ablation.py --n 50
 
-# Step 5: Generate LaTeX tables for paper submission
+# Step 5: Generate LaTeX tables for paper
 python scripts/generate_paper_metrics.py
 ```
 
-**Outputs in `outputs/`:**
-
-| File | Contents |
-|---|---|
-| `fever_results.json` | Per-claim InsightSwarm results |
-| `baseline_results.json` | Keyword + single-agent baseline results |
-| `benchmark_report.json` | Aggregated precision/recall/F1/ECE per system |
-| `ablation_results.json` | ΔF1 per component removed |
-| `table_main.tex` | Ready-to-paste LaTeX comparison table |
-| `table_ablation.tex` | Ablation LaTeX table |
-
-**Results (preliminary evaluation, 100-claim benchmark):**
+**Results (100-claim FEVER benchmark):**
 
 | Metric | Keyword Baseline | Zero-shot LLM | InsightSwarm |
 |---|---|---|---|
@@ -1085,16 +543,14 @@ Built across 25 structured development days:
 | Foundation | 1 | Architecture docs, FreeLLMClient, thread-safe dual-provider fallback | 5/5 | 0 |
 | Core agents | 2–3 | FactChecker (URL fetch, semantic match, hallucination classification), Moderator, XSS hardening | 35/35 | 25 |
 | Stability | 4–6 | Pydantic v2 migration, semantic cache, tri-state API key manager | 38/38 | 29 |
-| Scale | 7–12 | Cerebras + OpenRouter expansion, heterogeneous model pairing, 10-user concurrency testing | 80/80 | 18 |
+| Scale | 7–12 | Cerebras + OpenRouter expansion, heterogeneous model pairing, 10-user concurrency | 80/80 | 18 |
 | Modern stack | 13–20 | FastAPI + React migration, SSE streaming, LangGraph MemorySaver, Aurora glassmorphism UI | 120/120 | 16 |
 | Novelty + Security | 21–25 | HITL via LangGraph interrupts, ArgumentationAnalyzer, AdaptiveCalibrator, FEVER benchmark, SSRF + rate-limit hardening | 168/168 | 8 |
 
 **Three pivotal architectural decisions:**
 1. **Day 2** — Discovery that word-count verdicts couldn't distinguish verified from fabricated sources → FactChecker-weighted composite verdict (core hallucination-reduction mechanism)
-2. **Day 4** — Migration from fragile `TypedDict` to Pydantic `BaseModel` → eliminated all `KeyError` crashes pipeline-wide, enabled schema-strict `call_structured()` parsing
+2. **Day 4** — Migration from fragile `TypedDict` to Pydantic `BaseModel` → eliminated all `KeyError` crashes pipeline-wide
 3. **Days 18–20** — Replaced Streamlit prototype with FastAPI + React → unlocked SSE streaming and HITL panel (the two most critical contributions)
-
-Zero defects introduced in the final two days despite peak feature velocity in Days 21–23 — a direct result of maintaining test-driven discipline from Day 1.
 
 ---
 
@@ -1107,7 +563,7 @@ pytest tests/unit/ -v
 # Full test suite
 pytest tests/ -v --tb=short
 
-# Integration: novelty features (HITL, trust weighting, decomposition)
+# Integration: novelty features
 pytest tests/integration/test_novelty_features.py -v
 
 # Load: 10 concurrent users
@@ -1126,7 +582,7 @@ python tests/red_team_cases.py
 
 ```bibtex
 @article{insightswarm2026,
-  author    = {Gawas, Soham and Ghawali, Bhargav and Gawali, Mahesh and Devadiga, Ayush and Gujar, Shital},
+  author    = {Ayush Devadiga , Bhargav Ghawali , Soham Gawas , Mahesh Gawali , Shital Gujar},
   title     = {InsightSwarm: A Multi-Agent Adversarial Framework for Automated Fact-Checking with Real-Time Source Verification, Human-in-the-Loop Oversight, and Adaptive Confidence Calibration},
   journal   = {International Journal for Research in Applied Science and Engineering Technology (IJRASET)},
   year      = {2026},
