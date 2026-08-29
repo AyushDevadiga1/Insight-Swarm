@@ -12,15 +12,16 @@ export const verifyClaim = async (claim) => {
     const response = await api.post('/verify', { claim });
     return response.data;
   } catch (error) {
+    const detail = error.response?.data?.detail;
     if (error.response && error.response.status === 429) {
-      throw {
-        type: 'RATE_LIMITED',
-        ...error.response.data.detail
-      };
+      const base = { type: 'RATE_LIMITED', retry_after: 60 };
+      throw typeof detail === 'object' && detail !== null
+        ? { ...base, ...detail }
+        : { ...base, message: detail ?? error.message };
     }
     throw {
       type: 'SYSTEM_ERROR',
-      message: error.response?.data?.detail?.message || error.message
+      message: (typeof detail === 'object' && detail !== null && detail.message) || error.message
     };
   }
 };
