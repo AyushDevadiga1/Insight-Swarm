@@ -1,27 +1,48 @@
-streamlit>=1.31.0
-requests>=2.31.0
-tavily-python>=0.3.1
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
-python-dotenv>=1.0.0
-google-generativeai>=0.3.0
-google-genai>=0.1.0
-groq>=0.4.0
-langgraph>=0.0.26
-langgraph-checkpoint-sqlite>=1.0.0
-sentence-transformers>=2.3.0
-scikit-learn>=1.4.0
-rapidfuzz>=3.6.0
-pypdf>=4.0.0
-tenacity>=8.2.0
-numpy>=1.26.0
-pyyaml>=6.0.0
+# InsightSwarm runtime dependencies — exact pins (see improvement-plan Action 3)
+# Regenerate/re-pin with: pip-compile requirements.in -o requirements.txt
 
-# ── Benchmark & evaluation (Phase 3+4) ───────────────────────────────────────
-datasets>=2.19.0           # HuggingFace datasets — FEVER download
-scipy>=1.12.0              # ECE computation in calibration stats
-fastapi>=0.110.0           # API server
-uvicorn[standard]>=0.29.0  # ASGI server
-websockets>=12.0           # HITL WebSocket support
-httpx>=0.27.0              # Async HTTP (testing)
+# Web / UI
+streamlit==1.55.0
+fastapi==0.135.1
+uvicorn[standard]==0.42.0
+websockets==16.0
+
+# HTTP
+requests==2.32.5
+httpx==0.28.1
+
+# Retrieval
+tavily==1.1.0
+
+# Data validation / config
+pydantic==2.12.5
+python-dotenv==1.2.2
+
+# LLM providers
+google-genai==1.66.0
+google-generativeai==0.8.6
+groq==0.37.1
+
+# LangGraph orchestration
+langgraph==1.0.10
+langgraph-checkpoint-sqlite==3.0.3
+
+# Semantic cache / embeddings
+sentence-transformers==5.3.0
+scikit-learn==1.8.0
+rapidfuzz==3.14.3
+
+# PDF / document parsing
+pypdf==6.8.0
+
+# Resilience
+tenacity==9.1.4
+
+# Numerics / data
+numpy==2.4.3
+scipy==1.17.1
+pyyaml==6.0.3
+datasets==4.8.4
+
+# API rate limiting
 slowapi==0.1.9
