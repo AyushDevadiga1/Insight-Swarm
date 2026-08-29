@@ -1,7 +1,9 @@
 """
 src/config.py — Final production version. All batches applied.
+IMPROVEMENT PLAN: origins & provider cooldown read from env for deployability.
 """
 import logging
+import os
 logger = logging.getLogger(__name__)
 
 
@@ -34,8 +36,11 @@ class LLMClientConfig:
     MAX_CALLS_PER_MINUTE      = 60
     MIN_API_KEY_LENGTH        = 30
     GROQ_KEY_PREFIX           = "gsk_"
-    ALLOWED_ORIGINS           = ["http://localhost:5173", "http://127.0.0.1:5173"] # Expanded for Vite
-    PROVIDER_COOLDOWN_SECONDS = 90   # timed cooldown after rate-limit hit
+    ALLOWED_ORIGINS           = [o.strip() for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",") if o.strip()]
+    PROVIDER_COOLDOWN_SECONDS = int(os.getenv("PROVIDER_COOLDOWN_SECONDS", "90"))
 
 
 class DebateConfig:

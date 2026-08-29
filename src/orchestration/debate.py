@@ -4,8 +4,10 @@ Single definition of every method. No duplicates.
 Novelty modules (ArgumentationAnalyzer + AdaptiveConfidenceCalibrator) wired into pipeline.
 ClaimComplexityEstimator + ExplainabilityEngine also wired.
 BUG FIXES (D23): added close(), fixed contradiction detection, fixed None-guard in novelty.
+IMPROVEMENT PLAN (10/10): shared SQLite-backed checkpointer so HITL /resume works
+across orchestrator instances (previously in-process MemorySaver per instance).
 """
-import sys, logging, json, re
+import sys, logging, json, re, os, threading, sqlite3
 from pathlib import Path
 from typing import Optional, Literal, Any
 
@@ -13,6 +15,13 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+try:
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    HAS_SQLITE_CHECKPOINT = True
+except Exception:  # pragma: no cover - optional dependency
+    SqliteSaver = None  # type: ignore
+    HAS_SQLITE_CHECKPOINT = False
 
 from src.core.models import DebateState, AgentResponse, ConsensusResponse
 from src.llm.client import RateLimitError
@@ -41,6 +50,45 @@ SETTLED_TRUTHS = {
     r"\bsun revolves around earth\b": ("FALSE", 1.0, "Heliocentric model."),
 }
 
+# ── Shared persistent checkpointer (HITL resume across orchestrator instances) ──
+# A single module-level SQLite-backed checkpointer that every DebateOrchestrator
+# shares. Without this, an in-process MemorySaver created per orchestrator makes
+# the /api/debate/resume/{thread_id} flow unable to see the interrupted state.
+_CHECKPOINT_DB = os.getenv("INSIGHTSWARM_CHECKPOINT_DB", "insightswarm_graph.db")
+_checkpointer = None
+_checkpointer_lock = threading.Lock()
+
+
+def _create_checkpointer():
+    """Build a long-lived SqliteSaver over a persistent connection."""
+    # We deliberately construct the saver from a raw connection (NOT the
+    # from_conn_string context manager) so it stays open for the process
+    # lifetime, allowing any orchestrator instance to read/write thread state.
+    from langgraph.checkpoint.sqlite import SqliteSaver as _SS  # noqa: F811
+    _conn = sqlite3.connect(_CHECKPOINT_DB, check_same_thread=False)
+    _conn.execute("PRAGMA journal_mode=WAL")
+    _conn.execute("PRAGMA busy_timeout=15000")
+    return _conn, _SS(_conn)
+
+
+def get_checkpointer():
+    """Return the shared LangGraph checkpointer (SQLite if available, else memory)."""
+    global _checkpointer
+    if _checkpointer is not None:
+        return _checkpointer
+    with _checkpointer_lock:
+        if _checkpointer is None:
+            if HAS_SQLITE_CHECKPOINT and not os.getenv("PYTEST_CURRENT_TEST"):
+                try:
+                    _conn, _checkpointer = _create_checkpointer()
+                    logger.info("Using shared SQLite checkpointer: %s", _CHECKPOINT_DB)
+                except Exception as e:  # pragma: no cover
+                    logger.warning("SQLite checkpointer unavailable (%s) — falling back to memory", e)
+                    _checkpointer = MemorySaver()
+            else:
+                _checkpointer = MemorySaver()
+    return _checkpointer
+
 
 class DebateOrchestrator:
     def __init__(self, llm_client=None, pro_agent=None, con_agent=None,
@@ -54,7 +102,7 @@ class DebateOrchestrator:
         self.moderator    = moderator    or Moderator(self.client)
         self.summarizer       = Summarizer(self.client)
         self.claim_decomposer = ClaimDecomposer(self.client)
-        self.checkpointer = MemorySaver()
+        self.checkpointer = get_checkpointer()
         self.graph        = self._build_graph()
         self._closed      = False
 

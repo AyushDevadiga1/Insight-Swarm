@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 import sys
 import uuid
+import os
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -69,14 +71,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# Allowed CORS origins — env-overridable (comma-separated). Defaults to local dev.
+def _cors_origins() -> list:
+    raw = os.getenv("ALLOWED_ORIGINS", "")
+    if raw.strip():
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return [
         "http://localhost:5173",   # Vite dev server
         "http://127.0.0.1:5173",
         "http://localhost:3000",   # CRA / other
         "http://127.0.0.1:3000",
-    ],
+    ]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -86,11 +96,24 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# ── Request / response models ─────────────────────────────────────────────────
+# ── Shared orchestrator (reuse expensive init across requests) ────────────────
+# Previously a new DebateOrchestrator was built per request (loading the
+# embedding model + LLM clients every time). We now cache a single instance so
+# the lifespan pre-warm (and all endpoints) reuse it. LangGraph thread state is
+# isolated per thread_id, and the shared SQLite checkpointer makes HITL resume
+# work across requests (see src/orchestration/debate.py:get_checkpointer).
+_orchestrator_instance = None
+_orchestrator_lock = threading.Lock()
+
 
 def get_orchestrator() -> DebateOrchestrator:
-    """Instantiate a new thread-safe orchestrator per request."""
-    return DebateOrchestrator()
+    """Return the shared, lazily-initialised DebateOrchestrator (thread-safe)."""
+    global _orchestrator_instance
+    if _orchestrator_instance is None:
+        with _orchestrator_lock:
+            if _orchestrator_instance is None:
+                _orchestrator_instance = DebateOrchestrator()
+    return _orchestrator_instance
 
 
 # ── Request / response models ─────────────────────────────────────────────────
@@ -408,7 +431,7 @@ def resume_debate(thread_id: str, human_input: ResumeRequest, orchestrator: Deba
         raise HTTPException(status_code=404, detail="Thread state not found")
         
     state_vals = current_state.values
-    overrides = human_input.dict()
+    overrides = human_input.model_dump()
     
     for source_url, new_rating in overrides.get("source_overrides", {}).items():
         for result in state_vals.get("verification_results", []):
