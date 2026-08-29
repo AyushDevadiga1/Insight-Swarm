@@ -1,0 +1,72 @@
+**/__pycache__/
+.venv
+.vscode
+.pyre_configuration
+
+# Sensitive .env file
+.env
+.pytest_cache
+.streamlit/secrets.toml
+.qodo
+
+# Have vulnerabilities 
+Prerequisities.md
+Week1_Implementation_Guide.md
+
+# Best Phase 1 
+# stable1 = b54ea2bf44b5c63358519618ace2b489c91b0b51
+
+# Local utilities and temp files
+*.txt
+*.log
+*.db
+!requirements.txt
+!requirements-dev.txt
+!docs/audit.txt
+!docs/BUG_FIXES.txt
+
+# Node modules
+frontend/node_modules
+api_check.py
+tmp_check.py
+CODEBASE_STATUS.md
+insightswarm_graph.db-shm
+insightswarm_graph.db-wal
+tests/red_team_results.json
+
+# Future plans 
+frontend_revamp
+
+# Fixes
+fixes
+git_diff.patch
+
+#Automation scripts
+commit_days.bat
+
+#Legacy
+.streamlit
+
+# CI/CD
+backups/
+
+# Build output
+frontend/dist/
+
+# Deliverables / process artifacts (purged from version control — Action 8)
+paper/
+report/
+progress/
+planning/
+outputs/
+assets/
+resources/
+documentation/
+*.pdf
+page_source.html
+
+# Skills
+diagonise-repo.md
+
+# Improvement plans
+improvement-plan-to-10.md

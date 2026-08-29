@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check src api tests --exclude "tests/sandbox"
+
+      - name: Type-check (pyright)
+        run: pyright
+
+      - name: Security scan (bandit)
+        run: bandit -q -r src api -x "*/tests/*" -ll
+
+      - name: Run unit tests with coverage
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          SEMANTIC_CACHE_ENABLED: "0"
+          PYTEST_CURRENT_TEST: "1"
+        run: |
+          pytest tests/unit/ -v --tb=short --timeout=60 --cov=src --cov-report=xml --cov-report=term --cov-fail-under=50
+
+      - name: Run smoke test (single claim, no API)
+        run: |
+          python -c "
+          from src.orchestration.cache import SemanticCache
+          from src.core.models import DebateState
+          s = DebateState(claim='test', verdict='TRUE', confidence=0.9)
+          print('Smoke test passed:', s.verdict)
+          "
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
