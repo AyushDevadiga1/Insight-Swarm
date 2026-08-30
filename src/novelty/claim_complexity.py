@@ -24,9 +24,9 @@ Application:
 - Guides human-in-the-loop decisions (when to request expert review)
 """
 
-import re
 import logging
-from typing import Dict, Any, List, Tuple
+import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ class ClaimComplexityEstimator:
         
         return entities
     
-    def detect_domain(self, claim: str) -> Tuple[str, int]:
+    def detect_domain(self, claim: str) -> tuple[str, int]:
         """
         Detect technical domain and count domain-specific terms.
         Novel: Domain detection for complexity assessment.
@@ -103,10 +103,10 @@ class ClaimComplexityEstimator:
         if not domain_scores:
             return "general", 0
         
-        dominant_domain = max(domain_scores, key=domain_scores.get)
+        dominant_domain = max(domain_scores, key=lambda d: domain_scores[d])
         return dominant_domain, domain_scores[dominant_domain]
     
-    def detect_complexity_markers(self, claim: str) -> Dict[str, int]:
+    def detect_complexity_markers(self, claim: str) -> dict[str, int]:
         """Count different types of complexity indicators."""
         claim_lower = claim.lower()
         marker_counts = {}
@@ -221,7 +221,7 @@ class ClaimComplexityEstimator:
         # Default: moderate evidence availability
         return 0.5
     
-    def estimate_complexity(self, claim: str) -> Dict[str, Any]:
+    def estimate_complexity(self, claim: str) -> dict[str, Any]:
         """
         Main complexity estimation method.
         
@@ -285,7 +285,7 @@ class ClaimComplexityEstimator:
         }
     
     def adjust_debate_parameters(self, base_rounds: int, base_sources: int,
-                                 complexity_profile: Dict) -> Dict[str, int]:
+                                 complexity_profile: dict) -> dict[str, int | str]:
         """
         Novel: Adjust debate parameters based on complexity.
         

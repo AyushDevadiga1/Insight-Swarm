@@ -26,16 +26,15 @@ Output files (in outputs/):
 Run scripts/download_fever.py first to get the data.
 """
 
-import sys
-import os
-import json
-import time
-import re
 import argparse
+import json
 import logging
+import sys
+import time
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Any, List, Tuple, Optional
-from dataclasses import dataclass, asdict
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).parent.parent
@@ -91,11 +90,11 @@ class ClaimResult:
     correct:          bool
     partial_credit:   float      # 0.0 or 0.5 for PARTIALLY TRUE on TRUE/FALSE claims
     latency_s:        float
-    error:            Optional[str] = None
-    metrics:          Optional[Dict] = None
+    error:            str | None = None
+    metrics:          dict | None = None
 
 
-def compute_metrics(results: List[ClaimResult]) -> Dict[str, Any]:
+def compute_metrics(results: list[ClaimResult]) -> dict[str, Any]:
     """Compute precision, recall, F1, accuracy on binary TRUE/FALSE claims."""
     # Filter to binary (exclude NEI claims for primary metrics)
     binary = [r for r in results if r.fever_label in ("SUPPORTS", "REFUTES")]
@@ -163,7 +162,7 @@ class KeywordBaseline:
         "myth", "hoax", "disproven", "debunked",
     ]
 
-    def predict(self, claim: str) -> Tuple[str, float]:
+    def predict(self, claim: str) -> tuple[str, float]:
         claim_lower = claim.lower()
         neg_hits = sum(1 for kw in self.NEGATIVE_KEYWORDS if kw in claim_lower)
         if neg_hits >= 2:
@@ -191,7 +190,7 @@ class SingleAgentBaseline:
             llm_client = FreeLLMClient()
         self.client = llm_client
 
-    def predict(self, claim: str) -> Tuple[str, float]:
+    def predict(self, claim: str) -> tuple[str, float]:
         prompt = (
             f"Is the following claim TRUE, FALSE, or PARTIALLY TRUE?\n"
             f"Claim: {claim}\n\n"
@@ -215,12 +214,12 @@ class SingleAgentBaseline:
 # ── InsightSwarm runner ───────────────────────────────────────────────────────
 
 def run_insightswarm_benchmark(
-    claims: List[Dict],
-    n: Optional[int] = None,
+    claims: list[dict],
+    n: int | None = None,
     quick: bool = False,
-) -> List[ClaimResult]:
-    from src.orchestration.debate import DebateOrchestrator
+) -> list[ClaimResult]:
     from src.llm.client import FreeLLMClient
+    from src.orchestration.debate import DebateOrchestrator
 
     client = FreeLLMClient()
     orch   = DebateOrchestrator(client)
@@ -292,9 +291,9 @@ def run_insightswarm_benchmark(
 # ── Baseline runner ───────────────────────────────────────────────────────────
 
 def run_baseline_benchmark(
-    claims: List[Dict],
-    n: Optional[int] = None,
-) -> Dict[str, List[ClaimResult]]:
+    claims: list[dict],
+    n: int | None = None,
+) -> dict[str, list[ClaimResult]]:
 
     sample   = claims[:n] if n else claims
     keyword  = KeywordBaseline()

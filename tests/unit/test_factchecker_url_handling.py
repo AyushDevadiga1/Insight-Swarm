@@ -1,8 +1,6 @@
 import logging
 from types import SimpleNamespace
-from typing import cast, List
-
-import pytest
+from typing import cast
 
 from src.agents.fact_checker import FactChecker
 from src.core.models import DebateState

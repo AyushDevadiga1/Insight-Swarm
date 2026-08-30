@@ -1,10 +1,11 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
 from src.agents.moderator import Moderator
+from src.core.models import DebateState
 from src.orchestration.debate import DebateOrchestrator
-from src.utils.claim_decomposer import ClaimDecomposer
-from src.core.models import DebateState, SourceVerification
 from src.resilience.circuit_breaker import CircuitBreaker, CircuitState
+from src.utils.claim_decomposer import ClaimDecomposer
+
 
 def test_trust_weighted_verdicts():
     """Verify trust scores are passed to moderator and influence analysis."""
@@ -25,7 +26,6 @@ def test_trust_weighted_verdicts():
         mod.generate(state)
         
         args, kwargs = mock_prompt.call_args
-        prompt_text = args[0].model_dump_json() # DebateState dump
         assert "Trust: 0.95" in str(args) or "0.95" in str(args)
 
 def test_claim_decomposition_logic():

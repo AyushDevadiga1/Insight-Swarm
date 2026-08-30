@@ -3,14 +3,18 @@ Unit test: ProAgent and ConAgent logic check.
 """
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-import pytest
 from unittest.mock import Mock
-from src.agents.pro_agent import ProAgent
+
+import pytest
+
 from src.agents.con_agent import ConAgent
-from src.core.models import DebateState, AgentResponse
+from src.agents.pro_agent import ProAgent
+from src.core.models import AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
+
 
 @pytest.fixture
 def debate_setup():

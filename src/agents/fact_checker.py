@@ -1,21 +1,25 @@
 """
 src/agents/fact_checker.py — Final production version. All batches applied.
 """
-import logging, random, re, threading, time, atexit as _atexit
-from src.novelty import get_contradiction_detector
-
-from typing import List, Optional, Tuple, Any
+import atexit as _atexit
+import concurrent.futures
+import logging
+import random
+import re
+import threading
+import time
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import requests
-import concurrent.futures
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
-from src.agents.base import BaseAgent, AgentResponse, DebateState
+from src.agents.base import AgentResponse, BaseAgent, DebateState
+from src.config import FactCheckerConfig
 from src.core.models import SourceVerification
+from src.novelty import get_contradiction_detector
 from src.utils.temporal_verifier import TemporalVerifier
 from src.utils.trust_scorer import TrustScorer
-from src.config import FactCheckerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +35,7 @@ _USER_AGENTS = [
 
 
 class FactChecker(BaseAgent):
-    def __init__(self, llm_client, preferred_provider: Optional[str] = None):
+    def __init__(self, llm_client, preferred_provider: str | None = None):
         super().__init__(llm_client)
         self.role               = "FACT_CHECKER"
         self.preferred_provider = preferred_provider or "groq"
@@ -59,7 +63,7 @@ class FactChecker(BaseAgent):
 
     def generate(self, state: DebateState) -> AgentResponse:
         logger.info("FactChecker verifying all debate sources...")
-        all_sources: List[Tuple[str, str, str]] = []
+        all_sources: list[tuple[str, Literal["PRO", "CON"], str]] = []
 
         for i, round_sources in enumerate(state.pro_sources):
             argument = state.pro_arguments[i] if i < len(state.pro_arguments) else ""
@@ -73,7 +77,7 @@ class FactChecker(BaseAgent):
                 if isinstance(url, str) and url.strip():
                     all_sources.append((url, "CON", argument))
 
-        results: List[SourceVerification] = []
+        results: list[SourceVerification] = []
 
         if all_sources:
             claim_embedding = None
@@ -142,8 +146,8 @@ class FactChecker(BaseAgent):
                                      "Accept-Language": "en-US,en;q=0.5", "DNT": "1",
                                      "Connection": "keep-alive", "Upgrade-Insecure-Requests": "1"})
 
-    def _verify_url(self, url: str, agent: str, claim: str = "",
-                    claim_embedding: Any = None, state: Optional[DebateState] = None) -> SourceVerification:
+    def _verify_url(self, url: str, agent: Literal["PRO", "CON"], claim: str = "",
+                    claim_embedding: Any = None, state: DebateState | None = None) -> SourceVerification:
         try:
             if not isinstance(url, str):
                 return SourceVerification(url=str(url), status="INVALID_URL", agent_source=agent, error="Non-string URL")
@@ -196,7 +200,7 @@ class FactChecker(BaseAgent):
             logger.exception("Unexpected error verifying %r", url)
             return SourceVerification(url=str(url), status="ERROR", agent_source=agent, error=str(e))
 
-    def _process_content(self, url: str, content: str, agent: str,
+    def _process_content(self, url: str, content: str, agent: Literal["PRO", "CON"],
                          claim: str = "", claim_embedding: Any = None) -> SourceVerification:
         if claim and re.search(r"\b(?:19|20)\d{2}\b", claim):
             is_aligned, msg = TemporalVerifier().verify_alignment(claim, content)
@@ -214,8 +218,8 @@ class FactChecker(BaseAgent):
             candidates = [s for _, s in scored[:5]]
 
             if candidates:
-                from sklearn.metrics.pairwise import cosine_similarity
                 import numpy as np
+                from sklearn.metrics.pairwise import cosine_similarity
                 query_emb     = claim_embedding if claim_embedding is not None else self.model.encode([claim])
                 sims          = cosine_similarity(query_emb, self.model.encode(candidates))[0]
                 max_sim       = float(np.max(sims))

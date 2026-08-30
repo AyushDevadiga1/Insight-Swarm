@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Simple test script to validate LLM client import and basic functionality"""
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 try:

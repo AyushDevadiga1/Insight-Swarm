@@ -9,14 +9,14 @@ Provides:
 """
 
 import os
+
 os.environ.setdefault("ENABLE_OFFLINE_FALLBACK", "1")
 os.environ.setdefault("GROQ_API_KEY",   "gsk_ci_placeholder_not_real_key_abcdefgh")
 os.environ.setdefault("GEMINI_API_KEY",  "AIzaSy_ci_placeholder_not_real_key_xyz")
 
-import pytest
 import logging
-from typing import Generator
 
+import pytest
 
 # Configure logging for tests
 logging.basicConfig(

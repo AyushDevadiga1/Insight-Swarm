@@ -2,14 +2,15 @@
 src/resilience/fallback_handler.py — Final production version.
 """
 import logging
-from typing import Callable, Any, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class FallbackHandler:
     @staticmethod
-    def execute(operations: List[Callable[[], Any]], graceful_fallback: Optional[Callable[[], Any]] = None) -> Any:
+    def execute(operations: list[Callable[[], Any]], graceful_fallback: Callable[[], Any] | None = None) -> Any:
         """Try each operation in order. If all fail, call graceful_fallback or re-raise."""
         last_exc = None
         for i, op in enumerate(operations):

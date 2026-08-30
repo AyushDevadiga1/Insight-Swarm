@@ -3,22 +3,20 @@ src/llm/client.py — Final production version.
 FIXED: GEMINI_MODEL updated from deprecated gemini-2.0-flash (retired March 2026)
        to gemini-2.5-flash which is the current free-tier model.
 """
-from pydantic import BaseModel
-from typing import Type, Any, Optional
-import os, re, threading, logging, time, hashlib, json
-from dotenv import load_dotenv
+import hashlib
+import json
+import logging
+import os
+import re
+import threading
+import time
+from typing import Any
 
-try:
-    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
-    HAS_TENACITY = True
-except ImportError:
-    HAS_TENACITY = False
-    def retry(*a, **k):
-        def d(f): return f
-        return d
-    def stop_after_attempt(*a, **k): return None
-    def wait_exponential(*a, **k):   return None
-    def retry_if_exception(*a, **k): return None
+from dotenv import load_dotenv
+from pydantic import BaseModel
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+
+HAS_TENACITY = True
 
 try:
     import requests
@@ -49,8 +47,8 @@ def _get_schema_json(output_schema) -> str:
         _SCHEMA_CACHE[key] = json.dumps(output_schema.model_json_schema(), indent=2)
     return _SCHEMA_CACHE[key]
 
-from src.utils.api_key_manager import get_api_key_manager
 from src.resilience.circuit_breaker import CircuitBreaker
+from src.utils.api_key_manager import get_api_key_manager
 
 _PROVIDER_COOLDOWN_SECONDS = 90
 
@@ -63,7 +61,7 @@ _circuit_breakers = {
 
 
 class RateLimitError(RuntimeError):
-    def __init__(self, provider: str, message: str, retry_after: Optional[float] = None):
+    def __init__(self, provider: str, message: str, retry_after: float | None = None):
         super().__init__(message)
         self.provider    = provider
         self.retry_after = retry_after
@@ -105,7 +103,7 @@ class FreeLLMClient:
         self.openrouter_last_call_times = []
         self._counter_lock = threading.Lock()
         self.groq_error = self.gemini_error = self.cerebras_error = self.openrouter_error = None
-        self._preferred_provider: Optional[str] = None
+        self._preferred_provider: str | None = None
         self._init_providers()
 
     # ── Provider availability ─────────────────────────────────────────────────
@@ -175,14 +173,14 @@ class FreeLLMClient:
         return any(kw in text for kw in
                    ("rate limit","rate_limit","resource_exhausted","429","quota","too many"))
 
-    def _provider_order(self, preferred_provider: Optional[str] = None) -> list:
+    def _provider_order(self, preferred_provider: str | None = None) -> list:
         order = ["groq","gemini","cerebras","openrouter"]
         pref  = preferred_provider or self._preferred_provider
         if pref and pref in order:
             order.remove(pref); order.insert(0, pref)
         return order
 
-    def _extract_retry_after(self, message: str) -> Optional[float]:
+    def _extract_retry_after(self, message: str) -> float | None:
         for pattern in (r"retry in\s*([0-9]+(?:\.[0-9]+)?)s",
                         r"retrydelay':\s*'([0-9]+)s'",
                         r"retry-after[:\s]+([0-9]+)"):
@@ -250,9 +248,9 @@ class FreeLLMClient:
 
     # ── call_structured ───────────────────────────────────────────────────────
 
-    def call_structured(self, prompt: str, output_schema: Type[BaseModel],
+    def call_structured(self, prompt: str, output_schema: type[BaseModel],
                         temperature: float = 0.7, max_tokens: int = 1000,
-                        max_retries: int = 2, preferred_provider: Optional[str] = None) -> Any:
+                        max_retries: int = 2, preferred_provider: str | None = None) -> Any:
         from pydantic import ValidationError as PydanticValidationError
 
         schema_json = _get_schema_json(output_schema)
@@ -322,7 +320,7 @@ class FreeLLMClient:
     # ── call (plain text) ─────────────────────────────────────────────────────
 
     def call(self, prompt: str, temperature: float = 0.7, max_tokens: int = 1000,
-             timeout: int = 30, preferred_provider: Optional[str] = None) -> str:
+             timeout: int = 30, preferred_provider: str | None = None) -> str:
         self._validate_prompt(prompt)
         last_error = None; attempted_any = False
 

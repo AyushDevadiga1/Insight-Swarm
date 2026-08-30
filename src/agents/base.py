@@ -3,7 +3,8 @@ src/agents/base.py — All batches applied. Final production version.
 """
 import logging
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from src.core.models import AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
 
@@ -24,7 +25,7 @@ class BaseAgent(ABC):
     def _build_prompt(self, state: DebateState, round_num: int) -> str:
         raise NotImplementedError
 
-    def _format_evidence(self, evidence_bundle: Optional[List[Dict[str, Any]]]) -> str:
+    def _format_evidence(self, evidence_bundle: list[dict[str, Any]] | None) -> str:
         if not evidence_bundle:
             return (
                 "No pre-fetched evidence available. "
@@ -39,7 +40,7 @@ class BaseAgent(ABC):
             lines.append(f"- {title} ({url}): {content}...")
         return "\n".join(lines)
 
-    def _sanitize_sources(self, sources: Optional[List[str]]) -> List[str]:
+    def _sanitize_sources(self, sources: list[str] | None) -> list[str]:
         if not sources:
             return []
         try:

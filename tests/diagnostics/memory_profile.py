@@ -1,10 +1,10 @@
+import gc
+import logging
 import os
 import sys
-import time
-import gc
-import psutil
-import logging
 from pathlib import Path
+
+import psutil
 
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))

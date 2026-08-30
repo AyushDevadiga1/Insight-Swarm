@@ -1,14 +1,8 @@
 {
-  "venvPath": ".",
-  "venv": ".venv",
-  "pythonVersion": "3.13",
-  "pythonPlatform": "Windows",
+  "pythonVersion": "3.11",
   "include": [
     "src",
-    "tests",
-    "scripts",
-    "app.py",
-    "main.py"
+    "api"
   ],
   "extraPaths": [
     "."

@@ -13,36 +13,36 @@ Run with:
 
 from __future__ import annotations
 
+import json
 import logging
-import sys
-import uuid
 import os
+import sys
 import threading
+import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-import json
-import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 # ── Path setup so imports from root work ─────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from main import validate_claim
-from src.orchestration.debate import DebateOrchestrator
-from src.core.models import DebateState
-from src.orchestration.cache import record_feedback
-from src.llm.client import RateLimitError
-from fastapi import WebSocket, WebSocketDisconnect, Depends
-from api.websocket_hitl import hitl_manager
-
+from fastapi import Depends, WebSocket, WebSocketDisconnect
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+
+from api.websocket_hitl import hitl_manager
+from main import validate_claim
+from src.core.models import DebateState
+from src.llm.client import RateLimitError
+from src.orchestration.cache import record_feedback
+from src.orchestration.debate import DebateOrchestrator
 
 logger = logging.getLogger("insightswarm.api")
 logging.basicConfig(level=logging.INFO)
@@ -94,7 +94,7 @@ app.add_middleware(
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]  # FastAPI handler typing
 
 # ── Shared orchestrator (reuse expensive init across requests) ────────────────
 # Previously a new DebateOrchestrator was built per request (loading the
@@ -130,7 +130,7 @@ class FeedbackRequest(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _state_to_dict(state: Any) -> Dict[str, Any]:
+def _state_to_dict(state: Any) -> dict[str, Any]:
     """Convert DebateState (Pydantic model or dict) to a plain dict."""
     if hasattr(state, "model_dump"):
         return state.model_dump()
@@ -149,7 +149,7 @@ def _safe_list(val: Any) -> list:
     return list(val)
 
 
-def _normalise(raw: Dict[str, Any]) -> Dict[str, Any]:
+def _normalise(raw: dict[str, Any]) -> dict[str, Any]:
     """Ensure all expected keys exist with sensible defaults."""
     return {
         "claim": raw.get("claim", ""),
@@ -213,12 +213,12 @@ def root():
 
 
 @app.get("/health")
-def health() -> Dict[str, str]:
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/api/status")
-async def api_status() -> Dict[str, Any]:
+async def api_status() -> dict[str, Any]:
     """Return live health status for all configured LLM providers."""
     from src.monitoring.api_status import get_health_monitor
     monitor = get_health_monitor()
@@ -227,9 +227,11 @@ async def api_status() -> Dict[str, Any]:
 
 @app.get("/stream")
 @limiter.limit("10/minute")
-async def stream_debate(request: Request, claim: str, thread_id: str = None, orch: DebateOrchestrator = Depends(get_orchestrator)):
+async def stream_debate(request: Request, claim: str, thread_id: str | None = None, orch: DebateOrchestrator = Depends(get_orchestrator)):
     """SSE endpoint for real-time debate progress."""
-    import asyncio, threading, queue as _queue
+    import asyncio
+    import queue as _queue
+    import threading
     
     if not thread_id:
         thread_id = str(uuid.uuid4())
@@ -349,7 +351,7 @@ async def stream_debate(request: Request, claim: str, thread_id: str = None, orc
                 item = await asyncio.get_event_loop().run_in_executor(None, q.get, True, 1.0)
                 last_heartbeat = time.time()
                 if item is None:
-                    yield f"event: done\ndata: {{\"message\":\"complete\"}}\n\n"
+                    yield "event: done\ndata: {\"message\":\"complete\"}\n\n"
                     break
                 yield f"event: {item['type']}\ndata: {json.dumps(item['data'])}\n\n"
             except _queue.Empty:
@@ -372,7 +374,7 @@ async def stream_debate(request: Request, claim: str, thread_id: str = None, orc
 
 @app.post("/verify")
 @limiter.limit("10/minute")
-def verify(request: Request, req: VerifyRequest, orchestrator: DebateOrchestrator = Depends(get_orchestrator)) -> Dict[str, Any]:
+def verify(request: Request, req: VerifyRequest, orchestrator: DebateOrchestrator = Depends(get_orchestrator)) -> dict[str, Any]:
     claim = req.claim.strip()
 
     # ── Validate ──────────────────────────────────────────────────────────────
@@ -409,7 +411,7 @@ def verify(request: Request, req: VerifyRequest, orchestrator: DebateOrchestrato
 
 
 @app.post("/feedback")
-def feedback(req: FeedbackRequest) -> Dict[str, str]:
+def feedback(req: FeedbackRequest) -> dict[str, str]:
     try:
         record_feedback(req.claim, req.verdict, req.value)
         return {"status": "recorded"}
@@ -418,11 +420,11 @@ def feedback(req: FeedbackRequest) -> Dict[str, str]:
         raise HTTPException(status_code=500, detail=str(e))
 
 class ResumeRequest(BaseModel):
-    source_overrides: Dict[str, str] = {}
-    verdict_override: Optional[str] = None
+    source_overrides: dict[str, str] = {}
+    verdict_override: str | None = None
 
 @app.post("/api/debate/resume/{thread_id}")
-def resume_debate(thread_id: str, human_input: ResumeRequest, orchestrator: DebateOrchestrator = Depends(get_orchestrator)) -> Dict[str, Any]:
+def resume_debate(thread_id: str, human_input: ResumeRequest, orchestrator: DebateOrchestrator = Depends(get_orchestrator)) -> dict[str, Any]:
     """Resume debate after human intervention."""
     config = {"configurable": {"thread_id": thread_id}}
     

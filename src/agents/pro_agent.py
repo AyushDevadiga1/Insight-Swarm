@@ -3,18 +3,18 @@ src/agents/pro_agent.py — Final production version.
 FIXED: Non-quota fallback confidence changed from 0.3 → 0.5 (unknown/neutral)
        to match test_full_suite.py expectations and be more semantically correct.
 """
+import logging
 from datetime import datetime
-from typing import Optional
-from src.agents.base import BaseAgent, AgentResponse, DebateState
+
+from src.agents.base import AgentResponse, BaseAgent, DebateState
 from src.core.models import AgentArgumentResponse
 from src.llm.client import FreeLLMClient
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 class ProAgent(BaseAgent):
-    def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
+    def __init__(self, llm_client: FreeLLMClient, preferred_provider: str | None = None):
         super().__init__(llm_client)
         self.role               = "PRO"
         self.preferred_provider = preferred_provider or "groq"

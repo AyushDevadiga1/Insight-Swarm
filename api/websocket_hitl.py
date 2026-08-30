@@ -1,12 +1,12 @@
-from fastapi import WebSocket, WebSocketDisconnect
-from typing import Dict
 import logging
+
+from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
 class HITLConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
+        self.active_connections: dict[str, WebSocket] = {}
     
     async def connect(self, thread_id: str, websocket: WebSocket):
         await websocket.accept()

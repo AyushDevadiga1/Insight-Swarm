@@ -1,8 +1,10 @@
 """
 src/utils/tavily_retriever.py — Final production version.
 """
-import os, logging, threading
-from typing import List, Dict, Any, Optional
+import logging
+import os
+import threading
+from typing import Any
 
 try:
     from tavily import TavilyClient
@@ -38,7 +40,7 @@ def _is_safe_url(url: str) -> bool:
 
 
 class TavilyEvidenceRetriever:
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or os.getenv("TAVILY_API_KEY")
         if TavilyClient is None:
             logger.warning("Tavily client library not installed — retrieval disabled")
@@ -55,7 +57,7 @@ class TavilyEvidenceRetriever:
                 logger.error("Failed to initialize Tavily client: %s", e)
                 self.client = None
 
-    def search_adversarial(self, claim: str, max_results: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+    def search_adversarial(self, claim: str, max_results: int = 5) -> dict[str, list[dict[str, Any]]]:
         """Dual-sided search: one for supporting evidence, one for rebuttals.
         Falls back to Google Custom Search if Tavily is rate-limited or quota-exhausted."""
         if not self.client:
@@ -87,7 +89,7 @@ class TavilyEvidenceRetriever:
                 logger.error("Adversarial search failed: %s", e)
             return {"pro": [], "con": []}
 
-    def _google_fallback(self, claim: str, max_results: int) -> Dict[str, List[Dict[str, Any]]]:
+    def _google_fallback(self, claim: str, max_results: int) -> dict[str, list[dict[str, Any]]]:
         """Use Google Custom Search as fallback when Tavily is unavailable."""
         try:
             from src.utils.google_cse_retriever import get_google_cse_retriever
@@ -100,7 +102,7 @@ class TavilyEvidenceRetriever:
             logger.error("Google CSE fallback also failed: %s", e)
             return {"pro": [], "con": []}
 
-    def search_evidence(self, claim: str, max_results: int = 5) -> List[Dict[str, Any]]:
+    def search_evidence(self, claim: str, max_results: int = 5) -> list[dict[str, Any]]:
         if not self.client:
             return []
         try:
@@ -116,7 +118,7 @@ class TavilyEvidenceRetriever:
             logger.error("Tavily search failed: %s", e)
             return []
 
-    def get_relevant_sources(self, claim: str, num_sources: int = 3) -> List[str]:
+    def get_relevant_sources(self, claim: str, num_sources: int = 3) -> list[str]:
         return [item["url"] for item in self.search_evidence(claim, max_results=num_sources) if item["url"]]
 
 

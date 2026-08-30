@@ -70,3 +70,7 @@ diagonise-repo.md
 
 # Improvement plans
 improvement-plan-to-10.md
+
+# To ignore 
+error logs
+logs/*  

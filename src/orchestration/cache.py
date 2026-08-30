@@ -1,12 +1,17 @@
 """
 src/orchestration/cache.py — All batches applied. Final production version.
 """
-import sqlite3, json, logging, os, threading as _threading
-from typing import Optional, Dict, Any
+import json
+import logging
+import os
+import sqlite3
+import threading as _threading
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+
 try:
     from sentence_transformers import SentenceTransformer
     HAS_SENTENCE_TRANSFORMERS = True
@@ -68,7 +73,7 @@ class SemanticCache:
                     raise
         return self._model
 
-    def _encode(self, text: str) -> Optional[np.ndarray]:
+    def _encode(self, text: str) -> np.ndarray | None:
         try:
             return self.model.encode([text])[0]
         except Exception as e:
@@ -111,7 +116,7 @@ class SemanticCache:
         except Exception as e:
             logger.error("Failed to initialise cache DB: %s", e)
 
-    def get_verdict(self, claim: str, similarity_threshold: float = 0.85) -> Optional[Dict[str, Any]]:
+    def get_verdict(self, claim: str, similarity_threshold: float = 0.85) -> dict[str, Any] | None:
         try:
             if not self.enabled: return None
             if not self._has_live_rows(): return None
@@ -165,7 +170,7 @@ class SemanticCache:
             return None
 
 
-    def set_verdict(self, claim: str, verdict_data: Dict[str, Any]):
+    def set_verdict(self, claim: str, verdict_data: dict[str, Any]):
         try:
             if not self.enabled: return
             embedding = self._encode(claim)
@@ -223,10 +228,10 @@ def get_cache() -> SemanticCache:
                 _cache_instance = SemanticCache()
     return _cache_instance
 
-def get_cached_verdict(claim: str) -> Optional[Dict[str, Any]]:
+def get_cached_verdict(claim: str) -> dict[str, Any] | None:
     return get_cache().get_verdict(claim)
 
-def set_cached_verdict(claim: str, verdict_data: Dict[str, Any]):
+def set_cached_verdict(claim: str, verdict_data: dict[str, Any]):
     return get_cache().set_verdict(claim, verdict_data)
 
 def record_feedback(claim: str, verdict: str, feedback_type: str):

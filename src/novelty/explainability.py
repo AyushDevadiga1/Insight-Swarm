@@ -26,8 +26,7 @@ Black-box fact-checkers erode trust. We show our work.
 """
 
 import logging
-from typing import Dict, Any, List, Tuple
-from collections import defaultdict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +48,7 @@ class ExplainabilityEngine:
             "expert_required": "Claim complexity requires expert review",
         }
     
-    def calculate_feature_importance(self, state: Dict, final_confidence: float) -> Dict[str, float]:
+    def calculate_feature_importance(self, state: dict, final_confidence: float) -> dict[str, float]:
         """
         Calculate which features most influenced the verdict.
         
@@ -96,11 +95,11 @@ class ExplainabilityEngine:
         if total > 0:
             normalized = {k: v / total for k, v in raw_scores.items()}
         else:
-            normalized = {k: 0.25 for k in raw_scores.keys()}
+            normalized = {k: 0.25 for k in raw_scores}
         
         return {k: round(v, 3) for k, v in normalized.items()}
     
-    def generate_counterfactual(self, state: Dict, feature: str) -> str:
+    def generate_counterfactual(self, state: dict, feature: str) -> str:
         """
         Generate counterfactual explanation.
         
@@ -125,7 +124,7 @@ class ExplainabilityEngine:
         
         return counterfactuals.get(feature, "Counterfactual not available for this feature")
     
-    def identify_decision_factors(self, state: Dict) -> List[Dict[str, Any]]:
+    def identify_decision_factors(self, state: dict) -> list[dict[str, Any]]:
         """
         Identify key factors that influenced the decision.
         
@@ -202,7 +201,7 @@ class ExplainabilityEngine:
         
         return factors
     
-    def generate_decision_path(self, state: Dict) -> List[str]:
+    def generate_decision_path(self, state: dict) -> list[str]:
         """
         Generate step-by-step decision path.
         
@@ -256,7 +255,7 @@ class ExplainabilityEngine:
         
         return path
     
-    def generate_explanation(self, state: Dict, level: str = "standard") -> Dict[str, Any]:
+    def generate_explanation(self, state: dict, level: str = "standard") -> dict[str, Any]:
         """
         Main explanation generation method.
         
@@ -277,7 +276,7 @@ class ExplainabilityEngine:
         decision_path = self.generate_decision_path(state)
         
         # Generate counterfactuals
-        top_feature = max(feature_importance, key=feature_importance.get)
+        top_feature = max(feature_importance, key=lambda f: feature_importance[f])
         counterfactual = self.generate_counterfactual(state, top_feature)
         
         # Generate natural language summary
@@ -295,7 +294,7 @@ class ExplainabilityEngine:
             "transparency_score": self._calculate_transparency_score(state),
         }
     
-    def _generate_summary(self, state: Dict, factors: List[Dict], level: str) -> str:
+    def _generate_summary(self, state: dict, factors: list[dict], level: str) -> str:
         """Generate natural language explanation summary."""
         verdict = state.get("verdict", "UNKNOWN")
         confidence = state.get("confidence", 0.5)
@@ -324,7 +323,7 @@ class ExplainabilityEngine:
         
         return "\n".join(summary_parts)
     
-    def _calculate_transparency_score(self, state: Dict) -> float:
+    def _calculate_transparency_score(self, state: dict) -> float:
         """
         Novel: Score how transparent the decision is (0.0 - 1.0).
         

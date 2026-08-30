@@ -3,15 +3,15 @@ Unit tests for Moderator Agent
 """
 
 import sys
-import logging
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from unittest.mock import MagicMock
+
 from src.agents.moderator import Moderator
 from src.core.models import DebateState, ModeratorVerdict
 from src.llm.client import FreeLLMClient
-from unittest.mock import MagicMock
 
 
 def test_moderator_analysis():
@@ -72,7 +72,7 @@ def test_moderator_analysis():
     print("\n2. Moderator Verdict:")
     print(f"\n   Agent:      {result['agent']}")
     print(f"   Confidence: {result['confidence']:.1%}")
-    print(f"\n   Reasoning:")
+    print("\n   Reasoning:")
     for line in result["argument"].split("\n"):
         print(f"   {line}")
 

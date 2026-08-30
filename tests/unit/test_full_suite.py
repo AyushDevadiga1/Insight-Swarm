@@ -6,10 +6,11 @@ _process_content, SETTLED_TRUTHS, claim_decomposer, trust_scorer, etc.)
 """
 import os
 import sys
-import pytest
-from unittest.mock import Mock, MagicMock, patch, call
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import MagicMock, Mock
+
+import pytest
 
 # CI-safe defaults — must come before any src import
 os.environ.setdefault("ENABLE_OFFLINE_FALLBACK", "1")
@@ -18,18 +19,15 @@ os.environ.setdefault("GEMINI_API_KEY",  "AIzaSy_ci_placeholder_abcdefghijklmnop
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-from src.core.models import (
-    AgentResponse, DebateState, ModeratorVerdict, SourceVerification, ConsensusResponse
-)
-from src.agents.pro_agent import ProAgent
 from src.agents.con_agent import ConAgent
-from src.agents.moderator import Moderator
 from src.agents.fact_checker import FactChecker
+from src.agents.moderator import Moderator
+from src.agents.pro_agent import ProAgent
+from src.core.models import AgentResponse, DebateState, ModeratorVerdict
 from src.llm.client import FreeLLMClient, RateLimitError
-from src.utils.trust_scorer import TrustScorer
 from src.utils.temporal_verifier import TemporalVerifier
+from src.utils.trust_scorer import TrustScorer
 from src.utils.url_helper import URLNormalizer
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIXTURES
@@ -865,6 +863,7 @@ class TestOrchestratorLogic:
         We patch FreeLLMClient so no API keys are needed.
         """
         from unittest.mock import MagicMock
+
         import src.orchestration.debate as debate_mod
 
         fake_client = MagicMock(spec=FreeLLMClient)

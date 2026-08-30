@@ -1,9 +1,10 @@
 """
 src/ui/streamlit_observable.py — Final production version.
 """
-import html, time
-from typing import Optional
+import html
+
 import streamlit as st
+
 from src.ui.progress_tracker import ProgressTracker, Stage
 
 
@@ -63,7 +64,10 @@ def render_stage_grid(tracker: ProgressTracker) -> None:
 
 def render_resource_monitor() -> None:
     try:
-        import psutil, os
+        import os
+
+        import psutil
+
         from src.resource.manager import get_resource_manager
         proc   = psutil.Process(os.getpid())
         rm     = get_resource_manager()

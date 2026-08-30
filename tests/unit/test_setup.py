@@ -3,8 +3,8 @@
 Day 1 Verification Script - Check if environment is properly set up
 """
 
-import sys
 import importlib.util
+import sys
 from pathlib import Path
 
 
@@ -97,10 +97,10 @@ def check_env_file():
     """Check if .env file exists"""
     env_path = Path(".env")
     if env_path.exists():
-        print(f"✅ File: .env")
+        print("✅ File: .env")
         return True
     else:
-        print(f"⚠️  File: .env - NOT FOUND (will be needed for API keys)")
+        print("⚠️  File: .env - NOT FOUND (will be needed for API keys)")
         return False
 
 

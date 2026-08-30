@@ -3,10 +3,9 @@ src/utils/validation.py — Final production version.
 Shared claim validation for both CLI (main.py) and UI (app.py).
 """
 import re
-from typing import Tuple
 
 
-def validate_claim(claim: str) -> Tuple[bool, str]:
+def validate_claim(claim: str) -> tuple[bool, str]:
     """
     Returns (True, "") if claim is acceptable.
     Returns (False, reason) if rejected.

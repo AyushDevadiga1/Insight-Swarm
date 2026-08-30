@@ -3,13 +3,16 @@ Unit tests for Moderator agent
 """
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-import pytest
 from unittest.mock import Mock
+
+import pytest
+
 from src.agents.moderator import Moderator
-from src.core.models import DebateState, AgentResponse, ModeratorVerdict
-from src.llm.client import FreeLLMClient
+from src.core.models import DebateState, ModeratorVerdict
+
 
 @pytest.fixture
 def mock_client():

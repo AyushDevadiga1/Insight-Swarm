@@ -26,30 +26,11 @@ These modules are integrated into the main debate orchestrator
 to enhance verdict quality and transparency.
 """
 
-from src.novelty.confidence_calibration import (
-    AdaptiveConfidenceCalibrator,
-    get_calibrator
-)
-
-from src.novelty.argumentation_analysis import (
-    ArgumentationAnalyzer,
-    get_argumentation_analyzer
-)
-
-from src.novelty.contradiction_detection import (
-    EvidenceContradictionDetector,
-    get_contradiction_detector
-)
-
-from src.novelty.claim_complexity import (
-    ClaimComplexityEstimator,
-    get_complexity_estimator
-)
-
-from src.novelty.explainability import (
-    ExplainabilityEngine,
-    get_explainability_engine
-)
+from src.novelty.argumentation_analysis import ArgumentationAnalyzer, get_argumentation_analyzer
+from src.novelty.claim_complexity import ClaimComplexityEstimator, get_complexity_estimator
+from src.novelty.confidence_calibration import AdaptiveConfidenceCalibrator, get_calibrator
+from src.novelty.contradiction_detection import EvidenceContradictionDetector, get_contradiction_detector
+from src.novelty.explainability import ExplainabilityEngine, get_explainability_engine
 
 __all__ = [
     # Calibration

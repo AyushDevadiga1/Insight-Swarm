@@ -3,12 +3,16 @@ Unit tests for FactChecker agent
 """
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from src.agents.fact_checker import FactChecker
-from src.core.models import DebateState, SourceVerification, AgentResponse
+from src.core.models import AgentResponse, DebateState
+
 
 @pytest.fixture
 def mock_llm_client():

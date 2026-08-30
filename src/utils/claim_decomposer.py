@@ -2,22 +2,23 @@
 src/utils/claim_decomposer.py — Final production version.
 """
 import logging
-from typing import List
+
 from pydantic import BaseModel
+
 from src.llm.client import FreeLLMClient
 
 logger = logging.getLogger(__name__)
 
 
 class ClaimsOutput(BaseModel):
-    claims: List[str]
+    claims: list[str]
 
 
 class ClaimDecomposer:
     def __init__(self, llm_client: FreeLLMClient):
         self.client = llm_client
 
-    def decompose(self, full_claim: str) -> List[str]:
+    def decompose(self, full_claim: str) -> list[str]:
         # Fast-exit: short claims with no conjunctions don't need decomposition
         words = full_claim.split()
         if len(words) < 10 and " and " not in full_claim.lower() and "," not in full_claim:

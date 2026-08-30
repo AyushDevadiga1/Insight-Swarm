@@ -1,10 +1,12 @@
 """
 src/utils/observable_logger.py — Final production version.
 """
-import logging, queue, threading
+import logging
+import queue
+import threading
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 
 class ObservableLogger:

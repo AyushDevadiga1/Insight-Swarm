@@ -30,10 +30,11 @@ Implementation:
 Uses Platt scaling with temperature parameter adjusted per claim type.
 """
 
-import numpy as np
 import logging
-from typing import Dict, Any, List, Tuple, Optional
 from collections import defaultdict
+from typing import Any
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class AdaptiveConfidenceCalibrator:
     """
     
     def __init__(self):
-        self.calibration_history: Dict[str, List[Tuple[float, bool]]] = defaultdict(list)
+        self.calibration_history: dict[str, list[tuple[float, bool]]] = defaultdict(list)
         # Claim type categories for calibration
         self.claim_types = {
             "factual": ["is", "was", "are", "were", "has", "have"],
@@ -65,7 +66,7 @@ class AdaptiveConfidenceCalibrator:
                 return ctype
         return "other"
     
-    def calculate_source_quality_score(self, verification_results: List[Dict]) -> float:
+    def calculate_source_quality_score(self, verification_results: list[dict]) -> float:
         """
         Calculate aggregate source quality from trust scores.
         Novel: Weighted by verification status (verified sources count more).
@@ -85,8 +86,8 @@ class AdaptiveConfidenceCalibrator:
             return float(geometric_mean)
         return 0.5
     
-    def calculate_debate_asymmetry(self, pro_args: List[str], con_args: List[str],
-                                   pro_sources: List[List[str]], con_sources: List[List[str]]) -> float:
+    def calculate_debate_asymmetry(self, pro_args: list[str], con_args: list[str],
+                                   pro_sources: list[list[str]], con_sources: list[list[str]]) -> float:
         """
         Measure how lopsided the debate is.
         Novel: Strong asymmetry → higher confidence in dominant side.
@@ -125,20 +126,16 @@ class AdaptiveConfidenceCalibrator:
         """
         # Red flags for underconfidence:
         # 1. Clear verdict (TRUE/FALSE) but low confidence
-        if verdict in ("TRUE", "FALSE") and raw_confidence < 0.6:
-            # Check if evidence supports higher confidence
-            if source_quality > 0.7 and debate_asymmetry > 0.5:
-                return True
+        if (verdict in ("TRUE", "FALSE") and raw_confidence < 0.6
+                and source_quality > 0.7 and debate_asymmetry > 0.5):
+            return True
         
         # 2. High source quality but moderate confidence
         if source_quality > 0.8 and raw_confidence < 0.7:
             return True
         
         # 3. Very lopsided debate but low confidence
-        if debate_asymmetry > 0.7 and raw_confidence < 0.65:
-            return True
-        
-        return False
+        return debate_asymmetry > 0.7 and raw_confidence < 0.65
     
     def apply_underconfidence_penalty(self, raw_confidence: float,
                                      source_quality: float,
@@ -166,9 +163,9 @@ class AdaptiveConfidenceCalibrator:
         return float(min(0.95, calibrated))
     
     def calibrate(self, raw_confidence: float, verdict: str, claim: str,
-                  verification_results: List[Dict], pro_args: List[str],
-                  con_args: List[str], pro_sources: List[List[str]],
-                  con_sources: List[List[str]]) -> Tuple[float, Dict[str, Any]]:
+                  verification_results: list[dict], pro_args: list[str],
+                  con_args: list[str], pro_sources: list[list[str]],
+                  con_sources: list[list[str]]) -> tuple[float, dict[str, Any]]:
         """
         Main calibration method.
         
@@ -221,7 +218,7 @@ class AdaptiveConfidenceCalibrator:
         """Update calibration history for future improvements."""
         self.calibration_history[claim_type].append((predicted_confidence, was_correct))
     
-    def get_calibration_stats(self, claim_type: Optional[str] = None) -> Dict[str, float]:
+    def get_calibration_stats(self, claim_type: str | None = None) -> dict[str, float]:
         """
         Calculate Expected Calibration Error (ECE) - research metric.
         

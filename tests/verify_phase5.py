@@ -4,11 +4,12 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.utils.trust_scorer import TrustScorer
+from src.core.models import DebateState
+from src.llm.client import FreeLLMClient
 from src.utils.claim_decomposer import ClaimDecomposer
 from src.utils.summarizer import Summarizer
-from src.llm.client import FreeLLMClient
-from src.core.models import DebateState
+from src.utils.trust_scorer import TrustScorer
+
 
 def test_trust_scorer():
     print("\n--- Testing TrustScorer ---")

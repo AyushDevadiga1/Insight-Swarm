@@ -3,13 +3,17 @@ Unit tests for ConAgent
 """
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-import pytest
 from unittest.mock import Mock
+
+import pytest
+
 from src.agents.con_agent import ConAgent
-from src.core.models import DebateState, AgentResponse
+from src.core.models import AgentResponse, DebateState
 from src.llm.client import FreeLLMClient
+
 
 @pytest.fixture
 def mock_client():

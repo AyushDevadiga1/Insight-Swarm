@@ -8,9 +8,11 @@ FIXED: Removed tests for temperature/max_tokens/timeout validation
 
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 import pytest
+
 from src.llm.client import FreeLLMClient
 
 RUN_LLM_TESTS = os.getenv("RUN_LLM_TESTS", "").strip().lower() in ("1", "true", "yes")

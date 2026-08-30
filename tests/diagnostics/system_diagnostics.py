@@ -7,10 +7,10 @@ Usage:
     python tests/diagnostics/system_diagnostics.py
 """
 
+import gc
 import os
 import sys
 import time
-import gc
 import tracemalloc
 from pathlib import Path
 
@@ -153,7 +153,7 @@ class SystemDiagnostics:
                 self.results["memory_leak"] = "FAIL"
                 self.issues.append(f"Memory leak: +{growth:.0f}MB")
             else:
-                print(f"  ✅  No significant leak")
+                print("  ✅  No significant leak")
                 self.results["memory_leak"] = "OK"
         except Exception as exc:
             print(f"  ❌  FAILED: {exc}")
@@ -170,11 +170,11 @@ class SystemDiagnostics:
             print(f"  Init time: {init_time:.2f}s")
 
             if init_time > 10:
-                print(f"  ❌  CRITICAL: init >10s")
+                print("  ❌  CRITICAL: init >10s")
                 self.results["orch_init"] = "SLOW"
                 self.issues.append("Orchestrator init >10s")
             else:
-                print(f"  ✅  Init OK")
+                print("  ✅  Init OK")
                 self.results["orch_init"] = "OK"
 
             print("  Running 'The Earth is round'...")

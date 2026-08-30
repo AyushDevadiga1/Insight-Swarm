@@ -1,7 +1,9 @@
-import pytest
-import numpy as np
 import json
+
+import pytest
+
 from src.novelty.confidence_calibration import get_calibrator
+
 
 @pytest.fixture
 def calibrator():

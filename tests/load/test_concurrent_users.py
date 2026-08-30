@@ -8,10 +8,9 @@ By default these tests use the DummyClient (no real API calls).
 Set RUN_INTEGRATION_LLM=1 to run against live providers.
 """
 
-import os
-import time
-import threading
 import logging
+import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pytest
@@ -114,8 +113,9 @@ def test_10_concurrent_users():
 def test_memory_stability_20_runs():
     """Run the orchestrator 20 times sequentially and assert memory is stable."""
     try:
-        import psutil
         import os as _os
+
+        import psutil
         process = psutil.Process(_os.getpid())
         track_mem = True
     except ImportError:

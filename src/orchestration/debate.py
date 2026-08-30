@@ -7,12 +7,18 @@ BUG FIXES (D23): added close(), fixed contradiction detection, fixed None-guard 
 IMPROVEMENT PLAN (10/10): shared SQLite-backed checkpointer so HITL /resume works
 across orchestrator instances (previously in-process MemorySaver per instance).
 """
-import sys, logging, json, re, os, threading, sqlite3
+import json
+import logging
+import os
+import re
+import sqlite3
+import sys
+import threading
 from pathlib import Path
-from typing import Optional, Literal, Any
+from typing import Any, Literal, cast
 
-from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -23,18 +29,17 @@ except Exception:  # pragma: no cover - optional dependency
     SqliteSaver = None  # type: ignore
     HAS_SQLITE_CHECKPOINT = False
 
-from src.core.models import DebateState, AgentResponse, ConsensusResponse
-from src.llm.client import RateLimitError
-from src.agents.pro_agent import ProAgent
 from src.agents.con_agent import ConAgent
 from src.agents.fact_checker import FactChecker
 from src.agents.moderator import Moderator
-from src.orchestration.cache import get_cached_verdict, set_cached_verdict, get_cache
-from src.utils.tavily_retriever import get_tavily_retriever
-from src.utils.claim_decomposer import ClaimDecomposer
-from src.utils.summarizer import Summarizer
+from src.agents.pro_agent import ProAgent
+from src.core.models import ConsensusResponse, DebateState
 from src.llm.client import FreeLLMClient, RateLimitError
 from src.novelty import get_complexity_estimator, get_explainability_engine
+from src.orchestration.cache import get_cache, set_cached_verdict
+from src.utils.claim_decomposer import ClaimDecomposer
+from src.utils.summarizer import Summarizer
+from src.utils.tavily_retriever import get_tavily_retriever
 from src.utils.url_helper import URLNormalizer
 
 logger = logging.getLogger(__name__)
@@ -64,7 +69,7 @@ def _create_checkpointer():
     # We deliberately construct the saver from a raw connection (NOT the
     # from_conn_string context manager) so it stays open for the process
     # lifetime, allowing any orchestrator instance to read/write thread state.
-    from langgraph.checkpoint.sqlite import SqliteSaver as _SS  # noqa: F811
+    from langgraph.checkpoint.sqlite import SqliteSaver as _SS
     _conn = sqlite3.connect(_CHECKPOINT_DB, check_same_thread=False)
     _conn.execute("PRAGMA journal_mode=WAL")
     _conn.execute("PRAGMA busy_timeout=15000")
@@ -267,7 +272,9 @@ class DebateOrchestrator:
 
     def _should_continue(self, state: DebateState) -> Literal["continue", "end"]:
         if isinstance(state, dict):
-            return "end" if state.get("round", 1) > state.get("num_rounds", 3) else "continue"
+            r = cast(int, state.get("round", 1) or 1)
+            n = cast(int, state.get("num_rounds", 3) or 3)
+            return "end" if r > n else "continue"
         return "end" if state.round > state.num_rounds else "continue"
 
     def _should_retry(self, state: DebateState) -> Literal["retry", "proceed"]:
@@ -275,9 +282,8 @@ class DebateOrchestrator:
         last_con = state.con_arguments[-1] if state.con_arguments else ""
         if "[API_FAILURE]" in last_pro or "[API_FAILURE]" in last_con:
             return "proceed"
-        if (state.pro_verification_rate or 0) < 0.3 or (state.con_verification_rate or 0) < 0.3:
-            if state.retry_count < 1:
-                return "retry"
+        if ((state.pro_verification_rate or 0) < 0.3 or (state.con_verification_rate or 0) < 0.3) and state.retry_count < 1:
+            return "retry"
         return "proceed"
 
     def _retry_revision_node(self, state: DebateState) -> DebateState:
@@ -351,9 +357,9 @@ class DebateOrchestrator:
         self._set_stage("MODERATOR", "Analysing debate quality...")
         try:
             response                  = self.moderator.generate(state)
-            state.verdict             = response.verdict
+            state.verdict             = response.verdict  # type: ignore[assignment]  # None handled downstream
             state.confidence          = response.confidence
-            state.moderator_reasoning = response.reasoning
+            state.moderator_reasoning = response.reasoning  # type: ignore[assignment]  # None handled downstream
             # BUG FIX: merge instead of replace so 'consensus' key is not lost
             if state.metrics is None:
                 state.metrics = {}
@@ -466,7 +472,7 @@ class DebateOrchestrator:
             if result.verdict in weighted_votes:
                 weighted_votes[result.verdict] += result.confidence
         final_verdict = (
-            max(weighted_votes, key=weighted_votes.get)
+            max(weighted_votes, key=lambda v: weighted_votes[v])
             if any(weighted_votes.values()) else "INSUFFICIENT EVIDENCE"
         )
         total_weight     = sum(weighted_votes.values())
@@ -549,13 +555,13 @@ class DebateOrchestrator:
                 final_state.confidence        = final_state.confidence or 0.0
                 final_state.moderator_reasoning = final_state.moderator_reasoning or "No verdict produced."
 
-            if final_state.verdict not in ("ERROR", "RATE_LIMITED", "SYSTEM_ERROR", None):
-                if final_state.verdict != "INSUFFICIENT EVIDENCE" or \
-                        (final_state.confidence is not None and final_state.confidence > 0.1):
-                    try:
-                        set_cached_verdict(target_claim, json.loads(final_state.model_dump_json()))
-                    except Exception as ce:
-                        logger.warning("Cache write failed: %s", ce)
+            if (final_state.verdict not in ("ERROR", "RATE_LIMITED", "SYSTEM_ERROR", None)
+                    and (final_state.verdict != "INSUFFICIENT EVIDENCE"
+                         or (final_state.confidence is not None and final_state.confidence > 0.1))):
+                try:
+                    set_cached_verdict(target_claim, json.loads(final_state.model_dump_json()))
+                except Exception as ce:
+                    logger.warning("Cache write failed: %s", ce)
             return final_state
 
         except (ValueError, TypeError, AttributeError) as e:
@@ -588,7 +594,7 @@ class DebateOrchestrator:
             tier               = complexity_profile.get("complexity_tier", "medium")
             logger.info("Claim complexity: %s", tier)
             adjusted_params    = estimator.adjust_debate_parameters(num_rounds, 5, complexity_profile)
-            num_rounds_to_use  = adjusted_params["adjusted_rounds"]
+            num_rounds_to_use  = cast(int, adjusted_params["adjusted_rounds"])
             if num_rounds_to_use > num_rounds and tier in ("high", "very_high"):
                 try:
                     if sys.stdin.isatty():
@@ -631,7 +637,7 @@ class DebateOrchestrator:
             estimator       = get_complexity_estimator()
             cp              = estimator.estimate_complexity(claim)
             adjusted        = estimator.adjust_debate_parameters(num_rounds, 5, cp)
-            num_rounds      = adjusted["adjusted_rounds"]
+            num_rounds      = cast(int, adjusted["adjusted_rounds"])
         except Exception as _ce:
             logger.warning("ClaimComplexityEstimator failed (non-fatal): %s", _ce)
 
@@ -671,13 +677,13 @@ class DebateOrchestrator:
                 last_state = DebateState.model_validate(event) if isinstance(event, dict) else event
                 yield "progress", last_state
 
-            if last_state.verdict not in ("ERROR", "RATE_LIMITED", "SYSTEM_ERROR", None):
-                if last_state.verdict != "INSUFFICIENT EVIDENCE" or \
-                        (last_state.confidence is not None and last_state.confidence > 0.1):
-                    try:
-                        set_cached_verdict(target_claim, json.loads(last_state.model_dump_json()))
-                    except Exception as ce:
-                        logger.warning("Stream cache write failed: %s", ce)
+            if (last_state.verdict not in ("ERROR", "RATE_LIMITED", "SYSTEM_ERROR", None)
+                    and (last_state.verdict != "INSUFFICIENT EVIDENCE"
+                         or (last_state.confidence is not None and last_state.confidence > 0.1))):
+                try:
+                    set_cached_verdict(target_claim, json.loads(last_state.model_dump_json()))
+                except Exception as ce:
+                    logger.warning("Stream cache write failed: %s", ce)
             yield "complete", last_state
 
         except (ValueError, TypeError, AttributeError) as e:

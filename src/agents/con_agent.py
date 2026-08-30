@@ -1,18 +1,18 @@
 """
 src/agents/con_agent.py — All batches applied. Final production version.
 """
+import logging
 from datetime import datetime
-from typing import Optional
-from src.agents.base import BaseAgent, AgentResponse, DebateState
+
+from src.agents.base import AgentResponse, BaseAgent, DebateState
 from src.core.models import AgentArgumentResponse
 from src.llm.client import FreeLLMClient
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 class ConAgent(BaseAgent):
-    def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
+    def __init__(self, llm_client: FreeLLMClient, preferred_provider: str | None = None):
         super().__init__(llm_client)
         self.role               = "CON"
         self.preferred_provider = preferred_provider or "gemini"

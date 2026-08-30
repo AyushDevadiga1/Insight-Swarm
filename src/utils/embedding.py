@@ -1,7 +1,8 @@
 """
 src/utils/embedding.py — Final production version.
 """
-import logging, threading
+import logging
+import threading
 
 logger      = logging.getLogger(__name__)
 _instance   = None

@@ -1,7 +1,8 @@
 """
 src/utils/trust_scorer.py — Final production version.
 """
-import re, logging
+import logging
+import re
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ class TrustScorer:
     @classmethod
     def get_score(cls, url: str) -> float:
         try:
-            domain = urlparse(url).netloc.lower().lstrip("www.")
+            domain = urlparse(url).netloc.lower().removeprefix("www.")
             for t in ("UNRELIABLE","AUTHORITATIVE","CREDIBLE","UNDIRECTED"):
                 if any(re.search(p, domain) for p in cls.PATTERNS[t]):
                     return cls.TIERS[t]

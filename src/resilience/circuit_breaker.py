@@ -1,7 +1,9 @@
 """
 src/resilience/circuit_breaker.py — Final production version.
 """
-import time, threading, logging
+import logging
+import threading
+import time
 from enum import Enum
 
 logger = logging.getLogger(__name__)

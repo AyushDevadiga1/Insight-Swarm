@@ -1,10 +1,15 @@
 """
 src/utils/api_key_manager.py — Final production version. All batches applied.
 """
-import os, logging, time, hashlib, threading
-from typing import Dict, List, Optional, Any, Callable
+import hashlib
+import logging
+import os
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +36,8 @@ class APIKeyManager:
     def __init__(self):
         self.degraded        = False
         self.degraded_reason = ""
-        self.keys: Dict[str, List[APIKeyInfo]] = {}
-        self._reverse_lookup: Dict[str, str]   = {}
+        self.keys: dict[str, list[APIKeyInfo]] = {}
+        self._reverse_lookup: dict[str, str]   = {}
         self._load_and_validate_keys()
 
     def _load_and_validate_keys(self):
@@ -70,7 +75,7 @@ class APIKeyManager:
         else:
             logger.info("API Key Manager initialized successfully")
 
-    def _collect_keys(self, provider: str, env_vars: List[str]) -> List[str]:
+    def _collect_keys(self, provider: str, env_vars: list[str]) -> list[str]:
         keys = []
         for ev in env_vars:
             val = os.getenv(ev)
@@ -81,7 +86,7 @@ class APIKeyManager:
             if k not in seen: seen.add(k); unique.append(k)
         return unique
 
-    def _validate_key(self, provider: str, key: str, validators: List[Callable]) -> APIKeyInfo:
+    def _validate_key(self, provider: str, key: str, validators: list[Callable]) -> APIKeyInfo:
         key_hash = hashlib.sha256(key.encode()).hexdigest()[:16]
         ki = APIKeyInfo(key_hash=key_hash, provider=provider, status=APIKeyStatus.INVALID,
                         last_used=0, consecutive_failures=0, cooldown_until=0)
@@ -118,7 +123,7 @@ class APIKeyManager:
     def _validate_cerebras_key(self, key: str) -> bool: return len(key) >= 30 and key.startswith("csk-")
     def _validate_openrouter_key(self, key: str) -> bool: return len(key) >= 30 and key.startswith("sk-or-")
 
-    def get_working_key(self, provider: str) -> Optional[str]:
+    def get_working_key(self, provider: str) -> str | None:
         if provider not in self.keys: return None
         now = time.time()
         for ki in self.keys[provider]:
@@ -176,7 +181,7 @@ class APIKeyManager:
                     ki.status = APIKeyStatus.VALID; ki.cooldown_until = 0; ki.consecutive_failures = 0
         logger.info("All rate-limited keys reset")
 
-    def get_health_status(self) -> Dict[str, Any]:
+    def get_health_status(self) -> dict[str, Any]:
         now, status = time.time(), {}
         for provider, keys in self.keys.items():
             ps = {"total_keys":len(keys),"valid_keys":0,"rate_limited_keys":0,"invalid_keys":0,"cooldown_keys":0}

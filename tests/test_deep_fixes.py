@@ -1,4 +1,3 @@
-import pytest
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -6,10 +5,10 @@ from unittest.mock import MagicMock
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.orchestration.debate import DebateOrchestrator
 from src.agents.moderator import Moderator
-from src.core.models import DebateState, AgentResponse
+from src.core.models import AgentResponse, DebateState
 from src.llm.client import RateLimitError
+from src.orchestration.debate import DebateOrchestrator
 
 
 def test_verification_rate_semantics():

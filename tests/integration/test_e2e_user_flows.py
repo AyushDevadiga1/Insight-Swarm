@@ -3,8 +3,10 @@ End-to-end tests simulating complete user workflows
 Tests from UI input through to final verdict display
 """
 
-import pytest
 import time
+
+import pytest
+
 from src.orchestration.debate import DebateOrchestrator
 from src.utils.validation import validate_claim
 

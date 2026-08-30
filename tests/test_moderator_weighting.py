@@ -1,13 +1,13 @@
 import sys
-import os
 from pathlib import Path
 
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.agents.moderator import Moderator
-from src.core.models import SourceVerification
 from unittest.mock import MagicMock
+
+from src.agents.moderator import Moderator
+
 
 def test_weighting():
     mock_client = MagicMock()

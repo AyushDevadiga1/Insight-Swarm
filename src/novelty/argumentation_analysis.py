@@ -5,16 +5,16 @@ Previously np was imported at the bottom of the file, causing NameError inside
 calculate_argument_structure_score() and compare_debate_quality().
 """
 
-import re
 import logging
-from typing import List, Dict, Any
+import re
 from collections import Counter
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # ── numpy import at module level so all class methods can use np ──────────────
 try:
-    import numpy as np
+    import numpy as np  # type: ignore[assignment]  # optional-dependency fallback shim below
 except ImportError:
     class np:  # type: ignore[no-redef]
         """Minimal numpy shim for environments without numpy installed."""
@@ -132,7 +132,7 @@ class ArgumentationAnalyzer:
     def __init__(self):
         self.fallacy_stats = Counter()
 
-    def detect_fallacies(self, argument: str) -> List[Dict[str, Any]]:
+    def detect_fallacies(self, argument: str) -> list[dict[str, Any]]:
         detected = []
         argument_lower = argument.lower()
         for fallacy_type, config in self.FALLACY_PATTERNS.items():
@@ -148,7 +148,7 @@ class ArgumentationAnalyzer:
                     self.fallacy_stats[fallacy_type] += 1
         return detected
 
-    def analyze_citation_quality(self, argument: str, sources: List[str]) -> Dict[str, Any]:
+    def analyze_citation_quality(self, argument: str, sources: list[str]) -> dict[str, Any]:
         evidence_markers = [
             "study", "research", "according to", "found that", "shows that",
             "data", "statistics", "survey", "report", "analysis",
@@ -167,7 +167,7 @@ class ArgumentationAnalyzer:
             "citation_quality":       "good" if 0.5 <= source_to_claim_ratio <= 2.0 else "poor",
         }
 
-    def analyze_rhetorical_techniques(self, argument: str) -> Dict[str, Any]:
+    def analyze_rhetorical_techniques(self, argument: str) -> dict[str, Any]:
         techniques = {
             "repetition":         len(re.findall(r'\b(\w+)\b(?=.*\b\1\b)', argument.lower())),
             "rhetorical_questions": len(re.findall(r'\?\s*$', argument, re.MULTILINE)),
@@ -197,7 +197,7 @@ class ArgumentationAnalyzer:
             "rhetoric_level": "high" if rhetoric_score > 5 else "medium" if rhetoric_score > 2 else "low",
         }
 
-    def calculate_argument_structure_score(self, argument: str, sources: List[str]) -> float:
+    def calculate_argument_structure_score(self, argument: str, sources: list[str]) -> float:
         """Score the logical structure. BUG FIX: np now available at module level."""
         arg_len = len(argument)
         length_score = 0.3 if arg_len < 50 else 0.7 if arg_len > 1000 else 1.0
@@ -221,7 +221,7 @@ class ArgumentationAnalyzer:
 
         return round(0.3 * length_score + 0.3 * structure_score + 0.4 * evidence_score, 3)
 
-    def analyze_argument(self, argument: str, sources: List[str], agent_type: str) -> Dict[str, Any]:
+    def analyze_argument(self, argument: str, sources: list[str], agent_type: str) -> dict[str, Any]:
         fallacies       = self.detect_fallacies(argument)
         citation        = self.analyze_citation_quality(argument, sources)
         rhetoric        = self.analyze_rhetorical_techniques(argument)
@@ -255,9 +255,9 @@ class ArgumentationAnalyzer:
 
     def compare_debate_quality(
         self,
-        pro_analyses: List[Dict],
-        con_analyses: List[Dict],
-    ) -> Dict[str, Any]:
+        pro_analyses: list[dict],
+        con_analyses: list[dict],
+    ) -> dict[str, Any]:
         """BUG FIX: np.mean now available at module level."""
         pro_avg = float(np.mean([a["quality_score"] for a in pro_analyses])) if pro_analyses else 0.0
         con_avg = float(np.mean([a["quality_score"] for a in con_analyses])) if con_analyses else 0.0

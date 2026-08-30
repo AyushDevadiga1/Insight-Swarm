@@ -3,6 +3,7 @@ Integration test for complete 4-agent debate system
 """
 
 import pytest
+
 from src.orchestration.debate import DebateOrchestrator
 
 

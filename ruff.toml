@@ -1,0 +1,29 @@
+# ruff.toml — curated lint configuration for InsightSwarm.
+# Improvement-plan-to-10 (Action 7): use ruff's sensible default rule set as a
+# meaningful quality gate, with only the intentional / noisy rules suppressed.
+# (Without a config, bare `ruff check` on ruff 0.16 hits ~535 pre-existing hits
+# that the codebase never targeted.)
+target-version = "py311"
+line-length = 120
+
+[lint]
+ignore = [
+  "B008",   # FastAPI idiom: Depends() evaluated in argument defaults at import time
+  "BLE001", # blind `except Exception` — pervasive defensive fallback logic
+  "RUF012", # mutable class-attr defaults are deliberate sentinels
+  "RUF013", # implicit Optional kept for API readability
+  "RUF022", # unsorted __all__ (auto-fixable; kept cosmetic)
+  "RUF059", # unnecessary collection conversions in some call sites
+  "DTZ005", # naive datetime.now() — display-only agent timestamps
+  "S110",   # try/except-pass logging in fallbacks
+  "EXE001", # shebangs on entry-point scripts are intentional
+  "FURB192",# readability nit from flake8-use-pathlib
+  "G201",   # logger .error(f-string) — acceptable in this codebase
+]
+
+[lint.per-file-ignores]
+# Loose one-off diagnostics / throwaway scripts keep quick, explicit exceptions.
+"tests/diagnostics/**" = ["BLE001", "S110", "S311", "E402"]
+"tests/benchmark_suite.py" = ["BLE001", "S110", "E402"]
+"tests/verify_phase5.py" = ["BLE001", "S110", "E402"]
+"tests/red_team_cases.py" = ["BLE001", "S110", "E402"]

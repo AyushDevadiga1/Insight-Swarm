@@ -7,7 +7,7 @@ Thread-safe via a simple Lock.
 """
 from collections import OrderedDict
 from threading import Lock
-from typing import Any, Optional
+from typing import Any
 
 
 class BoundedCache:
@@ -23,7 +23,7 @@ class BoundedCache:
         self._maxsize = maxsize
         self._lock = Lock()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Return the cached value for key, or None if not present."""
         with self._lock:
             if key not in self._cache:

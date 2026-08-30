@@ -2,8 +2,9 @@
 src/utils/summarizer.py — Final production version.
 """
 import logging
-from src.llm.client import FreeLLMClient
+
 from src.core.models import DebateState
+from src.llm.client import FreeLLMClient
 
 logger = logging.getLogger(__name__)
 

@@ -1,11 +1,12 @@
-import os
 import sys
-import pytest
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.orchestration.debate import DebateOrchestrator
+
 
 class TestSSETracker:
     def __init__(self):

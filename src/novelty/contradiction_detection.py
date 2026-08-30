@@ -6,10 +6,9 @@ BUG FIX (D23): added None-guard in detect_directional_contradiction and
                with content_preview=None don't raise AttributeError.
 """
 
-import re
 import logging
-from typing import List, Dict, Any, Tuple, Optional
-from collections import defaultdict
+import re
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +28,7 @@ class EvidenceContradictionDetector:
                         r"september|october|november|december) (20\d{2})\b",
         }
 
-    def extract_temporal_markers(self, content: str) -> List[int]:
+    def extract_temporal_markers(self, content: str) -> list[int]:
         """Extract years mentioned in content."""
         if not content:
             return []
@@ -43,7 +42,7 @@ class EvidenceContradictionDetector:
                 continue
         return sorted(set(years))
 
-    def detect_temporal_contradiction(self, source1: Dict, source2: Dict) -> Optional[Dict]:
+    def detect_temporal_contradiction(self, source1: dict, source2: dict) -> dict | None:
         """Detect if two sources contradict due to time difference."""
         content1 = self._safe_content(source1)
         content2 = self._safe_content(source2)
@@ -112,7 +111,7 @@ class EvidenceContradictionDetector:
 
         return (source1_positive and source2_negative) or (source1_negative and source2_positive)
 
-    def detect_jurisdictional_contradiction(self, source1: Dict, source2: Dict) -> Optional[Dict]:
+    def detect_jurisdictional_contradiction(self, source1: dict, source2: dict) -> dict | None:
         """Detect if sources contradict due to different jurisdictions/regions."""
         content1 = self._safe_content(source1)
         content2 = self._safe_content(source2)
@@ -126,7 +125,7 @@ class EvidenceContradictionDetector:
             "WHO": [r"\bwho\b", r"\bworld health\b"],
         }
 
-        def _regions(content: str, url: str) -> List[str]:
+        def _regions(content: str, url: str) -> list[str]:
             detected = []
             for region, patterns in jurisdictions.items():
                 for pattern in patterns:
@@ -147,7 +146,7 @@ class EvidenceContradictionDetector:
             }
         return None
 
-    def analyze_contradiction_pair(self, source1, source2, claim: str) -> Optional[Dict]:
+    def analyze_contradiction_pair(self, source1, source2, claim: str) -> dict | None:
         """
         Comprehensive contradiction analysis between two sources.
         BUG FIX: uses _safe_content() so None content_preview never crashes.
@@ -181,7 +180,7 @@ class EvidenceContradictionDetector:
         self.contradiction_log.append(contradiction_data)
         return contradiction_data
 
-    def _suggest_resolution(self, temporal: Optional[Dict], jurisdictional: Optional[Dict]) -> str:
+    def _suggest_resolution(self, temporal: dict | None, jurisdictional: dict | None) -> str:
         if temporal and temporal.get("time_gap_years", 0) >= 10:
             return "temporal_priority_newer"
         if jurisdictional:
@@ -190,7 +189,7 @@ class EvidenceContradictionDetector:
             return "evolving_science"
         return "quality_weighted"
 
-    def detect_contradictions(self, verification_results: List, claim: str) -> Dict[str, Any]:
+    def detect_contradictions(self, verification_results: list, claim: str) -> dict[str, Any]:
         """
         Main contradiction detection across all verified sources.
         Accepts List[SourceVerification] or List[Dict].
@@ -239,7 +238,7 @@ class EvidenceContradictionDetector:
             "recommended_verdict_modifier":     self._get_verdict_modifier(contradictions),
         }
 
-    def _get_verdict_modifier(self, contradictions: List[Dict]) -> str:
+    def _get_verdict_modifier(self, contradictions: list[dict]) -> str:
         if not contradictions:
             return "none"
         temporal_count      = sum(1 for c in contradictions if c.get("temporal_factor"))
@@ -250,7 +249,7 @@ class EvidenceContradictionDetector:
             return "CONTEXT_DEPENDENT"
         return "PARTIALLY_TRUE"
 
-    def get_contradiction_summary(self) -> Dict[str, Any]:
+    def get_contradiction_summary(self) -> dict[str, Any]:
         if not self.contradiction_log:
             return {"total_contradictions": 0}
         temporal_count      = sum(1 for c in self.contradiction_log if c.get("temporal_factor"))

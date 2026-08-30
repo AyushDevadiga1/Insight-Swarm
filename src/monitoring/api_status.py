@@ -2,9 +2,12 @@
 src/monitoring/api_status.py — Final production version.
 Fixed: get_health_monitor() singleton is not thread-safe — added lock.
 """
-import asyncio, time, threading
-from src.utils.api_key_manager import get_api_key_manager
+import asyncio
+import threading
+import time
+
 from src.llm.client import FreeLLMClient
+from src.utils.api_key_manager import get_api_key_manager
 
 
 class HealthMonitor:

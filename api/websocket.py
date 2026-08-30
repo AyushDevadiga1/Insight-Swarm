@@ -1,15 +1,15 @@
+import asyncio
 import json
 import logging
-import asyncio
-from fastapi import WebSocket, WebSocketDisconnect
-from typing import List
+
+from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
 class ConnectionManager:
     """Manages active WebSocket connections for real-time status broadcasting."""
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()

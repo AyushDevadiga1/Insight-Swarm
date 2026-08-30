@@ -10,10 +10,10 @@ This test script validates:
 Run with: python tests/test_day3_factchecker.py
 """
 
-import sys
 import logging
+import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 try:
     from tabulate import tabulate
@@ -23,8 +23,8 @@ except ImportError:
 # Setup path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.orchestration.debate import DebateOrchestrator
 from src.core.models import AgentResponse
+from src.orchestration.debate import DebateOrchestrator
 
 if tabulate is None:
     import pytest
@@ -77,21 +77,21 @@ def evaluate_claim(orchestrator: DebateOrchestrator, claim: str, claim_type: str
             verification_rate = 0.0
         
         # Log results
-        logger.info(f"\n✅ Debate completed successfully")
+        logger.info("\n✅ Debate completed successfully")
         logger.info(f"\nVERDICT: {res_dict['verdict']}")
         logger.info(f"CONFIDENCE: {res_dict['confidence']:.1%}")
         
-        logger.info(f"\nSOURCE VERIFICATION:")
+        logger.info("\nSOURCE VERIFICATION:")
         logger.info(f"  Total sources cited: {total_sources}")
         logger.info(f"  ✅ Verified: {verified}")
         logger.info(f"  ❌ Hallucinated: {hallucinated}")
         logger.info(f"  📈 Verification rate: {verification_rate:.0%}")
         
-        logger.info(f"\nAGUMENT VERIFICATION RATES:")
+        logger.info("\nAGUMENT VERIFICATION RATES:")
         logger.info(f"  PRO agent sources verified: {res_dict.get('pro_verification_rate', 0):.0%}")
         logger.info(f"  CON agent sources verified: {res_dict.get('con_verification_rate', 0):.0%}")
         
-        logger.info(f"\nARGUMENT SUMMARY:")
+        logger.info("\nARGUMENT SUMMARY:")
         logger.info(f"  PRO arguments: {len(res_dict['pro_arguments'])} rounds")
         logger.info(f"  CON arguments: {len(res_dict['con_arguments'])} rounds")
         
@@ -240,7 +240,7 @@ def main():
     
     # Verdict distribution
     verdicts = [r['verdict'] for r in results if r['status'] == 'SUCCESS']
-    print(f"\nVerdict distribution:")
+    print("\nVerdict distribution:")
     for verdict in ['TRUE', 'FALSE', 'PARTIALLY TRUE', 'UNVERIFIABLE']:
         count = verdicts.count(verdict)
         if count > 0:

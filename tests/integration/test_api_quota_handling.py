@@ -12,14 +12,15 @@ Run with:
 Uses MockChaosClient from tests/sandbox/api_simulator.py.
 """
 
-import pytest
-import sys
 import os
+import sys
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from tests.sandbox.api_simulator import MockChaosClient, ChaosConfig
 from src.orchestration.debate import DebateOrchestrator
+from tests.sandbox.api_simulator import ChaosConfig, MockChaosClient
 
 VALID_VERDICTS = {"TRUE", "FALSE", "PARTIALLY TRUE", "INSUFFICIENT EVIDENCE", "RATE_LIMITED"}
 
@@ -102,7 +103,7 @@ def test_key_reset_allows_recovery():
     After resetting all API keys, the key manager should report them as working again.
     This simulates auto-recovery between sessions.
     """
-    from src.utils.api_key_manager import get_api_key_manager, APIKeyStatus
+    from src.utils.api_key_manager import APIKeyStatus, get_api_key_manager
 
     km = get_api_key_manager()
 

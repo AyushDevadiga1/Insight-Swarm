@@ -1,6 +1,6 @@
 import os
-import pytest
 
+import pytest
 
 RUN_INTEGRATION_LLM = os.getenv("RUN_INTEGRATION_LLM", "").strip().lower() in ("1", "true", "yes")
 

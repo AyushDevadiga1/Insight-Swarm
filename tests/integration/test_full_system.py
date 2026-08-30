@@ -1,17 +1,17 @@
-import os
 import sys
-import pytest
-from unittest.mock import Mock, patch
 from pathlib import Path
+from unittest.mock import Mock, patch
+
+import pytest
 
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from src.core.models import AgentResponse, ConsensusResponse
 from src.orchestration.debate import DebateOrchestrator
-from src.core.models import DebateState, AgentResponse, ConsensusResponse
-from src.llm.client import FreeLLMClient
-from src.ui.progress_tracker import ProgressTracker, Stage
 from src.resource.manager import get_resource_manager
+from src.ui.progress_tracker import ProgressTracker, Stage
+
 
 class MockLLMClient:
     """A mock LLM client that returns valid agent/consensus responses."""
@@ -89,7 +89,7 @@ def test_integration_full_debate_flow():
             
             # 3. Verify BoundedCache (indirectly via debug logs or by checking the instance)
             from src.orchestration.cache import get_cache
-            cache = get_cache()
+            get_cache()
             # If we call again, it should hit L1 cache (if enabled during tests)
             # Since we didn't disable it in this test explicitly, let's see.
             

@@ -1,8 +1,8 @@
 """
 src/utils/url_helper.py — Final production version.
 """
-import re, logging
-from typing import Optional
+import logging
+import re
 from urllib.parse import urlparse
 
 logger    = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ BARE_DOMAIN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-\.]+\.[A-Za-z]{2,}([/?#].*
 
 class URLNormalizer:
     @staticmethod
-    def sanitize_url(raw_input: str) -> Optional[str]:
+    def sanitize_url(raw_input: str) -> str | None:
         if not isinstance(raw_input, str):
             raw_input = str(raw_input)
         original = raw_input.strip()

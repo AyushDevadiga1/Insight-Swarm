@@ -2,10 +2,11 @@
 src/ui/progress_tracker.py — Final production version.
 """
 from __future__ import annotations
-import threading, time
+
+import threading
+import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
 
 
 class Stage(str, Enum):
@@ -78,9 +79,9 @@ class StageUpdate:
 
 class ProgressTracker:
     def __init__(self) -> None:
-        self._updates:    List[StageUpdate] = []
+        self._updates:    list[StageUpdate] = []
         self._lock        = threading.Lock()
-        self._start_time: Optional[float]   = None
+        self._start_time: float | None   = None
 
     def set_stage(self, stage: Stage, message: str = "") -> None:
         with self._lock:
@@ -89,12 +90,12 @@ class ProgressTracker:
             self._updates.append(StageUpdate(stage=stage, message=message))
 
     @property
-    def current(self) -> Optional[StageUpdate]:
+    def current(self) -> StageUpdate | None:
         with self._lock:
             return self._updates[-1] if self._updates else None
 
     @property
-    def updates(self) -> List[StageUpdate]:
+    def updates(self) -> list[StageUpdate]:
         with self._lock:
             return list(self._updates)
 

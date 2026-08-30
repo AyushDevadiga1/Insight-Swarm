@@ -1,8 +1,9 @@
-import os
 import gc
 import logging
+import os
+from collections.abc import Callable
+
 import psutil
-from typing import Callable, List
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class ResourceManager:
             return
             
         self.max_memory_mb = float(os.getenv("MAX_MEMORY_MB", "500"))
-        self._eviction_callbacks: List[Callable[[], None]] = []
+        self._eviction_callbacks: list[Callable[[], None]] = []
         self._initialized = True
         logger.info(f"ResourceManager initialized with {self.max_memory_mb}MB limit")
         

@@ -31,13 +31,13 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Lint (ruff)
-        run: ruff check src api tests --exclude "tests/sandbox"
+        run: python -m ruff check src api tests --exclude "tests/sandbox"
 
       - name: Type-check (pyright)
-        run: pyright
+        run: python -m pyright
 
       - name: Security scan (bandit)
-        run: bandit -q -r src api -x "*/tests/*" -ll
+        run: python -m bandit -q -r src api -x "*/tests/*" -ll
 
       - name: Run unit tests with coverage
         env:

@@ -8,10 +8,10 @@ or quota-exhausted. Uses existing GOOGLE_CLOUD (API key) and GOOGLE_CX
 Returns the same {"pro": [...], "con": [...]} shape as TavilyEvidenceRetriever
 so it is a drop-in replacement.
 """
-import os
 import logging
+import os
 import threading
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 try:
     import requests as _requests
@@ -30,7 +30,7 @@ class GoogleCSERetriever:
     Free tier: 100 queries/day.
     """
 
-    def __init__(self, api_key: Optional[str] = None, cx: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, cx: str | None = None):
         self.api_key = api_key or os.getenv("GOOGLE_CLOUD")
         self.cx      = cx      or os.getenv("GOOGLE_CX")
 
@@ -50,7 +50,7 @@ class GoogleCSERetriever:
 
     def search_adversarial(
         self, claim: str, max_results: int = 5
-    ) -> Dict[str, List[Dict[str, Any]]]:
+    ) -> dict[str, list[dict[str, Any]]]:
         """Dual-sided search: supporting vs. rebuttal evidence."""
         if not self._enabled:
             return {"pro": [], "con": []}
@@ -66,7 +66,7 @@ class GoogleCSERetriever:
             logger.error("GoogleCSE adversarial search failed: %s", e)
             return {"pro": [], "con": []}
 
-    def search_evidence(self, claim: str, max_results: int = 5) -> List[Dict[str, Any]]:
+    def search_evidence(self, claim: str, max_results: int = 5) -> list[dict[str, Any]]:
         """Single-sided evidence search."""
         if not self._enabled:
             return []
@@ -76,12 +76,12 @@ class GoogleCSERetriever:
             logger.error("GoogleCSE evidence search failed: %s", e)
             return []
 
-    def get_relevant_sources(self, claim: str, num_sources: int = 3) -> List[str]:
+    def get_relevant_sources(self, claim: str, num_sources: int = 3) -> list[str]:
         return [item["url"] for item in self.search_evidence(claim, num_sources) if item["url"]]
 
     # ── Internal ───────────────────────────────────────────────────────────────
 
-    def _search(self, query: str, n: int) -> List[Dict[str, Any]]:
+    def _search(self, query: str, n: int) -> list[dict[str, Any]]:
         """Execute a single CSE search. Returns normalised result list."""
         params = {
             "key": self.api_key,

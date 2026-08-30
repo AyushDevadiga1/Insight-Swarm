@@ -2,9 +2,12 @@
 src/async_tasks/task_queue.py — Final production version.
 Thread-pool task queue for background debate execution in Streamlit.
 """
-import threading, logging, time
+import logging
+import threading
+import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +18,7 @@ _task_queue_lock = threading.Lock()
 class TaskQueue:
     def __init__(self, max_workers: int = 2) -> None:
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="insightswarm_task")
-        self._tasks: Dict[str, Dict[str, Any]] = {}
+        self._tasks: dict[str, dict[str, Any]] = {}
         self._lock  = threading.Lock()
         self._max_tasks = 100 # Prevent memory leak
 
@@ -49,7 +52,7 @@ class TaskQueue:
 
         self._executor.submit(_run)
 
-    def get_status(self, task_id: str) -> Tuple[str, Any, Any]:
+    def get_status(self, task_id: str) -> tuple[str, Any, Any]:
         with self._lock:
             task = self._tasks.get(task_id)
         if task is None:

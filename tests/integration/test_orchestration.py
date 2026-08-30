@@ -3,6 +3,7 @@ Integration tests for debate orchestration
 """
 
 import pytest
+
 from src.orchestration.debate import DebateOrchestrator
 
 

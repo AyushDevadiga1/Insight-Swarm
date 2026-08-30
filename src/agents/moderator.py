@@ -6,11 +6,11 @@ BUG FIX (D23):
     generate() produced two calibration entries and inflated confidence.
   - Removed unused import: get_argumentation_analyzer was imported but never used.
 """
-from typing import Optional
-from src.agents.base import BaseAgent, AgentResponse, DebateState
+import logging
+
+from src.agents.base import AgentResponse, BaseAgent, DebateState
 from src.core.models import ModeratorVerdict
 from src.llm.client import FreeLLMClient, RateLimitError
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ _MAX_ARG_CHARS = 800
 
 
 class Moderator(BaseAgent):
-    def __init__(self, llm_client: FreeLLMClient, preferred_provider: Optional[str] = None):
+    def __init__(self, llm_client: FreeLLMClient, preferred_provider: str | None = None):
         super().__init__(llm_client)
         self.role               = "MODERATOR"
         self.preferred_provider = preferred_provider or "gemini"
