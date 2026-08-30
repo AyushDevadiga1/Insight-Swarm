@@ -8,8 +8,8 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.0-orange)](https://langchain-ai.github.io/langgraph/)
 [![Pydantic v2](https://img.shields.io/badge/Pydantic-v2-E92063.svg)](https://docs.pydantic.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-168%20passing-brightgreen.svg)]()
-[![Published](https://img.shields.io/badge/IJRASET-Published-blue.svg)]()
+[![Tests](https://img.shields.io/badge/tests-205%20passing-brightgreen.svg)](https://github.com/AyushDevadiga1/Insight-Swarm/actions)
+[![Published](https://img.shields.io/badge/IJRASET-Published-blue.svg)](paper/InsightSwarm_New_Paper.md)
 
 A **production-grade, research-quality** automated fact-checking system where four specialised AI agents debate claims, verify sources in real-time, and converge on a calibrated verdict — with optional human intervention at any stage. Built entirely on free-tier APIs with zero infrastructure cost.
 
@@ -375,7 +375,7 @@ InsightSwarm/
 │   └── hooks/useSSE.js            SSE connection with stable UUID + AbortController
 │
 ├── tests/
-│   ├── unit/                      Unit tests (168 passing)
+│   ├── unit/                      Unit tests (205 passing)
 │   ├── integration/               HITL, trust weighting, decomposition, circuit breakers
 │   ├── load/                      10-user concurrency suite
 │   ├── benchmark_suite.py         FEVER benchmark: precision/recall/F1/ECE
@@ -383,8 +383,7 @@ InsightSwarm/
 │
 ├── scripts/                       download_fever · run_benchmark_quick · run_ablation
 ├── data/fever_sample.json         100-claim benchmark dataset
-├── paper/                         Published IJRASET paper + drafts
-├── outputs/                       Benchmark results JSON + LaTeX tables
+├── paper/                         Published IJRASET paper (New_Paper.md tracked)
 ├── .env                           API keys (gitignored)
 └── requirements.txt               Pinned Python dependencies
 ```
@@ -519,7 +518,7 @@ python scripts/generate_paper_metrics.py
 | Metric | Value |
 |---|---|
 | Codebase size | 15,600+ lines |
-| Automated tests | 168 passing (100% pass rate) |
+| Automated tests | 205 passing (100% pass rate) |
 | Resolved defects across 25 dev days | 96 |
 | Source hallucination rate | < 3% |
 | Semantic cache similarity threshold | 0.85 cosine similarity |
@@ -568,9 +567,6 @@ pytest tests/integration/test_novelty_features.py -v
 
 # Load: 10 concurrent users
 pytest tests/load/test_concurrent_users.py -v
-
-# Live API health check (requires real .env keys)
-python tests/integration/test_real_api_health.py
 
 # Red-team adversarial cases
 python tests/red_team_cases.py

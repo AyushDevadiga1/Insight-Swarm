@@ -27,6 +27,7 @@ Week1_Implementation_Guide.md
 
 # Node modules
 frontend/node_modules
+frontend/.vite
 api_check.py
 tmp_check.py
 CODEBASE_STATUS.md
@@ -54,7 +55,8 @@ backups/
 frontend/dist/
 
 # Deliverables / process artifacts (purged from version control — Action 8)
-paper/
+paper/*
+!paper/InsightSwarm_New_Paper.md
 report/
 progress/
 planning/
