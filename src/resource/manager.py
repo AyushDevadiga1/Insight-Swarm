@@ -3,7 +3,10 @@ import logging
 import os
 from collections.abc import Callable
 
-import psutil
+try:
+    import psutil
+except ImportError:  # pragma: no cover - psutil is optional for non-memory-managed envs
+    psutil = None
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,8 @@ class ResourceManager:
     def get_current_memory_mb(self) -> float:
         """Returns the current RSS memory footprint in MB."""
         try:
+            if psutil is None:
+                raise RuntimeError("psutil not available")
             process = psutil.Process()
             return process.memory_info().rss / (1024 * 1024)
         except Exception as e:

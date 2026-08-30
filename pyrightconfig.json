@@ -7,8 +7,6 @@
   "extraPaths": [
     "."
   ],
-  "venvPath": ".",
-  "venv": ".venv",
   "exclude": [
     ".venv",
     "__pycache__",

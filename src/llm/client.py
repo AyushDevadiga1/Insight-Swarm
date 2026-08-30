@@ -136,10 +136,10 @@ class FreeLLMClient:
         try:
             gemini_key = self.key_manager.get_working_key("gemini")
             if gemini_key:
-                from google import genai
+                from google.genai import Client
                 from google.genai import types as genai_types
                 self._genai_types  = genai_types
-                self.genai_client  = genai.Client(api_key=gemini_key)
+                self.genai_client  = Client(api_key=gemini_key)
                 logger.info("Gemini client initialised (model: %s)", self.GEMINI_MODEL)
             else:
                 self.gemini_error = "No working Gemini API keys available"
@@ -424,10 +424,10 @@ class FreeLLMClient:
         if self.genai_client is None:
             with self._counter_lock:
                 if self.genai_client is None:
-                    from google import genai
+                    from google.genai import Client
                     from google.genai import types as genai_types
                     self._genai_types  = genai_types
-                    self.genai_client  = genai.Client(api_key=gemini_key)
+                    self.genai_client  = Client(api_key=gemini_key)
         if self._genai_types is None:
             from google.genai import types as genai_types
             self._genai_types = genai_types
