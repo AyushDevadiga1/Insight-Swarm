@@ -272,6 +272,7 @@ class ClaimComplexityEstimator:
         return {
             "overall_complexity": round(overall, 3),
             "complexity_tier": tier,
+            "complexity_level": tier,
             "semantic_complexity": semantic,
             "domain_complexity": domain,
             "temporal_complexity": temporal,
@@ -284,6 +285,20 @@ class ClaimComplexityEstimator:
             "requires_expert_review": overall >= 0.7 or domain in ["medical", "legal"],
         }
     
+    def recommend_debate_parameters(self, complexity: float) -> dict[str, int]:
+        """
+        Recommend debate rounds and source requirements for a given
+        complexity score (0.0 - 1.0).
+        """
+        if complexity >= 0.7:
+            return {"recommended_rounds": 4, "min_sources_required": 7}
+        elif complexity >= 0.5:
+            return {"recommended_rounds": 3, "min_sources_required": 5}
+        elif complexity >= 0.3:
+            return {"recommended_rounds": 3, "min_sources_required": 4}
+        else:
+            return {"recommended_rounds": 2, "min_sources_required": 3}
+
     def adjust_debate_parameters(self, base_rounds: int, base_sources: int,
                                  complexity_profile: dict) -> dict[str, int | str]:
         """

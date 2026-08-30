@@ -7,6 +7,8 @@
   "extraPaths": [
     "."
   ],
+  "venvPath": ".",
+  "venv": ".venv",
   "exclude": [
     ".venv",
     "__pycache__",
@@ -14,5 +16,6 @@
     "**/*.pyc"
   ],
   "typeCheckingMode": "basic",
-  "reportMissingModuleSource": "none"
+  "reportMissingModuleSource": "none",
+  "reportMissingImports": "none"
 }

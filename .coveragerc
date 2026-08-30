@@ -1,0 +1,18 @@
+[run]
+branch = True
+source = src
+omit =
+    src/ui/*
+    src/utils/google_cse_retriever.py
+    src/utils/observable_logger.py
+    src/monitoring/api_status.py
+
+[report]
+show_missing = True
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    pass

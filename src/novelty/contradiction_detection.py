@@ -33,7 +33,7 @@ class EvidenceContradictionDetector:
         if not content:
             return []
         years = []
-        for match in re.findall(r'\b(19|20)\d{2}\b', content):
+        for match in re.findall(r'\b(?:19|20)\d{2}\b', content):
             try:
                 y = int(match)
                 if 1900 <= y <= 2099:

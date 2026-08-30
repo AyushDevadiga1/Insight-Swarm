@@ -68,13 +68,17 @@ class FactChecker(BaseAgent):
         for i, round_sources in enumerate(state.pro_sources):
             argument = state.pro_arguments[i] if i < len(state.pro_arguments) else ""
             for url in round_sources:
-                if isinstance(url, str) and url.strip():
+                # Pass all items to _verify_url so it can record INVALID_URL for non-strings/None.
+                # Only skip empty string literals (vacuous entries).
+                if url != "":
                     all_sources.append((url, "PRO", argument))
 
         for i, round_sources in enumerate(state.con_sources):
             argument = state.con_arguments[i] if i < len(state.con_arguments) else ""
             for url in round_sources:
-                if isinstance(url, str) and url.strip():
+                # Pass all items to _verify_url so it can record INVALID_URL for non-strings/None.
+                # Only skip empty string literals (vacuous entries).
+                if url != "":
                     all_sources.append((url, "CON", argument))
 
         results: list[SourceVerification] = []

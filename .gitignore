@@ -74,3 +74,8 @@ improvement-plan-to-10.md
 # To ignore 
 error logs
 logs/*  
+
+# Coverage artifacts
+.coverage
+.coverage.*
+htmlcov/

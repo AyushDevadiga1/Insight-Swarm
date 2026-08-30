@@ -48,9 +48,25 @@ class Moderator(BaseAgent):
                     pass
 
             # ── Trust-weighted verification rates ────────────────────────────
-            results      = state.verification_results or []
+            # Primary: compute from detailed verification_results on state.
+            # Fallback: use pre-computed pro_verification_rate / con_verification_rate fields.
+            results = state.verification_results or []
+
+            # Also check state.metrics["verification_results"] as a secondary source
+            if not results and state.metrics and "verification_results" in state.metrics:
+                raw = state.metrics["verification_results"]
+                if isinstance(raw, list):
+                    results = raw  # type: ignore[assignment]
+
             pro_rate     = self._calculate_weighted_score(results, "PRO")
             con_rate     = self._calculate_weighted_score(results, "CON")
+
+            # Fall back to pre-computed fields when results list has no agent_source tags
+            if pro_rate == 0.0 and getattr(state, "pro_verification_rate", None) is not None:
+                pro_rate = float(state.pro_verification_rate or 0.0)
+            if con_rate == 0.0 and getattr(state, "con_verification_rate", None) is not None:
+                con_rate = float(state.con_verification_rate or 0.0)
+
             avg_ver_rate = (pro_rate + con_rate) / 2
 
             trust_scores = [
@@ -158,7 +174,10 @@ class Moderator(BaseAgent):
             (state.pro_sources and any(s for s in state.pro_sources)) or
             (state.con_sources and any(s for s in state.con_sources))
         )
-        no_sources = not has_sources or len(results) == 0
+        no_sources = not has_sources and len(results) == 0 and not (
+            getattr(state, "pro_verification_rate", None) or
+            getattr(state, "con_verification_rate", None)
+        )
 
         if state.summary:
             pro_final = (state.pro_arguments[-1] if state.pro_arguments else "No argument.")[:_MAX_ARG_CHARS]
@@ -186,11 +205,22 @@ class Moderator(BaseAgent):
             )
 
         verification_section = ""
+        # Use detailed results if available; otherwise use pre-computed rate fields
         if results:
             verification_section = (
                 f"\nSOURCE VERIFICATION SUMMARY:\n"
                 f"- ProAgent Weighted Score (trust-adjusted): {pro_ver_rate:.1%}\n"
                 f"- ConAgent Weighted Score (trust-adjusted): {con_ver_rate:.1%}\n"
+            )
+        elif (getattr(state, "pro_verification_rate", None) is not None and
+              (state.pro_verification_rate or state.con_verification_rate)):
+            # Fall back to pre-computed rate fields
+            pre_pro = float(state.pro_verification_rate or 0.0)
+            pre_con = float(state.con_verification_rate or 0.0)
+            verification_section = (
+                f"\nSOURCE VERIFICATION SUMMARY:\n"
+                f"- ProAgent Verification Rate: {pre_pro:.1%}\n"
+                f"- ConAgent Verification Rate: {pre_con:.1%}\n"
             )
 
         zero_source_guidance = ""

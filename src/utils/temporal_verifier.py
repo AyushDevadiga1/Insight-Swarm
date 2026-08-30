@@ -9,10 +9,12 @@ logger = logging.getLogger(__name__)
 
 class TemporalVerifier:
     def __init__(self):
-        self.year_pattern = re.compile(r"\b(?:19|20)\d{2}\b")
+        # Match years from 1900-2099, including decade references like 2010s
+        self.year_pattern = re.compile(r"\b((?:19|20)\d{2})s?\b")
 
     def extract_years(self, text: str) -> set[str]:
-        if not text: return set()
+        if not text:
+            return set()
         return set(self.year_pattern.findall(text))
 
     def verify_alignment(self, claim: str, content: str) -> tuple[bool, str]:

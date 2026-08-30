@@ -30,7 +30,7 @@ class Summarizer:
         try:
             summary = self.client.call(prompt=prompt, temperature=0.3, max_tokens=300, preferred_provider="gemini")
             logger.info("Generated debate summary for round %d", state.round)
-            return summary or ""
+            return summary or "Summary unavailable."
         except Exception as e:
             logger.warning("Summarizer failed (non-fatal): %s — using full argument list", e)
-            return ""
+            return "Summary unavailable."
