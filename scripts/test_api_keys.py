@@ -5,11 +5,11 @@ scripts/test_api_keys.py  —  InsightSwarm API Key Health Report
 REALISTIC rate-limit-aware provider test suite.
 
 RESEARCH-BACKED LIMITS (April 2026):
-  Groq  llama-3.3-70b-versatile   Free tier: 30 RPM, 14 400 RPD, 6 000 TPM
+  Groq  gpt-oss-120b              Free tier: 30 RPM, 14 400 RPD, 6 000 TPM
   Gemini 2.5 Flash                Free tier:  10 RPM,    250 RPD, 250 000 TPM
          (gemini-2.0-flash RETIRED March 3 2026 — do NOT use)
   Gemini 2.5 Flash-Lite           Free tier:  15 RPM,  1 000 RPD
-  Cerebras llama3.1-8b            Free tier: ~30 RPM (similar to Groq)
+  Cerebras gpt-oss-120b           Free tier: ~30 RPM (similar to Groq)
   OpenRouter (free models)        Free tier: ~20 RPM, varies by model
   Tavily                          Free tier:  1 000 searches/month (~33/day)
 
@@ -84,7 +84,7 @@ PROVIDERS = {
         "rpm_limit":  30,
         "rpd_limit":  14_400,
         "tpm_limit":  6_000,
-        "note":       "30 RPM / 14 400 RPD / 6 000 TPM (llama-3.3-70b-versatile)",
+        "note":       "30 RPM / 14 400 RPD / 6 000 TPM (gpt-oss-120b)",
     },
     "gemini": {
         "env_var":    "GEMINI_API_KEY",
@@ -106,7 +106,7 @@ PROVIDERS = {
         "rpm_limit":  30,
         "rpd_limit":  None,  # not publicly documented
         "tpm_limit":  None,
-        "note":       "~30 RPM (llama3.1-8b, fast inference)",
+        "note":       "~30 RPM (gpt-oss-120b, fast inference)",
     },
     "openrouter": {
         "env_var":    "OPENROUTER_API_KEY",
@@ -145,7 +145,7 @@ def _ping_groq(key: str, verbose: bool) -> Tuple[bool, float, str, dict]:
         client = Groq(api_key=key)
         t0 = time.perf_counter()
         resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             messages=[{"role": "user", "content": "Reply with one word: PONG"}],
             max_tokens=4,
             temperature=0.0,
@@ -211,7 +211,7 @@ def _ping_cerebras(key: str, verbose: bool) -> Tuple[bool, float, str, dict]:
         r = _req.post(
             "https://api.cerebras.ai/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": "llama3.1-8b",
+            json={"model": "gpt-oss-120b",
                   "messages": [{"role": "user", "content": "Reply with one word: PONG"}],
                   "max_tokens": 4, "temperature": 0.0},
             timeout=15,

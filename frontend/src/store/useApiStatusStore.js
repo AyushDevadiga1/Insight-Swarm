@@ -23,9 +23,9 @@ export const STATUS_META = {
 
 // Provider display order and display names
 export const PROVIDER_META = {
-  groq:       { displayName: 'Groq',       subtitle: 'Llama 3.3 70B' },
-  gemini:     { displayName: 'Gemini',     subtitle: 'Gemini 2.0 Flash' },
-  cerebras:   { displayName: 'Cerebras',   subtitle: 'Llama 3.1 8B' },
+  groq:       { displayName: 'Groq',       subtitle: 'GPT-OSS-120b' },
+  gemini:     { displayName: 'Gemini',     subtitle: 'Gemini 2.5 Flash' },
+  cerebras:   { displayName: 'Cerebras',   subtitle: 'GPT-OSS-120b' },
   openrouter: { displayName: 'OpenRouter', subtitle: 'Multi-model' },
   tavily:     { displayName: 'Tavily',     subtitle: 'Web search' },
 };
