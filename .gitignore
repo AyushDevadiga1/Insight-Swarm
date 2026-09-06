@@ -81,3 +81,10 @@ logs/*
 .coverage
 .coverage.*
 htmlcov/
+
+# Local problem-tracking list
+problems.md
+
+# Transient SQLite WAL artifacts
+*.db-shm
+*.db-wal
