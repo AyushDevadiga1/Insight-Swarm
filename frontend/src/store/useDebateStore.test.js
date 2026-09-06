@@ -55,6 +55,19 @@ describe('useDebateStore', () => {
     expect(s.streamingAgent).toBe('CON')
   })
 
+  it('setAgentArgument replaces the full argument text for an agent round', () => {
+    useDebateStore.getState().startRun('run-5')
+    const store = useDebateStore
+    store.getState().setAgentArgument('PRO', 1, 'First argument')
+    store.getState().setAgentArgument('PRO', 1, 'Replacement argument')
+    store.getState().setAgentArgument('CON', 2, 'Con round two')
+    const s = store.getState()
+    expect(s.agentMessages['PRO_1']).toBe('Replacement argument')
+    expect(s.agentMessages['CON_2']).toBe('Con round two')
+    expect(s.streamingAgent).toBe('CON')
+    expect(s.streamingRound).toBe(2)
+  })
+
   it('setResult marks the run complete and records history', () => {
     useDebateStore.getState().startRun('run-4')
     const store = useDebateStore

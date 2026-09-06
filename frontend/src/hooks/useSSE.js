@@ -9,21 +9,21 @@
  * Now the hook only reconnects when `runId` changes — i.e. when the user
  * clicks "Verify". Safe to re-render without retriggering the connection.
  *
- * Also fixed:
+ * Also:
  * - Auto-reconnect prevention (onerror closes intentionally, no retry loop)
  * - Heartbeat listener keeps the backend "alive" indicator updated
  * - DebateArena now mounts when DECOMPOSING/SEARCHING stages arrive
+ * - Listens for the ACTUAL SSE events emitted by the backend:
+ *   'pro_argument'/'con_argument' (full argument text per round) and
+ *   'verification_result' (verified source), instead of the never-emitted
+ *   'agent_text'/'source' events.
  */
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useDebateStore } from '../store/useDebateStore';
 
-const FLUSH_INTERVAL_MS = 150;  // How often to flush buffered agent text to state
-
 export function useSSE(claim, runId) {
   const esRef             = useRef(null);   // EventSource instance
-  const flushTimerRef     = useRef(null);   // setInterval handle for text flush
-  const bufferRef         = useRef({});     // { 'PRO_1': 'accumulated text' }
   const closedOnPurpose   = useRef(false);  // prevents auto-reconnect after intentional close
   const retryCount        = useRef(0);      // Current retry count
   const reconnectTimerRef = useRef(null);   // Timeout handle for scheduled reconnect
@@ -32,7 +32,7 @@ export function useSSE(claim, runId) {
     startRun,
     setStreamConnected,
     pushStage,
-    appendStreamChunk,
+    setAgentArgument,
     pushSource,
     setResult,
     setError,
@@ -40,40 +40,6 @@ export function useSSE(claim, runId) {
     setSubClaims,
     setPendingReview,
   } = useDebateStore.getState();
-
-  // ── Flush buffered text chunks to Zustand every 80ms ───────────────────────
-  const startFlushTimer = useCallback(() => {
-    if (flushTimerRef.current) return;
-    flushTimerRef.current = setInterval(() => {
-      const buf = bufferRef.current;
-      const keys = Object.keys(buf);
-      if (keys.length === 0) return;
-      keys.forEach(key => {
-        if (buf[key]) {
-          const [agent, round] = key.split('_');
-          appendStreamChunk(agent, parseInt(round, 10), buf[key]);
-          buf[key] = '';
-        }
-      });
-    }, FLUSH_INTERVAL_MS);
-  }, [appendStreamChunk]);
-
-  const stopFlushTimer = useCallback(() => {
-    if (flushTimerRef.current) {
-      clearInterval(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
-    // Final flush of any remaining buffered text
-    const buf = bufferRef.current;
-    Object.keys(buf).forEach(key => {
-      if (buf[key]) {
-        const [agent, round] = key.split('_');
-        appendStreamChunk(agent, parseInt(round, 10), buf[key]);
-        buf[key] = '';
-      }
-    });
-    bufferRef.current = {};
-  }, [appendStreamChunk]);
 
   // ── Open SSE connection ─────────────────────────────────────────────────────
   const connect = useCallback(() => {
@@ -87,7 +53,6 @@ export function useSSE(claim, runId) {
     }
 
     closedOnPurpose.current = false;
-    bufferRef.current = {};
 
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
@@ -101,7 +66,6 @@ export function useSSE(claim, runId) {
     es.onopen = () => {
       setStreamConnected(true);
       retryCount.current = 0; // Reset retries on successful connection
-      startFlushTimer();
     };
 
     // ── heartbeat — backend is alive, update timestamp ────────────────────
@@ -126,17 +90,21 @@ export function useSSE(claim, runId) {
       } catch (_) {}
     });
 
-    // ── agent_text event — buffer, don't flush immediately ──────────────────
-    es.addEventListener('agent_text', (e) => {
+    // ── pro_argument / con_argument events — full argument text per round ────
+    const onAgentArgument = (agent) => (e) => {
       try {
-        const { agent, round, chunk } = JSON.parse(e.data);
-        const key = `${agent}_${round}`;
-        bufferRef.current[key] = (bufferRef.current[key] || '') + chunk;
+        const data = JSON.parse(e.data);
+        const text = typeof data === 'string'
+          ? data
+          : (data.data || data.argument || data.text || '');
+        setAgentArgument(agent, data.round || 1, text);
       } catch (_) {}
-    });
+    };
+    es.addEventListener('pro_argument', onAgentArgument('PRO'));
+    es.addEventListener('con_argument', onAgentArgument('CON'));
 
-    // ── source event ─────────────────────────────────────────────────────────
-    es.addEventListener('source', (e) => {
+    // ── verification_result event — a source was verified ────────────────────
+    es.addEventListener('verification_result', (e) => {
       try {
         pushSource(JSON.parse(e.data));
       } catch (_) {}
@@ -145,7 +113,6 @@ export function useSSE(claim, runId) {
     // ── verdict event — final result ─────────────────────────────────────────
     es.addEventListener('verdict', (e) => {
       try {
-        stopFlushTimer();
         setResult(JSON.parse(e.data));
         closedOnPurpose.current = true;
         es.close();
@@ -158,7 +125,6 @@ export function useSSE(claim, runId) {
     // ── human_review_required event — Wait for human intervention ────────────
     es.addEventListener('human_review_required', (e) => {
       try {
-        stopFlushTimer();
         setPendingReview(JSON.parse(e.data));
         closedOnPurpose.current = true;
         es.close();
@@ -171,7 +137,6 @@ export function useSSE(claim, runId) {
     // ── error event — backend-emitted structured error ───────────────────────
     es.addEventListener('error', (e) => {
       try {
-        stopFlushTimer();
         setError(JSON.parse(e.data));
       } catch (_) {
         setError({ type: 'SYSTEM_ERROR', message: 'Unknown error from server.' });
@@ -183,7 +148,6 @@ export function useSSE(claim, runId) {
 
     // ── done event — stream closed cleanly ───────────────────────────────────
     es.addEventListener('done', () => {
-      stopFlushTimer();
       closedOnPurpose.current = true;
       es.close();
       esRef.current = null;
@@ -192,16 +156,15 @@ export function useSSE(claim, runId) {
     // ── Network/connection error with exponential backoff ───────────────────────
     es.onerror = () => {
       if (closedOnPurpose.current) return;
-      
-      stopFlushTimer();
+
       es.close();
       esRef.current = null;
-      
+
       if (retryCount.current < 5) {
         const delay = Math.min(2000 * Math.pow(2, retryCount.current), 30000);
         retryCount.current++;
         console.warn(`[SSE] Connection lost. Reconnecting in ${delay}ms (Attempt ${retryCount.current}/5)...`);
-        
+
         reconnectTimerRef.current = setTimeout(() => {
           connect();
         }, delay);
@@ -213,8 +176,8 @@ export function useSSE(claim, runId) {
         });
       }
     };
-  }, [claim, runId, setStreamConnected, pushStage, pushSource, setResult, setError,
-      setHeartbeat, setSubClaims, startFlushTimer, stopFlushTimer]);
+  }, [claim, runId, setStreamConnected, pushStage, setAgentArgument, pushSource,
+      setResult, setError, setHeartbeat, setSubClaims]);
 
   // ── Lifecycle — reconnects ONLY when runId changes (user clicks Verify) ────
   useEffect(() => {
@@ -223,7 +186,6 @@ export function useSSE(claim, runId) {
       connect();
     }
     return () => {
-      stopFlushTimer();
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;

@@ -310,13 +310,13 @@ async def stream_debate(request: Request, claim: str, thread_id: str | None = No
                     cur_pro = len(pro_args)
                     if cur_pro > prev_pro:
                         for i in range(prev_pro, cur_pro):
-                            q.put({"type": "pro_argument", "data": pro_args[i]})
+                            q.put({"type": "pro_argument", "data": pro_args[i], "round": i + 1})
                         prev_pro = cur_pro
 
                     cur_con = len(con_args)
                     if cur_con > prev_con:
                         for i in range(prev_con, cur_con):
-                            q.put({"type": "con_argument", "data": con_args[i]})
+                            q.put({"type": "con_argument", "data": con_args[i], "round": i + 1})
                         prev_con = cur_con
 
                     cur_src = len(src_list)

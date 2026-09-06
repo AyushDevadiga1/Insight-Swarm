@@ -149,6 +149,16 @@ export const useDebateStore = create((set, get) => ({
     });
   },
 
+  /** Called when 'pro_argument'/'con_argument' SSE events arrive — sets the full argument text for a round */
+  setAgentArgument: (agent, round, text) => set((state) => ({
+    streamingAgent: agent,
+    streamingRound: round,
+    agentMessages: {
+      ...state.agentMessages,
+      [`${agent}_${round}`]: text,
+    },
+  })),
+
   /** Called when a 'source' SSE event arrives */
   pushSource: (sourceData) => set((state) => ({
     sourceResults: [...state.sourceResults, sourceData],
