@@ -150,7 +150,7 @@ class DebateOrchestrator:
         workflow.add_node("revision",        self._retry_revision_node)
         workflow.add_edge(START, "consensus_check")
         workflow.add_conditional_edges("consensus_check", self._should_debate,
-                                       {"skip":"moderator","debate":"summarizer"})
+                                       {"skip":"verdict","debate":"summarizer"})
         workflow.add_edge("summarizer", "pro_agent")
         workflow.add_edge("pro_agent",  "con_agent")
         workflow.add_conditional_edges("con_agent", self._should_continue,
@@ -203,7 +203,9 @@ class DebateOrchestrator:
         prompt = (
             f"You are a Consensus Checker. Determine if there is a massive scientific consensus.\n"
             f"CLAIM: {state.claim}\n"
-            f'Respond ONLY in JSON: {{"verdict":"TRUE"|"FALSE"|"NEUTRAL"|"DEBATE","reasoning":"...","confidence":0.0-1.0}}\n'
+            f'Respond ONLY with a JSON object. The "verdict" value MUST be exactly one of: '
+            f'"TRUE", "FALSE", "NEUTRAL", "DEBATE". The "reasoning" value is a short explanation. '
+            f'The "confidence" value is a number between 0.0 and 1.0.\n'
             f"If settled fact return TRUE/FALSE. If controversial return DEBATE."
         )
         try:

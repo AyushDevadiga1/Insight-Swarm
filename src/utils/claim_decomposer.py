@@ -27,9 +27,10 @@ class ClaimDecomposer:
         prompt = (
             f"You are a Claim Decomposer. Split the following complex claim into atomic, "
             f"independent statements that can be individually fact-checked.\n"
-            f"Each statement must be a complete, self-contained sentence.\n\n"
+            f"Each statement must be a complete, self-contained sentence. Do NOT copy any example "
+            f"text verbatim.\n\n"
             f"COMPLEX CLAIM: {full_claim[:500]}\n\n"
-            f'Respond in JSON format:\n{{"claims": ["atomic claim 1", "atomic claim 2", ...]}}'
+            f"Respond with a JSON object whose only key is \"claims\", an array of 1-3 strings."
         )
         try:
             response = self.client.call_structured(

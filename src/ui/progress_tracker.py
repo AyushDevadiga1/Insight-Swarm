@@ -11,6 +11,7 @@ from enum import Enum
 
 class Stage(str, Enum):
     IDLE          = "IDLE"
+    DECOMPOSING   = "DECOMPOSING"
     CONSENSUS     = "CONSENSUS"
     SEARCHING     = "SEARCHING"
     ROUND_1_PRO   = "ROUND_1_PRO"
@@ -31,7 +32,7 @@ class Stage(str, Enum):
     @property
     def icon(self) -> str:
         return {
-            "IDLE":"⏸","CONSENSUS":"🔎","SEARCHING":"🌐",
+            "IDLE":"⏸","DECOMPOSING":"🧩","CONSENSUS":"🔎","SEARCHING":"🌐",
             "ROUND_1_PRO":"💬","ROUND_2_PRO":"💬","ROUND_3_PRO":"💬",
             "ROUND_1_CON":"🔴","ROUND_2_CON":"🔴","ROUND_3_CON":"🔴",
             "PRO":"💬","CON":"🔴",
@@ -42,7 +43,7 @@ class Stage(str, Enum):
 
 
 STAGE_PROGRESS: dict = {
-    Stage.IDLE:0.0,Stage.CONSENSUS:0.05,Stage.SEARCHING:0.1,
+    Stage.IDLE:0.0,Stage.DECOMPOSING:0.02,Stage.CONSENSUS:0.05,Stage.SEARCHING:0.1,
     Stage.ROUND_1_PRO:0.2,Stage.ROUND_1_CON:0.3,
     Stage.ROUND_2_PRO:0.4,Stage.ROUND_2_CON:0.5,
     Stage.ROUND_3_PRO:0.6,Stage.ROUND_3_CON:0.7,
