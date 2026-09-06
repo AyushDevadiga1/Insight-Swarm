@@ -80,11 +80,15 @@ def test_integration_full_debate_flow():
             assert state.round >= 1
             
             # 2. Verify tracker updates
-            # We expect INITIALIZING, SEARCHING, ROUND_1_PRO, ROUND_1_CON, MODERATING, COMPLETE
+            # Expected stages: DECOMPOSING, SEARCHING, CONSENSUS, PRO, CON,
+            # FACT_CHECK, MODERATOR, COMPLETE
             stages_hit = [u.stage for u in tracker.updates]
-            assert Stage.INITIALIZING in stages_hit
+            assert Stage.DECOMPOSING in stages_hit
             assert Stage.SEARCHING in stages_hit
-            assert Stage.ROUND_1_PRO in stages_hit
+            assert Stage.CONSENSUS in stages_hit
+            assert Stage.PRO in stages_hit
+            assert Stage.CON in stages_hit
+            assert Stage.FACT_CHECK in stages_hit
             assert Stage.COMPLETE in stages_hit
             
             # 3. Verify BoundedCache (indirectly via debug logs or by checking the instance)

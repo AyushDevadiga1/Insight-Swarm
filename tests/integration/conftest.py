@@ -14,24 +14,29 @@ class DummyClient:
 
     def call_structured(self, prompt, output_schema, temperature=0.7, max_tokens=2000, max_retries=2, preferred_provider=None, **kwargs):
         fields = list(output_schema.model_fields.keys()) if hasattr(output_schema, "model_fields") else []
-        
+
+        if "claims" in fields:
+            # ClaimDecomposer — two atomic claims so multi-claim paths are exercised
+            return output_schema(
+                claims=["Electric cars are better for the environment.",
+                        "Electric cars are cheaper to maintain over their lifetime."]
+            )
         if "metrics" in fields and "verdict" in fields:
+            # ModeratorVerdict — used by Moderator.generate (final verdict path)
             return output_schema(
                 verdict="INSUFFICIENT EVIDENCE",
                 confidence=0.5,
                 reasoning="Mock moderator reasoning for integration tests. This explanation is intentionally long to satisfy minimum length checks in integration tests.",
                 metrics={"credibility": 0.5, "balance": 0.5}
             )
-        elif "score" in fields and "verdict" in fields:
+        if "verdict" in fields and "confidence" in fields and "reasoning" in fields:
+            # ConsensusResponse — pre-check never settles, so the debate path runs
             return output_schema(
                 verdict="DEBATE",
-                score=0.5,
-                confidence=0.5,
+                confidence=0.4,
                 reasoning="Mock consensus reasoning."
             )
         return output_schema(
-            agent="PRO",
-            round=1,
             argument="Mock argument for integration tests. " * 10,
             sources=["https://example.com"],
             confidence=0.6

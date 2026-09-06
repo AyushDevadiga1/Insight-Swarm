@@ -25,8 +25,11 @@ def test_stage_event_coverage():
     events = []
     states = []
     
-    # Using a claim we know won't hit consensus immediately 
-    for event_type, state_data in orch.stream("Artificial intelligence will replace all software engineers by 2030", "test_thread"):
+    # Using a claim that decomposes but won't hit consensus immediately
+    for event_type, state_data in orch.stream(
+        "Artificial intelligence will replace all software engineers by 2030 and disrupt education systems globally",
+        "test_thread"
+    ):
         events.append(event_type)
         states.append(state_data)
         
