@@ -47,10 +47,40 @@ def _get_schema_json(output_schema) -> str:
         _SCHEMA_CACHE[key] = json.dumps(output_schema.model_json_schema(), indent=2)
     return _SCHEMA_CACHE[key]
 
+
+def _render_schema_fields(output_schema) -> str:
+    """Compact, human-friendly field list for the LLM prompt.
+
+    ISSUE-012 FIX: pasting the full JSON Schema (with placeholder titles/descriptions)
+    into the prompt made weak models ECHO the schema back verbatim instead of producing
+    real output. A terse field list is far less echo-bait and works across providers.
+    """
+    key = f"fields:{id(output_schema)}"
+    if key not in _SCHEMA_CACHE:
+        schema = output_schema.model_json_schema()
+        props = schema.get("properties", {})
+        required = schema.get("required") or list(props)
+        lines = []
+        for fname in required:
+            finfo = props.get(fname, {})
+            ftype = finfo.get("type", "any")
+            desc = (finfo.get("description") or "").strip().replace("\n", " ")
+            lines.append(f"- {fname} ({ftype}): {desc}" if desc else f"- {fname} ({ftype})")
+        _SCHEMA_CACHE[key] = "\n".join(lines)
+    return _SCHEMA_CACHE[key]
+
 from src.resilience.circuit_breaker import CircuitBreaker
 from src.utils.api_key_manager import get_api_key_manager
 
 _PROVIDER_COOLDOWN_SECONDS = 90
+
+# Cloudflare blocks the default python-requests user-agent with error 1010 on
+# some providers (Cerebras/OpenRouter were returning HTTP 404/403 for that
+# reason). Sending a browser-like UA bypasses the block.
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+)
 
 _circuit_breakers = {
     "groq":       CircuitBreaker("groq",       failure_threshold=3, recovery_timeout=60.0),
@@ -69,11 +99,11 @@ class RateLimitError(RuntimeError):
 
 class FreeLLMClient:
     # ── Accurate free-tier rate limits (RPM) ─────────────────────────────────
-    # Groq llama-3.3-70b-versatile: 30 RPM, 14 400 RPD, 6 000 TPM
+    # Groq (openai/gpt-oss-120b):   30 RPM, 14 400 RPD, 6 000 TPM
     # Gemini 2.5 Flash (free):      10 RPM, 250 RPD, 250 000 TPM  (post Dec-2025 cuts)
     # Gemini 2.5 Flash-Lite:        15 RPM, 1 000 RPD
-    # Cerebras:                     30 RPM (similar to Groq)
-    # OpenRouter:                   ~20 RPM (varies by model)
+    # Cerebras (gpt-oss-120b):      30 RPM (similar to Groq)
+    # OpenRouter (nemotron-3-super-120b free): ~20 RPM (varies by model)
     PROVIDER_RATE_LIMITS = {
         "groq":       int(os.getenv("RATE_LIMIT_GROQ",       "28")),  # 30 RPM − 2 buffer
         "gemini":     int(os.getenv("RATE_LIMIT_GEMINI",      "9")),  # 10 RPM − 1 buffer
@@ -81,11 +111,14 @@ class FreeLLMClient:
         "openrouter": int(os.getenv("RATE_LIMIT_OPENROUTER", "18")),  # 20 RPM − 2 buffer
     }
 
-    GROQ_MODEL       = os.getenv("GROQ_MODEL",        "llama-3.3-70b-versatile")
+    GROQ_MODEL       = os.getenv("GROQ_MODEL",        "openai/gpt-oss-120b")
     # gemini-2.0-flash was RETIRED March 3 2026 — use 2.5-flash (free tier, 10 RPM)
     GEMINI_MODEL     = os.getenv("GEMINI_MODEL",       "gemini-2.5-flash")
-    CEREBRAS_MODEL   = os.getenv("CEREBRAS_MODEL",     "llama3.1-8b")
-    OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL",   "meta-llama/llama-3.1-8b-instruct")
+    CEREBRAS_MODEL   = os.getenv("CEREBRAS_MODEL",     "gpt-oss-120b")
+    OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL",   "nvidia/nemotron-3-super-120b-a12b:free")
+    # Base URLs overridable via env — allows BYO gateways/proxies without code changes
+    CEREBRAS_BASE_URL   = os.getenv("CEREBRAS_BASE_URL",   "https://api.cerebras.ai/v1/chat/completions")
+    OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions")
 
     def __init__(self):
         self.key_manager  = get_api_key_manager()
@@ -214,15 +247,25 @@ class FreeLLMClient:
             raise ValueError("LLM returned empty or invalid response")
 
     def _clean_json_response(self, response: str) -> str:
-        """Strip markdown fences and extract the first complete JSON object/array."""
+        """Strip markdown fences/prose and return the first complete JSON object/array.
+
+        Handles ```json, ```JSON, ``` python fences, prose around JSON, and
+        partial/truncated booleans. Falls back to the raw text if nothing parses.
+        """
         if not response:
             return response
         response = response.strip()
 
         if "```" in response:
-            m = re.search(r"```(?:json)?\s*(.*?)\s*```", response, re.DOTALL)
-            if m:
+            m = re.search(r"```[a-zA-Z]*\s*(.*?)```", response, re.DOTALL)
+            if m and m.group(1).strip():
                 response = m.group(1).strip()
+            else:
+                # Unpaired fence — drop fence markers outright and keep the content
+                response = re.sub(r"```[a-zA-Z]*\s*", "", response).strip()
+
+        if response.lower().startswith("json"):
+            response = response[4:].lstrip()
 
         for open_ch, close_ch in (('{', '}'), ('[', ']')):
             start = response.find(open_ch)
@@ -244,7 +287,7 @@ class FreeLLMClient:
                     depth -= 1
                     if depth == 0:
                         return response[start:idx + 1]
-        return response
+        return response.strip()
 
     # ── call_structured ───────────────────────────────────────────────────────
 
@@ -253,9 +296,12 @@ class FreeLLMClient:
                         max_retries: int = 2, preferred_provider: str | None = None) -> Any:
         from pydantic import ValidationError as PydanticValidationError
 
-        schema_json = _get_schema_json(output_schema)
+        schema_fields = _render_schema_fields(output_schema)
         json_prompt = (
-            f"{prompt}\n\nIMPORTANT: Return a valid JSON object matching this schema:\n{schema_json}"
+            f"{prompt}\n\n"
+            f"IMPORTANT: Respond with ONE valid JSON object ONLY. No markdown fences, "
+            f"no commentary, no placeholder text. Every value must be real content based on "
+            f"the task above. Required output fields:\n{schema_fields}"
         )
         last_error = None; attempted_any = False
 
@@ -277,7 +323,8 @@ class FreeLLMClient:
                             raise RuntimeError(f"{provider} rate limit exceeded — switching provider")
                         call_times.append(time.time())
 
-                    raw     = self._dispatch_call(provider, json_prompt, temperature, max_tokens, key)
+                    raw     = self._dispatch_call(provider, json_prompt, temperature, max_tokens, key,
+                                                  structured=True)
                     cleaned = self._clean_json_response(raw)
                     result  = output_schema.model_validate_json(cleaned)
                     self.key_manager.report_key_success(provider, key_hash)
@@ -286,12 +333,14 @@ class FreeLLMClient:
                 except PydanticValidationError as ve:
                     last_error = ve
                     logger.warning("%s parse error %d/%d: %s", provider, attempt+1, max_retries+1, ve)
+                    logger.debug("Raw model output (parse error): %.400s", cleaned[:400] if 'cleaned' in dir() else (raw if 'raw' in dir() else ""))
                     # ISSUE-002 FIX: cap sleep at 2s so cumulative retries can't breach SSE 180s timeout
                     if attempt < max_retries: time.sleep(min(1, 2))
 
                 except json.JSONDecodeError as je:
                     last_error = je
                     logger.warning("%s bad JSON %d/%d: %s", provider, attempt+1, max_retries+1, je)
+                    logger.debug("Raw model output (bad JSON): %.400s", cleaned[:400] if 'cleaned' in dir() else (raw if 'raw' in dir() else ""))
                     # ISSUE-002 FIX: same 2s cap — prevents thread starvation in SSE generator
                     if attempt < max_retries: time.sleep(min(1, 2))
 
@@ -366,19 +415,21 @@ class FreeLLMClient:
     # ── Dispatch ──────────────────────────────────────────────────────────────
 
     def _dispatch_call(self, provider: str, prompt: str, temperature: float,
-                       max_tokens: int, key: str, timeout: int = 30) -> str:
+                       max_tokens: int, key: str, timeout: int = 30,
+                       structured: bool = False,
+                       schema_json: str | None = None) -> str:
         breaker = _circuit_breakers[provider]
         if not breaker.is_allowed():
             raise RuntimeError(f"Circuit OPEN for {provider}")
         try:
             if provider == "groq":
-                res = self._call_groq(prompt, temperature, max_tokens, timeout, key)
+                res = self._call_groq(prompt, temperature, max_tokens, timeout, key, structured)
             elif provider == "gemini":
-                res = self._call_gemini(prompt, temperature, max_tokens, timeout, key)
+                res = self._call_gemini(prompt, temperature, max_tokens, timeout, key, structured)
             elif provider == "cerebras":
-                res = self._call_cerebras(prompt, temperature, max_tokens, timeout, key)
+                res = self._call_cerebras(prompt, temperature, max_tokens, timeout, key, structured)
             elif provider == "openrouter":
-                res = self._call_openrouter(prompt, temperature, max_tokens, timeout, key)
+                res = self._call_openrouter(prompt, temperature, max_tokens, timeout, key, structured)
             else:
                 raise ValueError(f"Unknown provider: {provider!r}")
             breaker.record_success()
@@ -398,15 +449,32 @@ class FreeLLMClient:
                                            or "exhausted" in str(e).lower()),
         reraise=True,
     )
-    def _call_groq(self, prompt, temperature, max_tokens, timeout, groq_key) -> str:
+    def _call_groq(self, prompt, temperature, max_tokens, timeout, groq_key, structured=False) -> str:
         from groq import Groq
-        resp = Groq(api_key=groq_key).chat.completions.create(
-            model=self.GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-        )
+        payload: dict = {
+            "model": self.GROQ_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "timeout": timeout,
+        }
+        client = Groq(api_key=groq_key)
+        if structured:
+            # Force strict JSON mode — dramatically reduces markdown-fence/parse failures
+            payload["response_format"] = {"type": "json_object"}
+        try:
+            resp = client.chat.completions.create(**payload)
+        except Exception as e:
+            # ISSUE-011 FIX: some models (e.g. qwen) occasionally return an EMPTY
+            # generation under forced JSON mode, so Groq aborts the whole request
+            # with json_validate_failed. Retry once WITHOUT strict mode and let the
+            # hardened _clean_json_response extract the JSON instead.
+            if structured and ("json_validate_failed" in str(e) or "Failed to validate JSON" in str(e)):
+                logger.info("Groq strict JSON failed (%s) — retrying without response_format", type(e).__name__)
+                payload.pop("response_format", None)
+                resp = client.chat.completions.create(**payload)
+            else:
+                raise
         if not resp.choices:
             raise ValueError("Groq returned empty response")
         return resp.choices[0].message.content or ""
@@ -420,7 +488,7 @@ class FreeLLMClient:
                                            or "resource_exhausted" in str(e).lower()),
         reraise=True,
     )
-    def _call_gemini(self, prompt, temperature, max_tokens, timeout, gemini_key) -> str:
+    def _call_gemini(self, prompt, temperature, max_tokens, timeout, gemini_key, structured=False) -> str:
         if self.genai_client is None:
             with self._counter_lock:
                 if self.genai_client is None:
@@ -431,9 +499,13 @@ class FreeLLMClient:
         if self._genai_types is None:
             from google.genai import types as genai_types
             self._genai_types = genai_types
-        config = self._genai_types.GenerateContentConfig(
-            temperature=temperature, max_output_tokens=max_tokens
-        )
+        config_kwargs: dict = {
+            "temperature": temperature, "max_output_tokens": max_tokens,
+        }
+        if structured:
+            # Return raw JSON — avoids ```fences``` / prose that broke pydantic parsing
+            config_kwargs["response_mime_type"] = "application/json"
+        config = self._genai_types.GenerateContentConfig(**config_kwargs)
         resp = self.genai_client.models.generate_content(
             model=self.GEMINI_MODEL, contents=prompt, config=config
         )
@@ -447,14 +519,20 @@ class FreeLLMClient:
         retry=retry_if_exception(lambda e: not isinstance(e, (ValueError, TypeError))),
         reraise=True,
     )
-    def _call_cerebras(self, prompt, temperature, max_tokens, timeout, cerebras_key) -> str:
+    def _call_cerebras(self, prompt, temperature, max_tokens, timeout, cerebras_key, structured=False) -> str:
+        payload: dict = {
+            "model": self.CEREBRAS_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature, "max_tokens": max_tokens,
+        }
+        if structured:
+            payload["response_format"] = {"type": "json_object"}
         resp = requests.post(
-            "https://api.cerebras.ai/v1/chat/completions",
+            self.CEREBRAS_BASE_URL,
             headers={"Authorization": f"Bearer {cerebras_key}",
-                     "Content-Type": "application/json"},
-            json={"model": self.CEREBRAS_MODEL,
-                  "messages": [{"role": "user", "content": prompt}],
-                  "temperature": temperature, "max_tokens": max_tokens},
+                     "Content-Type": "application/json",
+                     "User-Agent": _BROWSER_UA},
+            json=payload,
             timeout=timeout,
         )
         resp.raise_for_status()
@@ -469,11 +547,19 @@ class FreeLLMClient:
         retry=retry_if_exception(lambda e: not isinstance(e, (ValueError, TypeError))),
         reraise=True,
     )
-    def _call_openrouter(self, prompt, temperature, max_tokens, timeout, openrouter_key) -> str:
+    def _call_openrouter(self, prompt, temperature, max_tokens, timeout, openrouter_key, structured=False) -> str:
+        payload: dict = {
+            "model": self.OPENROUTER_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature, "max_tokens": max_tokens,
+        }
+        if structured:
+            payload["response_format"] = {"type": "json_object"}
         resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
+            self.OPENROUTER_BASE_URL,
             headers={"Authorization": f"Bearer {openrouter_key}",
                      "Content-Type": "application/json",
+                     "User-Agent": _BROWSER_UA,
                      "HTTP-Referer": "https://insightswarm.ai",
                      "X-Title": "InsightSwarm"},
             json={"model": self.OPENROUTER_MODEL,
