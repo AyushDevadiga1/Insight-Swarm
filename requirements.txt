@@ -2,7 +2,6 @@
 # Regenerate/re-pin with: pip-compile requirements.in -o requirements.txt
 
 # Web / UI
-streamlit==1.55.0
 fastapi==0.135.1
 uvicorn[standard]==0.42.0
 websockets==16.0

@@ -6,7 +6,6 @@
 # Sensitive .env file
 .env
 .pytest_cache
-.streamlit/secrets.toml
 .qodo
 
 # Have vulnerabilities 
@@ -44,9 +43,6 @@ git_diff.patch
 
 #Automation scripts
 commit_days.bat
-
-#Legacy
-.streamlit
 
 # CI/CD
 backups/

@@ -90,7 +90,7 @@ class SystemDiagnostics:
     def test_imports(self) -> None:
         self._sep("Test 2: Critical Imports")
         modules = ["groq", "google.generativeai", "langgraph", "pydantic",
-                   "streamlit", "requests", "dotenv", "sentence_transformers"]
+                   "requests", "dotenv", "sentence_transformers"]
         for mod in modules:
             try:
                 __import__(mod)

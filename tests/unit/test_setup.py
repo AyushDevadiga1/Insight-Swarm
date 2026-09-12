@@ -73,7 +73,6 @@ def check_packages():
         "langgraph",
         "groq",
         "pydantic",
-        "streamlit",
         "sentence_transformers",
         "rapidfuzz",
         "requests",
