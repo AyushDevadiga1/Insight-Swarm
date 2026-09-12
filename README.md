@@ -13,8 +13,8 @@
 
 A **production-grade, research-quality** automated fact-checking system where four specialised AI agents debate claims, verify sources in real-time, and converge on a calibrated verdict — with optional human intervention at any stage. Built entirely on free-tier APIs with zero infrastructure cost.
 
-**Bharat College of Engineering, University of Mumbai**  
-Guided by **Prof. Shital Gujar**, Dept. of CSE (AI & ML)
+**Built by Ayush Devadiga**  
+Bharat College of Engineering, University of Mumbai
 
 ---
 
@@ -675,7 +675,7 @@ python tests/red_team_cases.py
 
 ```bibtex
 @article{insightswarm2026,
-  author    = {Ayush Devadiga , Bhargav Ghawali , Soham Gawas , Mahesh Gawali , Shital Gujar},
+  author    = {Ayush Devadiga},
   title     = {InsightSwarm: A Multi-Agent Adversarial Framework for Automated Fact-Checking with Real-Time Source Verification, Human-in-the-Loop Oversight, and Adaptive Confidence Calibration},
   journal   = {International Journal for Research in Applied Science and Engineering Technology (IJRASET)},
   year      = {2026},
@@ -688,7 +688,7 @@ python tests/red_team_cases.py
 
 ## Acknowledgements
 
-Guided by **Prof. Shital Gujar**, Department of CSE (AI & ML), Bharat College of Engineering, University of Mumbai.
+Built by **Ayush Devadiga**, Bharat College of Engineering, University of Mumbai.
 
 Built on [LangGraph](https://langchain-ai.github.io/langgraph/), [FastAPI](https://fastapi.tiangolo.com/), [React](https://react.dev/), [Groq](https://groq.com/), [Google Gemini](https://deepmind.google/technologies/gemini/), [Tavily](https://tavily.com/), [Pydantic](https://docs.pydantic.dev/), [sentence-transformers](https://www.sbert.net/), and [RapidFuzz](https://github.com/maxbachmann/RapidFuzz).
 
